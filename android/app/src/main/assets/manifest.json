@@ -1,0 +1,49 @@
+{
+  "name": "MedConnect 2.0",
+  "short_name": "MedConnect",
+  "description": "Plateforme médicale universelle — patients, médecins, pharmacies, laboratoires dans 195 pays.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0A0F1E",
+  "theme_color": "#0EA5E9",
+  "orientation": "any",
+  "lang": "fr",
+  "dir": "ltr",
+  "categories": ["medical", "health"],
+  "icons": [
+    { "src": "assets/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ],
+  "shortcuts": [
+    {
+      "name": "Nouveau Patient",
+      "short_name": "Patient",
+      "description": "Créer une fiche patient",
+      "url": "./index.html?shortcut=new_patient",
+      "icons": [{ "src": "assets/icon.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "Nouvelle Ordonnance",
+      "short_name": "Ordonnance",
+      "description": "Rédiger une ordonnance",
+      "url": "./index.html?shortcut=prescription",
+      "icons": [{ "src": "assets/icon.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "Pharmacie",
+      "short_name": "Pharmacie",
+      "description": "Accès point de vente",
+      "url": "./index.html?shortcut=pharmacy",
+      "icons": [{ "src": "assets/icon.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "Rendez-vous",
+      "short_name": "RDV",
+      "description": "Gérer les rendez-vous",
+      "url": "./index.html?shortcut=appointments",
+      "icons": [{ "src": "assets/icon.png", "sizes": "96x96" }]
+    }
+  ]
+}

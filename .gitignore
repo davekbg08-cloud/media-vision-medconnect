@@ -1,0 +1,25 @@
+# Android signing keys and local secrets
+android/keys/
+*.jks
+*.keystore
+*.p12
+*.pem
+*.key
+*.storepass
+*.keypass
+.env
+.env.*
+local.properties
+
+# Build outputs
+android/.gradle/
+android/build/
+android/app/build/
+dist/
+build/
+
+# Dependencies and caches
+node_modules/
+.netlify/
+.vscode/
+npm-debug.log*
