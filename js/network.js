@@ -215,3 +215,5 @@ const Network = (() => {
     checkStockForMeds,
   };
 })();
+
+window.Network = Network;

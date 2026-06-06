@@ -327,3 +327,6 @@ const PharmacyPortal = (() => {
 })();
 
 const PharmacyModule = PharmacyPortal;
+
+window.PharmacyPortal = PharmacyPortal;
+window.PharmacyModule = PharmacyModule;

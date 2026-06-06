@@ -223,3 +223,5 @@ const ACL = (() => {
     initDemoRegistry,
   };
 })();
+
+window.ACL = ACL;

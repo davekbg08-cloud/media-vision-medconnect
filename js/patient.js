@@ -410,3 +410,6 @@ const PatientPortal = (() => {
 })();
 
 const PatientModule = PatientPortal;
+
+window.PatientPortal = PatientPortal;
+window.PatientModule = PatientModule;

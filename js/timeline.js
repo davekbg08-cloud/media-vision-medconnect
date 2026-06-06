@@ -107,3 +107,5 @@ const Timeline = (() => {
 
   return { render, buildEvents, toggleFilter };
 })();
+
+window.Timeline = Timeline;

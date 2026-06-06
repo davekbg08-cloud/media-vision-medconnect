@@ -137,3 +137,5 @@ const AppointmentsModule = (() => {
 
   return { render, openNew, save, setStatus, deleteApt };
 })();
+
+window.AppointmentsModule = AppointmentsModule;

@@ -225,3 +225,5 @@ const Currency = (() => {
     list, renderSelector, setManual,
   };
 })();
+
+window.Currency = Currency;

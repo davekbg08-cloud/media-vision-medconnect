@@ -345,3 +345,5 @@ const HospitalsRegistry = (() => {
     initDemoHospitals,
   };
 })();
+
+window.HospitalsRegistry = HospitalsRegistry;

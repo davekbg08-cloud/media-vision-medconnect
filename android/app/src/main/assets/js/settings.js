@@ -261,3 +261,5 @@ const Settings = (() => {
 
   return { render, openAddDoctor, saveDoctor, openAddPharmacist, savePharmacist };
 })();
+
+window.Settings = Settings;

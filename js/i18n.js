@@ -121,7 +121,7 @@ const I18n = (() => {
     patient_found:      { fr:'Patient trouvé', en:'Patient found', es:'Paciente encontrado', ar:'تم العثور على المريض', pt:'Paciente encontrado', sw:'Mgonjwa amepatikana', zh:'找到患者', de:'Patient gefunden', ru:'Пациент найден', hi:'रोगी मिला' },
   };
 
-  let currentLang = localStorage.getItem('mc_lang') || navigator.language.slice(0, 2) || 'fr';
+  let currentLang = localStorage.getItem('mc_lang') || (navigator.language || 'fr').slice(0, 2) || 'fr';
   if (!LANGUAGES[currentLang]) currentLang = 'fr';
 
   function t(key) {
@@ -163,3 +163,5 @@ const I18n = (() => {
 
   return { t, setLang, getLang, getLanguages, getCurrent, init, renderSelector };
 })();
+
+window.I18n = I18n;

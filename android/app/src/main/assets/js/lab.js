@@ -207,3 +207,5 @@ const LabModule = (() => {
 
   return { renderForHospital, renderForPatient, openNew, addParam, save, printResult, deleteResult };
 })();
+
+window.LabModule = LabModule;

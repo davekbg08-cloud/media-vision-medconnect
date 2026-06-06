@@ -409,3 +409,5 @@ const Auth = (() => {
     getRoleIcon, getRoleLabel,
   };
 })();
+
+window.Auth = Auth;

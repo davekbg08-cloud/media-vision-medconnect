@@ -338,3 +338,6 @@ const HospitalPortal = (() => {
 })();
 
 const HospitalModule = HospitalPortal;
+
+window.HospitalPortal = HospitalPortal;
+window.HospitalModule = HospitalModule;
