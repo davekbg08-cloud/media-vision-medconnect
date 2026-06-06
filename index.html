@@ -2,135 +2,101 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="MedConnect — Application médicale gratuite pour patients, hôpitaux et pharmacies. Gestion des dossiers médicaux, vente de médicaments, localisation GPS.">
-  <title>MedConnect — Plateforme Médicale Universelle</title>
-
-  <!-- PWA Manifest -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="description" content="MedConnect 2.0 — Plateforme médicale sécurisée. Identités vérifiées, confidentialité maximale, accès basé sur les rôles.">
+  <title>MedConnect 2.0 — Plateforme Médicale Sécurisée</title>
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#0EA5E9">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%230EA5E9'/><text x='50' y='68' font-size='55' text-anchor='middle' fill='white'>🏥</text></svg>">
-
-  <!-- Leaflet CSS for maps -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-
-  <!-- App CSS -->
+  <link rel="apple-touch-icon" href="assets/icon.png">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 
-  <!-- ==================== LANDING PAGE ==================== -->
-  <div id="landing">
-    <div class="landing-actions">
-      <label class="language-control" for="landing-language-select">
-        <span aria-hidden="true">🌐</span>
-        <select class="language-select" id="landing-language-select" data-language-select aria-label="Langue">
-          <option value="fr">Français</option>
-          <option value="en">English</option>
-        </select>
-      </label>
-      <button class="btn btn-ghost" id="landing-theme-toggle" onclick="App.toggleTheme()" data-i18n="themeToggleLanding" aria-label="Mode Sombre/Clair">🌓 Mode Sombre/Clair</button>
+  <!-- AUTH -->
+  <div id="auth-screen" style="display:none"></div>
+
+  <!-- LANDING (accès rapide sans auth) -->
+  <div id="landing" style="display:none">
+    <div class="landing-top-bar">
+      <div id="lang-selector-container"></div>
+      <button class="btn btn-ghost btn-sm" onclick="App.toggleTheme()">🌓</button>
     </div>
     <div class="landing-logo">🏥</div>
     <h1 class="landing-title">MedConnect</h1>
-    <p class="landing-subtitle" data-i18n="landingSubtitle">Plateforme médicale universelle et gratuite — Gérez les dossiers patients, les ventes en pharmacie et localisez les établissements de santé.</p>
-
-    <div class="portal-grid">
-      <!-- Patient Portal -->
-      <div class="portal-card glass patient" onclick="App.openPortal('patient')" id="portal-patient">
-        <span class="portal-icon">🩺</span>
-        <h3 data-i18n="portalPatientTitle">Patient</h3>
-        <p data-i18n="portalPatientText">Fiche médicale personnelle, historique des consultations, ordonnances et localisation.</p>
-      </div>
-
-      <!-- Hospital Portal -->
-      <div class="portal-card glass hospital" onclick="App.openPortal('hospital')" id="portal-hospital">
-        <span class="portal-icon">🏥</span>
-        <h3 data-i18n="portalHospitalTitle">Hôpital / Docteur</h3>
-        <p data-i18n="portalHospitalText">Gestion des patients, dossiers médicaux, rendez-vous et tableau de bord.</p>
-      </div>
-
-      <!-- Pharmacy Portal -->
-      <div class="portal-card glass pharmacy" onclick="App.openPortal('pharmacy')" id="portal-pharmacy">
-        <span class="portal-icon">💊</span>
-        <h3 data-i18n="portalPharmacyTitle">Pharmacie</h3>
-        <p data-i18n="portalPharmacyText">Point de vente, gestion d'inventaire, historique des ventes et localisation.</p>
-      </div>
+    <p class="landing-subtitle" id="landing-subtitle">Plateforme Médicale Universelle · Sécurisée</p>
+    <div style="margin-top:1rem;text-align:center">
+      <button class="btn btn-primary" onclick="Auth.showLogin()" style="font-size:1rem;padding:.75rem 2rem">
+        🔐 Se connecter
+      </button>
     </div>
-
-    <p style="margin-top:2.5rem;color:var(--text-muted);font-size:0.8rem;" data-i18n="landingContact">
-      📞 Contact : +243 856 373 707 &nbsp;|&nbsp; ✉️ hallo.mediavision.tech@gmail.com &nbsp;|&nbsp; 100% Gratuit & Open Source
+    <p style="margin-top:1.5rem;color:var(--text-muted);font-size:.77rem;text-align:center">
+      Identités vérifiées · Confidentialité maximale · 195 pays
     </p>
   </div>
 
-  <!-- ==================== APP LAYOUT ==================== -->
-  <button class="mobile-menu-btn" id="mobile-menu-btn">☰</button>
+  <!-- MOBILE MENU -->
+  <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Menu">☰</button>
 
+  <!-- APP -->
   <div class="app-layout" id="app-layout">
-    <!-- Sidebar -->
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-header">
-        <div class="sidebar-brand" id="sidebar-brand">
-          <span>🏥</span> MedConnect
-        </div>
-        <button class="sidebar-back" onclick="App.goHome()" data-i18n="backHome">← Retour à l'accueil</button>
+        <div class="sidebar-brand" id="sidebar-brand"><span>🏥</span> MedConnect</div>
+        <!-- Sélecteur d'hôpital pour médecins -->
+        <div id="hospital-switcher-container"></div>
+        <button class="sidebar-back" id="sidebar-back-btn" onclick="Auth.logout()">🚪 Déconnexion</button>
       </div>
       <ul class="sidebar-nav" id="sidebar-nav"></ul>
-      <div style="padding:1rem 1.5rem;border-top:1px solid var(--border);margin-top:auto;">
-        <label class="language-control sidebar-language" for="sidebar-language-select">
-          <span aria-hidden="true">🌐</span>
-          <select class="language-select" id="sidebar-language-select" data-language-select aria-label="Langue">
-            <option value="fr">Français</option>
-            <option value="en">English</option>
-          </select>
-        </label>
-        <button class="btn btn-ghost" id="theme-toggle-btn" onclick="App.toggleTheme()" data-i18n="themeToggleSidebar" style="width:100%;margin-bottom:0.75rem;justify-content:center;gap:0.5rem;font-size:0.8rem;padding:0.4rem;">🌓 Thème Clair / Sombre</button>
-        <p style="font-size:0.7rem;color:var(--text-muted);">📞 +243 856 373 707</p>
-        <p style="font-size:0.7rem;color:var(--text-muted);">✉️ hallo.mediavision.tech@gmail.com</p>
-        <p style="font-size:0.7rem;color:var(--text-muted);margin-top:0.25rem;" data-i18n="footerVersion">MedConnect v1.1 © 2026</p>
-        <p style="font-size:0.65rem;color:var(--secondary);margin-top:0.25rem;" data-i18n="footerOffline">📱 App installable hors-ligne</p>
+      <div class="sidebar-footer">
+        <div id="sidebar-lang-container"></div>
+        <div class="sidebar-user" id="sidebar-user"></div>
+        <p style="font-size:.67rem;color:var(--text-dim)">MedConnect v2.0 © 2026</p>
       </div>
     </aside>
-
-    <!-- Main Content Area -->
     <main class="main-content" id="main-content"></main>
   </div>
 
-  <!-- ==================== GLOBAL MODAL ==================== -->
+  <!-- MODAL -->
   <div class="modal-overlay" id="global-modal">
     <div class="modal">
       <div class="modal-header">
-        <h2 id="modal-title">Modal</h2>
-        <button class="modal-close" onclick="App.closeModal()">&times;</button>
+        <h2 id="modal-title">—</h2>
+        <button class="modal-close" onclick="App.closeModal()">✕</button>
       </div>
       <div id="modal-body"></div>
     </div>
   </div>
 
-  <!-- ==================== TOAST CONTAINER ==================== -->
-  <div class="toast-container" id="toast-container"></div>
+  <!-- TOASTS -->
+  <div class="toast-container" id="toast-container" aria-live="polite"></div>
 
-  <!-- ==================== SCRIPTS ==================== -->
-  <!-- Leaflet JS for maps -->
+  <!-- SCRIPTS (ordre crucial) -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
-  <!-- App modules -->
+  <script src="js/i18n.js"></script>
   <script src="js/db.js"></script>
+  <script src="js/currency.js"></script>
+  <script src="js/access_control.js"></script>
+  <script src="js/network.js"></script>
+  <script src="js/hospitals_registry.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/timeline.js"></script>
+  <script src="js/appointments.js"></script>
+  <script src="js/lab.js"></script>
   <script src="js/map.js"></script>
   <script src="js/patient.js"></script>
   <script src="js/hospital.js"></script>
   <script src="js/pharmacy.js"></script>
   <script src="js/share.js"></script>
+  <script src="js/settings.js"></script>
   <script src="js/app.js"></script>
-
-  <!-- Service Worker Registration -->
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./sw.js').then(() => {
-        console.log('✅ MedConnect PWA installée');
-      }).catch(err => console.log('SW error:', err));
+      navigator.serviceWorker.register('./sw.js')
+        .then(() => console.log('✅ MedConnect 2.0 PWA'))
+        .catch(e => console.warn('SW:', e));
     }
   </script>
 </body>

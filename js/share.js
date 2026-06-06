@@ -395,5 +395,20 @@ window.ShareModule = (() => {
     if (resultDiv) resultDiv.innerHTML = '';
   }
 
-  return { createPrescription, getAllPrescriptions, findByCode, getPatientPrescriptions, dispensePrescription, printPrescription, getPharmacistLookupHTML, lookupPrescription, dispenseFromLookup, getPatientSharedHTML, copyCode, generateCode, toggleQRCodeDisplay, startQRScanner, stopQRScanner };
+  async function sharePatient(patientId) {
+    const patient = window.DB?.getPatientById?.(patientId);
+    if (!patient) return;
+    const name = `${patient.firstname || patient.prenom || ''} ${patient.lastname || patient.nom || ''}`.trim();
+    const text = `MedConnect — ${name}\nID patient : ${patient.id}\nGroupe sanguin : ${patient.blood_type || patient.groupeSanguin || '—'}\nAllergies : ${patient.allergies || '—'}`;
+    if (navigator.share) {
+      await navigator.share({ title: 'Fiche patient MedConnect', text }).catch(() => {});
+      return;
+    }
+    if (navigator.clipboard) {
+      await navigator.clipboard.writeText(text).catch(() => {});
+      window.App?.toast?.('📋 Fiche patient copiée');
+    }
+  }
+
+  return { createPrescription, getAllPrescriptions, findByCode, getPatientPrescriptions, dispensePrescription, printPrescription, getPharmacistLookupHTML, lookupPrescription, dispenseFromLookup, getPatientSharedHTML, sharePatient, copyCode, generateCode, toggleQRCodeDisplay, startQRScanner, stopQRScanner };
 })();

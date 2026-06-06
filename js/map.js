@@ -177,6 +177,23 @@ window.MapModule = (() => {
     }
   }
 
+  function render(main) {
+    destroyMap();
+    main.innerHTML = `
+      <div class="page-header">
+        <h2>🗺️ ${window.I18n?.t ? I18n.t('map_title') : 'Établissements de Santé'}</h2>
+        <div class="header-actions">
+          <button class="btn btn-ghost btn-sm" onclick="MapModule.searchNearby('hospital')">🏥 Hôpitaux</button>
+          <button class="btn btn-ghost btn-sm" onclick="MapModule.searchNearby('pharmacy')">💊 Pharmacies</button>
+        </div>
+      </div>
+      <div class="card" style="padding:.75rem">
+        <div id="map-container" style="height:420px;border-radius:var(--radius-sm);overflow:hidden"></div>
+      </div>
+      <div id="map-results" style="margin-top:1rem"></div>`;
+    setTimeout(initMap, 50);
+  }
+
   function destroyMap() {
     if (map) {
       map.remove();
@@ -186,5 +203,5 @@ window.MapModule = (() => {
     }
   }
 
-  return { initMap, searchNearby, focusOn, destroyMap };
+  return { render, initMap, searchNearby, focusOn, destroyMap };
 })();

@@ -1,242 +1,218 @@
-// ========== MedConnect — IndexedDB Database Layer ==========
+/* =====================================================
+   MedConnect 2.0 — DB Module (localStorage)
+   Numéro de série patient : MC-YYYY-CC-XXXXXXXX
+   ===================================================== */
+const DB = (() => {
 
-const DB_NAME = 'MedConnectDB';
-const DB_VERSION = 1;
+  /* ── SERIAL NUMBER ──────────────────────────────────
+     MC-2026-NG-A3B7X9Q2
+  ──────────────────────────────────────────────────── */
+  function generatePatientId(countryCode) {
+    const year  = new Date().getFullYear();
+    const cc    = (countryCode || 'XX').toUpperCase().slice(0, 2);
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let   rnd   = '';
+    for (let i = 0; i < 8; i++) rnd += chars[Math.floor(Math.random() * chars.length)];
+    return `MC-${year}-${cc}-${rnd}`;
+  }
 
-let db = null;
+  /* ── HELPERS ──────────────────────────────────────── */
+  const load = (k, d=[]) => { try { return JSON.parse(localStorage.getItem(k) || JSON.stringify(d)); } catch { return d; } };
+  const save = (k, v)     => localStorage.setItem(k, JSON.stringify(v));
+  const today = ()        => new Date().toISOString().slice(0, 10);
 
-function openDB() {
-  return new Promise((resolve, reject) => {
-    if (db) return resolve(db);
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
+  /* ── ACCOUNTS ─────────────────────────────────────── */
+  function getAccounts()        { return load('mc_accounts'); }
+  function saveAccounts(list)   { save('mc_accounts', list); }
 
-    request.onupgradeneeded = (e) => {
-      const database = e.target.result;
+  /* ── PATIENTS ─────────────────────────────────────── */
+  function getPatients()        { return load('mc_patients'); }
+  function savePatients(list)   { save('mc_patients', list); }
 
-      // Patients store
-      if (!database.objectStoreNames.contains('patients')) {
-        const ps = database.createObjectStore('patients', { keyPath: 'id', autoIncrement: true });
-        ps.createIndex('nom', 'nom', { unique: false });
-        ps.createIndex('prenom', 'prenom', { unique: false });
-        ps.createIndex('telephone', 'telephone', { unique: false });
-      }
+  function addPatient(data) {
+    const list = getPatients();
+    const p = { ...data, id: generatePatientId(data.country_code), created_at: new Date().toISOString() };
+    list.push(p);
+    savePatients(list);
+    return p;
+  }
+  function updatePatient(id, data) {
+    const list = getPatients();
+    const idx  = list.findIndex(p => p.id === id);
+    if (idx !== -1) { list[idx] = { ...list[idx], ...data, id, updated_at: new Date().toISOString() }; savePatients(list); return list[idx]; }
+    return null;
+  }
+  function deletePatient(id) {
+    savePatients(getPatients().filter(p => p.id !== id));
+    save('mc_consultations',  getConsultations().filter(c => c.patient_id !== id));
+    save('mc_prescriptions',  getPrescriptions().filter(p => p.patient_id !== id));
+    save('mc_vaccinations',   getVaccinations().filter(v => v.patient_id !== id));
+    save('mc_lab_results',    getAllLabResults().filter(l => l.patient_id !== id));
+    save('mc_appointments',   getAppointments().filter(a => a.patient_id !== id));
+  }
+  function getPatientById(id)   { return getPatients().find(p => p.id === id) || null; }
+  function searchPatients(q) {
+    if (!q) return getPatients();
+    const ql = q.toLowerCase();
+    return getPatients().filter(p =>
+      (p.id||'').toLowerCase().includes(ql) ||
+      (p.firstname||'').toLowerCase().includes(ql) ||
+      (p.lastname||'').toLowerCase().includes(ql) ||
+      (p.phone||'').includes(ql));
+  }
 
-      // Consultations store
-      if (!database.objectStoreNames.contains('consultations')) {
-        const cs = database.createObjectStore('consultations', { keyPath: 'id', autoIncrement: true });
-        cs.createIndex('patientId', 'patientId', { unique: false });
-        cs.createIndex('date', 'date', { unique: false });
-      }
+  /* ── CONSULTATIONS ────────────────────────────────── */
+  function getConsultations()   { return load('mc_consultations'); }
+  function addConsultation(data) {
+    const list = getConsultations();
+    const c = { ...data, cid: `C${Date.now()}`, date: data.date || today() };
+    list.push(c); save('mc_consultations', list); return c;
+  }
+  function getPatientConsultations(pid) {
+    return getConsultations().filter(c => c.patient_id === pid).sort((a,b) => b.date.localeCompare(a.date));
+  }
+  function deleteConsultation(cid) { save('mc_consultations', getConsultations().filter(c => c.cid !== cid)); }
 
-      // Medications / Products store
-      if (!database.objectStoreNames.contains('products')) {
-        const ms = database.createObjectStore('products', { keyPath: 'id', autoIncrement: true });
-        ms.createIndex('nom', 'nom', { unique: false });
-        ms.createIndex('categorie', 'categorie', { unique: false });
-      }
+  /* ── PRESCRIPTIONS ────────────────────────────────── */
+  function getPrescriptions()   { return load('mc_prescriptions'); }
+  function addPrescription(data) {
+    const list = getPrescriptions();
+    const p = { ...data, pid: `P${Date.now()}`, date: data.date || today() };
+    list.push(p); save('mc_prescriptions', list); return p;
+  }
+  function getPatientPrescriptions(pid) {
+    return getPrescriptions().filter(p => p.patient_id === pid).sort((a,b) => b.date.localeCompare(a.date));
+  }
 
-      // Sales store
-      if (!database.objectStoreNames.contains('sales')) {
-        const ss = database.createObjectStore('sales', { keyPath: 'id', autoIncrement: true });
-        ss.createIndex('date', 'date', { unique: false });
-      }
+  /* ── APPOINTMENTS ─────────────────────────────────── */
+  function getAppointments()    { return load('mc_appointments'); }
+  function addAppointment(data) {
+    const list = getAppointments();
+    const a = { ...data, aid: `A${Date.now()}`, created_at: new Date().toISOString() };
+    list.push(a); save('mc_appointments', list); return a;
+  }
+  function updateAppointment(aid, data) {
+    const list = getAppointments();
+    const idx  = list.findIndex(a => a.aid === aid);
+    if (idx !== -1) { list[idx] = { ...list[idx], ...data, aid }; save('mc_appointments', list); }
+  }
+  function deleteAppointment(aid) { save('mc_appointments', getAppointments().filter(a => a.aid !== aid)); }
 
-      // Appointments store
-      if (!database.objectStoreNames.contains('appointments')) {
-        const as = database.createObjectStore('appointments', { keyPath: 'id', autoIncrement: true });
-        as.createIndex('patientId', 'patientId', { unique: false });
-        as.createIndex('date', 'date', { unique: false });
-      }
+  /* ── VACCINATIONS ─────────────────────────────────── */
+  function getVaccinations()    { return load('mc_vaccinations'); }
+  function addVaccination(data) {
+    const list = getVaccinations();
+    const v = { ...data, vid: `V${Date.now()}`, date: data.date || today() };
+    list.push(v); save('mc_vaccinations', list); return v;
+  }
+  function getPatientVaccinations(pid) {
+    return getVaccinations().filter(v => v.patient_id === pid).sort((a,b) => b.date.localeCompare(a.date));
+  }
+  function deleteVaccination(vid) { save('mc_vaccinations', getVaccinations().filter(v => v.vid !== vid)); }
+
+  /* ── LAB RESULTS ──────────────────────────────────── */
+  function getAllLabResults()    { return load('mc_lab_results'); }
+  function addLabResult(data) {
+    const list = getAllLabResults();
+    const l = { ...data, lid: `L${Date.now()}`, date: data.date || today() };
+    list.push(l); save('mc_lab_results', list); return l;
+  }
+  function getPatientLabResults(pid) {
+    return getAllLabResults().filter(l => l.patient_id === pid).sort((a,b) => b.date.localeCompare(a.date));
+  }
+  function deleteLabResult(lid) { save('mc_lab_results', getAllLabResults().filter(l => l.lid !== lid)); }
+
+  /* ── MEDICINES ────────────────────────────────────── */
+  function getMedicines()       { return load('mc_medicines'); }
+  function addMedicine(data) {
+    const list = getMedicines();
+    const m = { ...data, mid: `M${Date.now()}`, created_at: new Date().toISOString() };
+    list.push(m); save('mc_medicines', list); return m;
+  }
+  function updateMedicine(mid, data) {
+    const list = getMedicines();
+    const idx  = list.findIndex(m => m.mid === mid);
+    if (idx !== -1) { list[idx] = { ...list[idx], ...data, mid }; save('mc_medicines', list); }
+  }
+  function deleteMedicine(mid)  { save('mc_medicines', getMedicines().filter(m => m.mid !== mid)); }
+
+  /* ── SALES ────────────────────────────────────────── */
+  function getSales()           { return load('mc_sales'); }
+  function addSale(items, total, patientId) {
+    const list = getSales();
+    const s = { sid:`S${Date.now()}`, items, total:parseFloat(total).toFixed(2), patient_id:patientId||null, date:today(), time:new Date().toLocaleTimeString() };
+    list.push(s); save('mc_sales', list);
+    const meds = getMedicines();
+    items.forEach(i => { const idx=meds.findIndex(m=>m.mid===i.mid); if(idx!==-1) meds[idx].stock=Math.max(0,(parseInt(meds[idx].stock)||0)-i.qty); });
+    save('mc_medicines', meds);
+    return s;
+  }
+
+  /* ── MESSAGES (Network) ───────────────────────────── */
+  function getMessages()        { return load('mc_messages'); }
+  function saveMessages(list)   { save('mc_messages', list); }
+
+  /* ── SETTINGS ─────────────────────────────────────── */
+  function getSettings()        { return load('mc_settings', {}); }
+  function saveSettings(data)   { save('mc_settings', { ...getSettings(), ...data }); }
+
+  /* ── STATS ────────────────────────────────────────── */
+  function getStats() {
+    const pts   = getPatients();
+    const cons  = getConsultations();
+    const sales = getSales();
+    const meds  = getMedicines();
+    const apts  = getAppointments();
+    const td    = today();
+    return {
+      totalPatients:   pts.length,
+      todayPatients:   pts.filter(p=>(p.created_at||'').startsWith(td)).length,
+      totalConsults:   cons.length,
+      todayConsults:   cons.filter(c=>c.date===td).length,
+      totalSales:      sales.reduce((s,x)=>s+parseFloat(x.total||0),0),
+      todaySales:      sales.filter(x=>x.date===td).reduce((s,x)=>s+parseFloat(x.total||0),0),
+      lowStockCount:   meds.filter(m=>parseInt(m.stock)<10).length,
+      expiredCount:    meds.filter(m=>m.expiry && m.expiry < td).length,
+      pendingApts:     apts.filter(a=>a.status==='pending' && a.date>=td).length,
+      unreadMessages:  getMessages().filter(m=>!m.read).length,
     };
+  }
 
-    request.onsuccess = (e) => {
-      db = e.target.result;
-      resolve(db);
+  return {
+    generatePatientId,
+    getAccounts, saveAccounts,
+    getPatients, addPatient, updatePatient, deletePatient, getPatientById, searchPatients,
+    getConsultations, addConsultation, getPatientConsultations, deleteConsultation,
+    getPrescriptions, addPrescription, getPatientPrescriptions,
+    getAppointments, addAppointment, updateAppointment, deleteAppointment,
+    getVaccinations, addVaccination, getPatientVaccinations, deleteVaccination,
+    getAllLabResults, addLabResult, getPatientLabResults, deleteLabResult,
+    getMedicines, addMedicine, updateMedicine, deleteMedicine,
+    getSales, addSale,
+    getMessages, saveMessages,
+    getSettings, saveSettings,
+    getStats,
+  };
+})();
+
+window.DB = DB;
+
+// Compatibility bridge for legacy helpers that still expect the old async MedDB API.
+window.MedDB = window.MedDB || {
+  openDB: async () => null,
+  seedDemoData: async () => null,
+  dbGetAll: async (storeName) => {
+    const map = {
+      patients: DB.getPatients,
+      consultations: DB.getConsultations,
+      products: DB.getMedicines,
+      sales: DB.getSales,
+      appointments: DB.getAppointments,
     };
-
-    request.onerror = (e) => reject(e.target.error);
-  });
-}
-
-// Generic CRUD operations
-async function dbAdd(storeName, data) {
-  const database = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = database.transaction(storeName, 'readwrite');
-    const store = tx.objectStore(storeName);
-    const req = store.add({ ...data, createdAt: new Date().toISOString() });
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-async function dbUpdate(storeName, data) {
-  const database = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = database.transaction(storeName, 'readwrite');
-    const store = tx.objectStore(storeName);
-    const req = store.put(data);
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-async function dbDelete(storeName, id) {
-  const database = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = database.transaction(storeName, 'readwrite');
-    const store = tx.objectStore(storeName);
-    const req = store.delete(id);
-    req.onsuccess = () => resolve();
-    req.onerror = () => reject(req.error);
-  });
-}
-
-async function dbGetAll(storeName) {
-  const database = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = database.transaction(storeName, 'readonly');
-    const store = tx.objectStore(storeName);
-    const req = store.getAll();
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-async function dbGet(storeName, id) {
-  const database = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = database.transaction(storeName, 'readonly');
-    const store = tx.objectStore(storeName);
-    const req = store.get(id);
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-async function dbGetByIndex(storeName, indexName, value) {
-  const database = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = database.transaction(storeName, 'readonly');
-    const store = tx.objectStore(storeName);
-    const index = store.index(indexName);
-    const req = index.getAll(value);
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-async function dbCount(storeName) {
-  const database = await openDB();
-  return new Promise((resolve, reject) => {
-    const tx = database.transaction(storeName, 'readonly');
-    const store = tx.objectStore(storeName);
-    const req = store.count();
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-// Seed demo data
-async function seedDemoData() {
-  // Demo patients
-  const demoPatients = [
-    { identiteNumero: 'MC-PAT-0001', nom: 'Dupont', prenom: 'Marie', dateNaissance: '1985-03-15', sexe: 'F', telephone: '+243 999 123 456', email: 'marie.dupont@email.com', adresse: '12 Rue de la Paix, Kinshasa', groupeSanguin: 'A+', allergies: 'Pénicilline', maladiesChroniques: 'Asthme', contactUrgence: 'Jean Dupont - +243 999 789 012', notes: '' },
-    { identiteNumero: 'MC-PAT-0002', nom: 'Kabongo', prenom: 'Patrick', dateNaissance: '1990-07-22', sexe: 'M', telephone: '+243 998 456 789', email: 'p.kabongo@email.com', adresse: '45 Avenue Lumumba, Lubumbashi', groupeSanguin: 'O+', allergies: 'Aucune', maladiesChroniques: 'Diabète type 2', contactUrgence: 'Sarah Kabongo - +243 997 321 654', notes: '' },
-    { identiteNumero: 'MC-PAT-0003', nom: 'Mbeki', prenom: 'Amina', dateNaissance: '1978-11-08', sexe: 'F', telephone: '+243 997 654 321', email: 'amina.m@email.com', adresse: '8 Boulevard du 30 Juin, Kinshasa', groupeSanguin: 'B-', allergies: 'Sulfamides, Aspirine', maladiesChroniques: 'Hypertension', contactUrgence: 'Ahmed Mbeki - +243 996 111 222', notes: 'Patiente suivie depuis 2020' },
-    { identiteNumero: 'MC-PAT-0004', nom: 'Lukaku', prenom: 'David', dateNaissance: '1995-01-30', sexe: 'M', telephone: '+243 996 987 654', email: 'david.l@email.com', adresse: '23 Rue Kasai, Mbuji-Mayi', groupeSanguin: 'AB+', allergies: 'Aucune', maladiesChroniques: 'Aucune', contactUrgence: 'Rose Lukaku - +243 995 444 555', notes: '' },
-  ];
-
-  let patients = await dbGetAll('patients');
-  const seedVersion = localStorage.getItem('medconnect_demo_seed_version');
-  const shouldRunSeedMigration = patients.length === 0 || seedVersion !== '2';
-
-  if (shouldRunSeedMigration) {
-    for (const demoPatient of demoPatients) {
-      const existing = patients.find(p =>
-        p.identiteNumero === demoPatient.identiteNumero ||
-        (!p.identiteNumero && p.nom === demoPatient.nom && p.prenom === demoPatient.prenom)
-      );
-
-      if (existing) {
-        if (!existing.identiteNumero) {
-          await dbUpdate('patients', { ...existing, identiteNumero: demoPatient.identiteNumero });
-        }
-      } else {
-        await dbAdd('patients', demoPatient);
-      }
-    }
-    localStorage.setItem('medconnect_demo_seed_version', '2');
-  }
-
-  patients = await dbGetAll('patients');
-  const patientIdBySerial = Object.fromEntries(demoPatients.map((demoPatient) => {
-    const patient = patients.find(p =>
-      p.identiteNumero === demoPatient.identiteNumero ||
-      (p.nom === demoPatient.nom && p.prenom === demoPatient.prenom)
-    );
-    return [demoPatient.identiteNumero, patient?.id];
-  }));
-
-  // Demo consultations
-  const consultationCount = await dbCount('consultations');
-  if (consultationCount === 0) {
-    const consultations = [
-      { patientId: patientIdBySerial['MC-PAT-0001'], date: '2026-05-15', docteur: 'Dr. Mukendi', diagnostic: 'Crise d\'asthme modérée', traitement: 'Ventoline 100µg - 2 bouffées x3/jour', notes: 'Contrôle dans 2 semaines', statut: 'terminé' },
-      { patientId: patientIdBySerial['MC-PAT-0001'], date: '2026-04-20', docteur: 'Dr. Ngoy', diagnostic: 'Contrôle de routine', traitement: 'Maintien traitement habituel', notes: 'Résultats satisfaisants', statut: 'terminé' },
-      { patientId: patientIdBySerial['MC-PAT-0002'], date: '2026-05-18', docteur: 'Dr. Mukendi', diagnostic: 'Contrôle glycémie', traitement: 'Metformine 500mg - 2x/jour', notes: 'HbA1c à 7.2%, amélioration', statut: 'terminé' },
-      { patientId: patientIdBySerial['MC-PAT-0003'], date: '2026-05-19', docteur: 'Dr. Kasongo', diagnostic: 'Suivi hypertension', traitement: 'Amlodipine 5mg - 1x/jour', notes: 'TA: 140/85, ajuster dosage', statut: 'en cours' },
-    ].filter(c => c.patientId);
-
-    for (const c of consultations) await dbAdd('consultations', c);
-  }
-
-  // Demo products
-  const productCount = await dbCount('products');
-  if (productCount === 0) {
-    const products = [
-      { nom: 'Paracétamol 500mg', categorie: 'Antalgique', prix: 2500, stock: 150, emoji: '💊', dateExpiration: '2027-06-15' },
-      { nom: 'Amoxicilline 500mg', categorie: 'Antibiotique', prix: 4500, stock: 80, emoji: '💊', dateExpiration: '2027-03-20' },
-      { nom: 'Ibuprofène 400mg', categorie: 'Anti-inflammatoire', prix: 3000, stock: 120, emoji: '💊', dateExpiration: '2027-08-10' },
-      { nom: 'Ventoline 100µg', categorie: 'Bronchodilatateur', prix: 12000, stock: 25, emoji: '🫁', dateExpiration: '2027-01-30' },
-      { nom: 'Metformine 500mg', categorie: 'Antidiabétique', prix: 5500, stock: 60, emoji: '💉', dateExpiration: '2027-05-22' },
-      { nom: 'Amlodipine 5mg', categorie: 'Antihypertenseur', prix: 4000, stock: 90, emoji: '❤️', dateExpiration: '2027-04-18' },
-      { nom: 'Oméprazole 20mg', categorie: 'Antiulcéreux', prix: 3500, stock: 100, emoji: '💊', dateExpiration: '2027-07-05' },
-      { nom: 'Vitamine C 1000mg', categorie: 'Vitamines', prix: 2000, stock: 200, emoji: '🍊', dateExpiration: '2027-12-31' },
-      { nom: 'Sérum physiologique', categorie: 'Solution', prix: 1500, stock: 300, emoji: '💧', dateExpiration: '2028-01-15' },
-      { nom: 'Pansements stériles', categorie: 'Matériel', prix: 3000, stock: 150, emoji: '🩹', dateExpiration: '2028-06-20' },
-      { nom: 'Thermomètre digital', categorie: 'Matériel', prix: 8000, stock: 30, emoji: '🌡️', dateExpiration: '2030-01-01' },
-      { nom: 'Masques chirurgicaux (50)', categorie: 'Protection', prix: 5000, stock: 45, emoji: '😷', dateExpiration: '2028-03-15' },
-    ];
-
-    for (const p of products) await dbAdd('products', p);
-  }
-
-  // Demo sales
-  const salesCount = await dbCount('sales');
-  if (salesCount === 0) {
-    const sales = [
-      { date: '2026-05-19T10:30:00', items: [{ nom: 'Paracétamol 500mg', quantite: 2, prixUnitaire: 2500 }, { nom: 'Vitamine C 1000mg', quantite: 1, prixUnitaire: 2000 }], total: 7000, client: 'Marie Dupont' },
-      { date: '2026-05-19T09:15:00', items: [{ nom: 'Metformine 500mg', quantite: 3, prixUnitaire: 5500 }], total: 16500, client: 'Patrick Kabongo' },
-      { date: '2026-05-18T16:45:00', items: [{ nom: 'Amlodipine 5mg', quantite: 1, prixUnitaire: 4000 }, { nom: 'Oméprazole 20mg', quantite: 2, prixUnitaire: 3500 }], total: 11000, client: 'Amina Mbeki' },
-    ];
-
-    for (const s of sales) await dbAdd('sales', s);
-  }
-
-  // Demo appointments
-  const appointmentCount = await dbCount('appointments');
-  if (appointmentCount === 0) {
-    const appointments = [
-      { patientId: patientIdBySerial['MC-PAT-0001'], patientNom: 'Marie Dupont', date: '2026-05-20', heure: '09:00', docteur: 'Dr. Mukendi', motif: 'Contrôle asthme', statut: 'confirmé' },
-      { patientId: patientIdBySerial['MC-PAT-0003'], patientNom: 'Amina Mbeki', date: '2026-05-20', heure: '10:30', docteur: 'Dr. Kasongo', motif: 'Suivi hypertension', statut: 'confirmé' },
-      { patientId: patientIdBySerial['MC-PAT-0002'], patientNom: 'Patrick Kabongo', date: '2026-05-21', heure: '14:00', docteur: 'Dr. Mukendi', motif: 'Contrôle diabète', statut: 'en attente' },
-      { patientId: patientIdBySerial['MC-PAT-0004'], patientNom: 'David Lukaku', date: '2026-05-22', heure: '11:00', docteur: 'Dr. Ngoy', motif: 'Bilan de santé annuel', statut: 'en attente' },
-    ].filter(a => a.patientId);
-
-    for (const a of appointments) await dbAdd('appointments', a);
-  }
-}
-
-// Export
-window.MedDB = { openDB, dbAdd, dbUpdate, dbDelete, dbGetAll, dbGet, dbGetByIndex, dbCount, seedDemoData };
+    return map[storeName]?.() || [];
+  },
+  dbGet: async (storeName, id) => {
+    const items = await window.MedDB.dbGetAll(storeName);
+    return items.find(item => String(item.id || item.mid || item.sid || item.aid || item.cid) === String(id)) || null;
+  },
+};
