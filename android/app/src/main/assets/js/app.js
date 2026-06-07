@@ -25,6 +25,7 @@ const App = (() => {
       { label: 'Laboratoire',               icon:'🧪', s:'lab'           },
       { label: 'Rendez-vous',               icon:'📅', s:'appointments'  },
       { label: '📨 Messagerie',             icon:'📨', s:'inbox'         },
+      { label: 'Établissements',            icon:'🏥', s:'hospitals'     },
       { label: I18n.t('nav_map'),           icon:'🗺️', s:'map'           },
     ],
     nurse: () => [
@@ -32,6 +33,7 @@ const App = (() => {
       { label: 'Vaccinations',              icon:'💉', s:'vaccinations'  },
       { label: 'Rendez-vous',               icon:'📅', s:'appointments'  },
       { label: '📨 Messagerie',             icon:'📨', s:'inbox'         },
+      { label: 'Établissements',            icon:'🏥', s:'hospitals'     },
       { label: I18n.t('nav_map'),           icon:'🗺️', s:'map'           },
     ],
     pharmacist: () => [
@@ -76,6 +78,7 @@ const App = (() => {
       case 'appointments':  AppointmentsModule.render(main, role==='patient' ? localStorage.getItem('mc_my_patient_id') : null); break;
       case 'inbox':         Network.renderInbox(main);                           break;
       case 'map':           MapModule.render(main);                              break;
+      case 'hospitals':      HospitalsRegistry.renderManagePage(main);            break;
 
       // Hospital / Doctor
       case 'dashboard':

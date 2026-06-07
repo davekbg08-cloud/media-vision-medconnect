@@ -17,14 +17,29 @@ const Network = (() => {
     msgs.push({
       mid:     `N${Date.now()}`,
       to_role, to_id, type, subject, body,
-      from:    Auth.getUser()?.name || 'MedConnect',
+      from:    window.Auth?.getUser?.()?.name || 'MedConnect',
       date:    new Date().toISOString().slice(0,10),
       read:    false,
     });
     DB.saveMessages(msgs);
   }
 
+  function recipientKeys(user) {
+    return [user?.uid, user?.patient_id, user?.username, user?.order_num, user?.matricule]
+      .filter(Boolean);
+  }
+
+  function messageMatchesUser(message, user) {
+    if (!user || message.to_role !== user.role) return false;
+    if (!message.to_id) return true;
+    return recipientKeys(user).includes(message.to_id);
+  }
+
   function getUnread(role, id) {
+    const user = window.Auth?.getUser?.();
+    if (!id && user?.role === role) {
+      return DB.getMessages().filter(m => messageMatchesUser(m, user) && !m.read).length;
+    }
     return DB.getMessages().filter(m =>
       m.to_role === role && (!id || m.to_id === id) && !m.read
     ).length;
@@ -40,7 +55,7 @@ const Network = (() => {
   function renderInbox(main) {
     const user = Auth.getUser();
     const msgs = DB.getMessages()
-      .filter(m => m.to_role === user.role)
+      .filter(m => messageMatchesUser(m, user))
       .sort((a,b) => b.date.localeCompare(a.date));
 
     main.innerHTML = `

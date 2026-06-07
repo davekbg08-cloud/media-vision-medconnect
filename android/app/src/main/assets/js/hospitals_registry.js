@@ -33,7 +33,7 @@ const HospitalsRegistry = (() => {
   function saveAffiliations(l){ localStorage.setItem('mc_affiliations', JSON.stringify(l)); }
 
   /** Médecin demande une affiliation */
-  function requestAffiliation(doctorUid, doctorName, hid) {
+  function requestAffiliation(doctorUid, doctorName, hid, options = {}) {
     const affs = getAffiliations();
     if (affs.find(a => a.doctor_uid===doctorUid && a.hid===hid)) return false;
     const a = {
@@ -46,7 +46,24 @@ const HospitalsRegistry = (() => {
     };
     affs.push(a);
     saveAffiliations(affs);
+    if (!options.silent) notifyAffiliationRequest(a);
     return a;
+  }
+
+  function notifyAffiliationRequest(affiliation) {
+    const h = getHospitalById(affiliation.hid);
+    if (!window.Network?.notify) return;
+    Network.notify({
+      to_role: h?.owner_role || 'admin',
+      to_id:   h?.owner_uid  || 'admin_root',
+      type:    'info',
+      subject: `🏥 Demande d'affiliation — ${affiliation.doctor_name}`,
+      body: [
+        `${affiliation.doctor_name} demande à rejoindre ${h?.name || 'cet établissement'}.`,
+        ``,
+        `Pour confirmer : ouvrez le menu "Établissements", puis cliquez sur "Approuver" ou "Refuser".`,
+      ].join('\n'),
+    });
   }
 
   /** Admin/gestionnaire de l'hôpital valide ou rejette */
@@ -156,7 +173,8 @@ const HospitalsRegistry = (() => {
     const hospitals = getHospitals();
     App.openModal('🏥 Demander une affiliation', `
       <p style="font-size:.84rem;color:var(--text-muted);margin-bottom:1rem">
-        Sélectionnez l'établissement. L'admin de cet hôpital devra valider votre demande.
+        Sélectionnez l'établissement. La demande sera envoyée dans la messagerie et la page
+        Établissements de l'admin ou du gestionnaire de cet hôpital.
       </p>
       <form onsubmit="HospitalsRegistry.submitAffiliation(event)">
         <div class="form-group">
@@ -186,7 +204,7 @@ const HospitalsRegistry = (() => {
     const hid  = document.getElementById('aff-hid').value;
     const ok   = requestAffiliation(user.uid, user.name, hid);
     App.closeModal();
-    App.toast(ok ? '📤 Demande envoyée — en attente de validation' : '⚠️ Demande déjà envoyée', ok?'success':'error');
+    App.toast(ok ? '📤 Demande envoyée à l’hôpital — en attente de validation' : '⚠️ Demande déjà envoyée', ok?'success':'error');
   }
 
   /* ── MODAL CRÉATION ÉTABLISSEMENT ───────────────── */
@@ -242,9 +260,10 @@ const HospitalsRegistry = (() => {
       phone:    document.getElementById('h-phone').value.trim(),
       email:    document.getElementById('h-email').value.trim(),
       owner_uid: user.uid,
+      owner_role: user.role,
     });
     // Affiliation automatique pour le créateur (approuvée)
-    const a = requestAffiliation(user.uid, user.name, h.hid);
+    const a = requestAffiliation(user.uid, user.name, h.hid, { silent: true });
     if (a) respondAffiliation(a.afid, true);
     App.closeModal();
     App.toast(`✅ Établissement créé — ${h.name}`);
@@ -254,15 +273,16 @@ const HospitalsRegistry = (() => {
   /* ── PAGE GESTION ÉTABLISSEMENTS (admin/médecin) ── */
   function renderManagePage(main) {
     const user     = Auth.getUser();
-    const myHosps  = getDoctorHospitals(user.uid);
+    const isAdmin  = user?.role === 'admin';
+    const myHosps  = isAdmin ? getHospitals() : getDoctorHospitals(user.uid);
     const pending  = getAffiliations().filter(a => {
       const h = getHospitalById(a.hid);
-      return a.status==='pending' && h?.owner_uid===user.uid;
+      return a.status==='pending' && (isAdmin || h?.owner_uid===user.uid);
     });
 
     main.innerHTML = `
       <div class="page-header">
-        <h2>🏥 Mes Établissements</h2>
+        <h2>🏥 ${isAdmin ? 'Établissements' : 'Mes Établissements'}</h2>
         <button class="btn btn-primary btn-sm" onclick="HospitalsRegistry.openCreateHospital()">+ Créer</button>
       </div>
 
@@ -273,6 +293,7 @@ const HospitalsRegistry = (() => {
             <div class="record-card">
               <div class="record-header">
                 <strong>👨‍⚕️ ${esc(a.doctor_name)}</strong>
+                <span class="chip">🏥 ${esc(getHospitalById(a.hid)?.name || 'Établissement')}</span>
                 <span class="record-date">📅 ${a.requested_at?.slice(0,10)}</span>
               </div>
               <div style="display:flex;gap:.5rem;margin-top:.5rem">
@@ -288,7 +309,7 @@ const HospitalsRegistry = (() => {
             </div>`).join('')}
         </div>` : ''}
 
-      <h3 style="margin-bottom:.75rem">Mes affiliations approuvées</h3>
+      <h3 style="margin-bottom:.75rem">${isAdmin ? 'Établissements enregistrés' : 'Mes affiliations approuvées'}</h3>
       ${myHosps.length ? myHosps.map(h => {
         const isCurrent = getCurrentHospital()?.hid === h.hid;
         const typeIcons = { hospital:'🏥', clinic:'🏨', health_center:'🏢', pharmacy:'💊', lab:'🧪' };
@@ -327,7 +348,7 @@ const HospitalsRegistry = (() => {
     const h5 = addHospital({ name:'Hôpital Lariboisière', type:'hospital',      country:'FR', city:'Paris',     phone:'+33 1 49 95 65 65'});
     // Affiliations démo pour docteur demo
     const demoAff = (hid) => {
-      const a = requestAffiliation('u2','Dr. Amina Koné', hid);
+      const a = requestAffiliation('u2','Dr. Amina Koné', hid, { silent: true });
       if (a) respondAffiliation(a.afid, true);
     };
     demoAff(h1.hid); demoAff(h2.hid);

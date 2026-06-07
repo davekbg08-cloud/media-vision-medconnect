@@ -1,400 +1,451 @@
 /* =====================================================
-   MedConnect 2.0 — Auth Module (Sécurisé)
-   Vérification crédentiels · PIN patient · Rôles stricts
+   MedConnect 2.0 — Auth Module (Corrigé)
+
+   FLUX PAR RÔLE :
+   ─────────────────────────────────────────────────
+   PATIENT     → N° MC (créé par médecin) + PIN
+                 Premier accès = création du PIN
+   MÉDECIN     → N° Ordre Médical (vérifié) + mdp
+                 S'inscrit avec son numéro officiel
+   PHARMACIEN  → N° Matricule RCCM (vérifié) + mdp
+   INFIRMIER   → N° Matricule (vérifié) + mdp
+   ADMIN       → Identifiants sécurisés (cachés)
    ===================================================== */
 const Auth = (() => {
-  const ROLE_ICONS = { patient:'🩺', doctor:'👨‍⚕️', pharmacist:'💊', nurse:'🩹', admin:'⚙️' };
+
+  const ROLE_ICONS  = { patient:'🩺', doctor:'👨‍⚕️', pharmacist:'💊', nurse:'🩹', admin:'⚙️' };
   const ROLE_LABELS = { patient:'Patient', doctor:'Médecin', pharmacist:'Pharmacien', nurse:'Infirmier(e)', admin:'Administrateur' };
+  const ADMIN_CREDS = { uid:'admin_root', username:'admin', password:'MedConnect@2026!', role:'admin', name:'Administrateur MedConnect' };
 
-  /* ── COMPTE ADMIN (unique, pré-configuré) ──────── */
-  const ADMIN = { uid:'admin_root', username:'admin', password:'MedConnect@2026!', role:'admin', name:'Administrateur MedConnect' };
-
-  /* ── SESSION ────────────────────────────────────── */
+  /* ══ SESSION ════════════════════════════════════ */
   function getUser()  { try { return JSON.parse(sessionStorage.getItem('mc_user')||'null'); } catch { return null; } }
   function isLogged() { return !!getUser(); }
-
-  function setUser(acc) { sessionStorage.setItem('mc_user', JSON.stringify(acc)); }
+  function _save(acc) { sessionStorage.setItem('mc_user', JSON.stringify(acc)); }
 
   function logout() {
-    sessionStorage.removeItem('mc_user');
-    if (window.HospitalsRegistry?.clearCurrentHospital) HospitalsRegistry.clearCurrentHospital();
+    sessionStorage.clear();
+    HospitalsRegistry?.clearCurrentHospital?.();
     showLogin();
   }
 
-  /* ── ÉCRAN DE CONNEXION ─────────────────────────── */
+  /* ══ ÉCRAN DE CONNEXION ════════════════════════ */
   function showLogin() {
     document.getElementById('landing').style.display    = 'none';
     document.getElementById('app-layout').style.display = 'none';
-    const el = document.getElementById('auth-screen');
-    el.style.display = 'flex';
-    el.innerHTML = renderLoginHTML();
-    const lc = document.getElementById('auth-lang');
-    if (lc && window.I18n?.renderSelector) lc.innerHTML = I18n.renderSelector();
-  }
+    const scr = document.getElementById('auth-screen');
+    scr.style.display = 'flex';
+    scr.innerHTML = `
+      <div class="auth-card">
+        <div class="auth-logo">🏥</div>
+        <h1 class="auth-title">MedConnect</h1>
+        <p class="auth-sub">Plateforme Médicale Universelle v2.0</p>
 
-  function renderLoginHTML() { return `
-    <div class="auth-card">
-      <div class="auth-logo">🏥</div>
-      <h1 class="auth-title">MedConnect</h1>
-      <p class="auth-sub">Plateforme Médicale Universelle v2.0</p>
-
-      <div id="auth-tabs" class="auth-tabs">
-        <button class="auth-tab active" onclick="Auth.switchTab('login')">Connexion</button>
-        <button class="auth-tab"        onclick="Auth.switchTab('register')">Inscription</button>
-      </div>
-
-      <!-- ── LOGIN ── -->
-      <div id="tab-login">
-        <!-- Sélecteur de rôle -->
-        <div class="role-selector">
-          ${Object.entries(ROLE_LABELS).filter(([r])=>r!=='admin').map(([role, label]) => `
-            <button class="role-btn" data-role="${role}" onclick="Auth.selectRole('${role}')">
-              <span>${ROLE_ICONS[role]}</span>
-              <span>${label}</span>
-            </button>`).join('')}
+        <div class="auth-tabs">
+          <button id="tab-btn-login"    class="auth-tab active" onclick="Auth._tab('login')">🔐 Connexion</button>
+          <button id="tab-btn-register" class="auth-tab"        onclick="Auth._tab('register')">📝 Inscription</button>
         </div>
-        <div id="login-form-area"></div>
-        <div id="auth-err" class="auth-error" style="display:none"></div>
-      </div>
 
-      <!-- ── REGISTER ── -->
-      <div id="tab-register" style="display:none">
-        <div id="register-form-area">
-          <p class="auth-register-info">
-            Sélectionnez votre rôle pour voir les instructions d'inscription.
-          </p>
-          <div class="role-selector">
-            ${Object.entries(ROLE_LABELS).filter(([r])=>r!=='admin'&&r!=='patient').map(([role,label]) => `
-              <button class="role-btn" data-role="${role}" onclick="Auth.showRegisterForm('${role}')">
-                <span>${ROLE_ICONS[role]}</span><span>${label}</span>
-              </button>`).join('')}
-          </div>
-          <div style="margin-top:.85rem;padding:.75rem;background:rgba(14,165,233,.07);border:1px solid rgba(14,165,233,.2);border-radius:8px;font-size:.79rem;color:var(--text-muted)">
-            🩺 <strong style="color:var(--text)">Patient ?</strong><br>
-            Votre fiche est créée par votre médecin. Utilisez l'onglet <strong>Connexion</strong> avec votre numéro unique <code style="color:var(--primary)">MC-YYYY-CC-XXXXXXXX</code> + votre PIN.
-          </div>
+        <div id="tab-login">
+          ${renderLoginTab()}
         </div>
-      </div>
 
-      <div id="auth-lang" style="margin-top:1.1rem;display:flex;justify-content:center"></div>
-      <p style="font-size:.68rem;color:var(--text-dim);text-align:center;margin-top:.6rem">📞 +243 856 373 707</p>
-    </div>`; }
+        <div id="tab-register" style="display:none">
+          ${renderRegisterTab()}
+        </div>
 
-  /* ── SÉLECTION DU RÔLE → FORMULAIRE ───────────── */
-  function selectRole(role) {
-    document.querySelectorAll('.role-btn').forEach(b => b.classList.toggle('active', b.dataset.role===role));
-    document.getElementById('login-form-area').innerHTML = loginFormFor(role);
-    document.getElementById('auth-err').style.display = 'none';
-  }
-
-  function loginFormFor(role) {
-    if (role === 'patient') return `
-      <div style="margin:.75rem 0">
-        <label class="inp-lbl">Numéro de fiche unique *</label>
-        <input type="text" id="l-patient-id" class="inp"
-               placeholder="MC-2026-CD-XXXXXXXX" style="letter-spacing:1px;text-transform:uppercase"
-               oninput="this.value=this.value.toUpperCase()">
-        <label class="inp-lbl" style="margin-top:.5rem">PIN (4 chiffres) *</label>
-        <input type="password" id="l-patient-pin" class="inp" maxlength="6" placeholder="••••" inputmode="numeric">
-        <button class="btn-p" style="margin-top:.75rem" onclick="Auth.loginPatient()">🔐 Accéder à mon dossier</button>
-        <p style="font-size:.73rem;color:var(--text-muted);margin-top:.65rem;text-align:center">
-          Votre numéro unique vous a été communiqué par votre médecin.
+        <div id="auth-lang" style="margin-top:1rem;display:flex;justify-content:center"></div>
+        <p style="font-size:.68rem;color:var(--text-dim);text-align:center;margin-top:.5rem">
+          📞 +243 856 373 707 · MedConnect v2.0
         </p>
       </div>`;
 
-    if (role === 'doctor') return `
-      <div style="margin:.75rem 0">
-        <label class="inp-lbl">N° Ordre Médical *</label>
-        <input type="text" id="l-order" class="inp" placeholder="OM-CD-2024-XXXX"
-               style="text-transform:uppercase;letter-spacing:1px"
-               oninput="this.value=this.value.toUpperCase()">
-        <label class="inp-lbl" style="margin-top:.5rem">Mot de passe *</label>
-        <input type="password" id="l-pass" class="inp" placeholder="••••••">
-        <button class="btn-p" style="margin-top:.75rem" onclick="Auth.loginDoctor()">🔐 Connexion</button>
-      </div>`;
-
-    if (role === 'pharmacist') return `
-      <div style="margin:.75rem 0">
-        <label class="inp-lbl">N° Matricule / RCCM *</label>
-        <input type="text" id="l-mat" class="inp" placeholder="PH-CD-2024-XXXX"
-               style="text-transform:uppercase;letter-spacing:1px"
-               oninput="this.value=this.value.toUpperCase()">
-        <label class="inp-lbl" style="margin-top:.5rem">Mot de passe *</label>
-        <input type="password" id="l-pass-ph" class="inp" placeholder="••••••">
-        <button class="btn-p" style="margin-top:.75rem" onclick="Auth.loginPharmacist()">🔐 Connexion</button>
-      </div>`;
-
-    if (role === 'nurse') return `
-      <div style="margin:.75rem 0">
-        <label class="inp-lbl">N° Matricule infirmier *</label>
-        <input type="text" id="l-nurse" class="inp" placeholder="INF-CD-2024-XXXX"
-               style="text-transform:uppercase;letter-spacing:1px"
-               oninput="this.value=this.value.toUpperCase()">
-        <label class="inp-lbl" style="margin-top:.5rem">Mot de passe *</label>
-        <input type="password" id="l-pass-n" class="inp" placeholder="••••••">
-        <button class="btn-p" style="margin-top:.75rem" onclick="Auth.loginNurse()">🔐 Connexion</button>
-      </div>`;
-
-    return '';
+    // Injecter sélecteur de langue
+    const lc = document.getElementById('auth-lang');
+    if (lc) lc.innerHTML = I18n.renderSelector();
   }
 
-  /* ── LOGIN PATIENT (N° fiche + PIN) ────────────── */
-  function loginPatient() {
-    const id  = document.getElementById('l-patient-id')?.value?.trim().toUpperCase();
-    const pin = document.getElementById('l-patient-pin')?.value;
+  /* ── Onglet Connexion ─────────────────────────── */
+  function renderLoginTab() {
+    return `
+      <div class="role-selector" id="login-roles">
+        ${['patient','doctor','pharmacist','nurse'].map(r=>`
+          <button class="role-btn" data-role="${r}" onclick="Auth._loginRole('${r}')">
+            <span>${ROLE_ICONS[r]}</span>
+            <span>${ROLE_LABELS[r]}</span>
+          </button>`).join('')}
+      </div>
+      <div id="login-form"></div>
+      <div id="auth-err" class="auth-error" style="display:none"></div>`;
+  }
 
-    if (!id || !pin) { showErr('Veuillez remplir tous les champs.'); return; }
+  /* ── Onglet Inscription ───────────────────────── */
+  function renderRegisterTab() {
+    return `
+      <div class="auth-register-info">
+        🩺 <strong>Patient ?</strong> Votre médecin crée votre fiche. Connectez-vous avec votre numéro
+        <code style="color:var(--primary)">MC-XXXX-CC-XXXXXXXX</code> reçu de votre médecin.
+      </div>
+      <p style="font-size:.8rem;color:var(--text-muted);margin:.6rem 0 .4rem">
+        Choisissez votre rôle pour vous inscrire :
+      </p>
+      <div class="role-selector" id="register-roles">
+        ${['doctor','pharmacist','nurse'].map(r=>`
+          <button class="role-btn" data-role="${r}" onclick="Auth._registerRole('${r}')">
+            <span>${ROLE_ICONS[r]}</span>
+            <span>${ROLE_LABELS[r]}</span>
+          </button>`).join('')}
+      </div>
+      <div id="register-form" style="margin-top:.75rem"></div>
+      <div id="reg-err" class="auth-error" style="display:none"></div>`;
+  }
 
+  /* ══ SWITCH ONGLET ═════════════════════════════ */
+  function _tab(tab) {
+    const isLogin = tab === 'login';
+    document.getElementById('tab-login').style.display    = isLogin ? '' : 'none';
+    document.getElementById('tab-register').style.display = isLogin ? 'none' : '';
+    document.getElementById('tab-btn-login').classList.toggle('active', isLogin);
+    document.getElementById('tab-btn-register').classList.toggle('active', !isLogin);
+  }
+
+  /* ══ SÉLECTION RÔLE CONNEXION ══════════════════ */
+  function _loginRole(role) {
+    // Mettre en surbrillance le rôle sélectionné
+    document.querySelectorAll('#login-roles .role-btn').forEach(b =>
+      b.classList.toggle('active', b.dataset.role === role));
+
+    const form = document.getElementById('login-form');
+    const err  = document.getElementById('auth-err');
+    if (err) err.style.display = 'none';
+
+    if (role === 'patient') {
+      form.innerHTML = `
+        <div class="form-group" style="margin-top:.75rem">
+          <label class="inp-lbl">Numéro de fiche unique *</label>
+          <input type="text" id="lp-id" class="inp"
+            placeholder="MC-2026-CD-XXXXXXXX"
+            style="letter-spacing:1px;text-transform:uppercase;font-family:monospace"
+            oninput="this.value=this.value.toUpperCase()">
+        </div>
+        <div class="form-group">
+          <label class="inp-lbl">PIN (4-6 chiffres) *</label>
+          <input type="password" id="lp-pin" class="inp"
+            maxlength="6" placeholder="••••" inputmode="numeric">
+          <small style="color:var(--text-muted);font-size:.72rem">
+            Premier accès : votre PIN sera créé automatiquement.
+          </small>
+        </div>
+        <button class="btn-p" onclick="Auth._doPatient()">🔐 Accéder à mon dossier</button>`;
+    }
+
+    else if (role === 'doctor') {
+      form.innerHTML = `
+        <div class="form-group" style="margin-top:.75rem">
+          <label class="inp-lbl">N° Ordre Médical *</label>
+          <input type="text" id="ld-num" class="inp"
+            placeholder="OM-CD-2024-XXXX"
+            style="text-transform:uppercase;font-family:monospace"
+            oninput="this.value=this.value.toUpperCase()">
+        </div>
+        <div class="form-group">
+          <label class="inp-lbl">Mot de passe *</label>
+          <input type="password" id="ld-pass" class="inp" placeholder="••••••">
+        </div>
+        <button class="btn-p" onclick="Auth._doDoctor()">🔐 Connexion Médecin</button>`;
+    }
+
+    else if (role === 'pharmacist') {
+      form.innerHTML = `
+        <div class="form-group" style="margin-top:.75rem">
+          <label class="inp-lbl">N° Matricule / RCCM *</label>
+          <input type="text" id="lph-num" class="inp"
+            placeholder="PH-CD-2024-XXXX"
+            style="text-transform:uppercase;font-family:monospace"
+            oninput="this.value=this.value.toUpperCase()">
+        </div>
+        <div class="form-group">
+          <label class="inp-lbl">Mot de passe *</label>
+          <input type="password" id="lph-pass" class="inp" placeholder="••••••">
+        </div>
+        <button class="btn-p" onclick="Auth._doPharmacist()">🔐 Connexion Pharmacien</button>`;
+    }
+
+    else if (role === 'nurse') {
+      form.innerHTML = `
+        <div class="form-group" style="margin-top:.75rem">
+          <label class="inp-lbl">N° Matricule Infirmier *</label>
+          <input type="text" id="ln-num" class="inp"
+            placeholder="INF-CD-2024-XXXX"
+            style="text-transform:uppercase;font-family:monospace"
+            oninput="this.value=this.value.toUpperCase()">
+        </div>
+        <div class="form-group">
+          <label class="inp-lbl">Mot de passe *</label>
+          <input type="password" id="ln-pass" class="inp" placeholder="••••••">
+        </div>
+        <button class="btn-p" onclick="Auth._doNurse()">🔐 Connexion Infirmier</button>`;
+    }
+  }
+
+  /* ══ SÉLECTION RÔLE INSCRIPTION ════════════════ */
+  function _registerRole(role) {
+    document.querySelectorAll('#register-roles .role-btn').forEach(b =>
+      b.classList.toggle('active', b.dataset.role === role));
+
+    const form = document.getElementById('register-form');
+    const err  = document.getElementById('reg-err');
+    if (err) err.style.display = 'none';
+
+    if (role === 'doctor') {
+      form.innerHTML = `
+        <div class="auth-register-info">
+          👨‍⚕️ Votre <strong>N° d'Ordre Médical</strong> doit être enregistré par l'administrateur.
+          Entrez-le ci-dessous avec un mot de passe de votre choix.
+        </div>
+        <div class="form-group">
+          <label class="inp-lbl">N° Ordre Médical *</label>
+          <input type="text" id="rd-num" class="inp"
+            placeholder="ex: OM-CD-2024-0042"
+            style="text-transform:uppercase;font-family:monospace"
+            oninput="this.value=this.value.toUpperCase()">
+          <small style="color:var(--text-muted);font-size:.71rem">
+            Numéros disponibles (démo) : OM-CD-2024-0042 · OM-CD-2024-0117 · OM-SN-2023-0089
+          </small>
+        </div>
+        <div class="form-group">
+          <label class="inp-lbl">Choisir un mot de passe *</label>
+          <input type="password" id="rd-pass" class="inp"
+            placeholder="Min. 6 caractères" minlength="6">
+        </div>
+        <div class="form-group">
+          <label class="inp-lbl">Confirmer le mot de passe *</label>
+          <input type="password" id="rd-pass2" class="inp" placeholder="••••••">
+        </div>
+        <button class="btn-p" onclick="Auth._regDoctor()">✅ Créer mon compte médecin</button>`;
+    }
+
+    else if (role === 'pharmacist') {
+      form.innerHTML = `
+        <div class="auth-register-info">
+          💊 Votre <strong>N° Matricule RCCM</strong> doit être enregistré par l'administrateur.
+        </div>
+        <div class="form-group">
+          <label class="inp-lbl">N° Matricule / RCCM *</label>
+          <input type="text" id="rph-num" class="inp"
+            placeholder="ex: PH-CD-2024-0015"
+            style="text-transform:uppercase;font-family:monospace"
+            oninput="this.value=this.value.toUpperCase()">
+          <small style="color:var(--text-muted);font-size:.71rem">
+            Numéros disponibles (démo) : PH-CD-2024-0015 · PH-CD-2024-0032 · PH-SN-2023-0077
+          </small>
+        </div>
+        <div class="form-group">
+          <label class="inp-lbl">Choisir un mot de passe *</label>
+          <input type="password" id="rph-pass" class="inp"
+            placeholder="Min. 6 caractères" minlength="6">
+        </div>
+        <div class="form-group">
+          <label class="inp-lbl">Confirmer le mot de passe *</label>
+          <input type="password" id="rph-pass2" class="inp" placeholder="••••••">
+        </div>
+        <button class="btn-p" onclick="Auth._regPharmacist()">✅ Créer mon compte pharmacien</button>`;
+    }
+
+    else if (role === 'nurse') {
+      form.innerHTML = `
+        <div class="auth-register-info">
+          🩹 Votre <strong>N° Matricule infirmier</strong> doit être enregistré par l'administrateur.
+        </div>
+        <div class="form-group">
+          <label class="inp-lbl">N° Matricule Infirmier *</label>
+          <input type="text" id="rn-num" class="inp"
+            placeholder="ex: INF-CD-2024-0089"
+            style="text-transform:uppercase;font-family:monospace"
+            oninput="this.value=this.value.toUpperCase()">
+          <small style="color:var(--text-muted);font-size:.71rem">
+            Numéros disponibles (démo) : INF-CD-2024-0089 · INF-CM-2024-0034
+          </small>
+        </div>
+        <div class="form-group">
+          <label class="inp-lbl">Choisir un mot de passe *</label>
+          <input type="password" id="rn-pass" class="inp"
+            placeholder="Min. 6 caractères" minlength="6">
+        </div>
+        <div class="form-group">
+          <label class="inp-lbl">Confirmer le mot de passe *</label>
+          <input type="password" id="rn-pass2" class="inp" placeholder="••••••">
+        </div>
+        <button class="btn-p" onclick="Auth._regNurse()">✅ Créer mon compte infirmier</button>`;
+    }
+  }
+
+  /* ══ ACTIONS CONNEXION ═════════════════════════ */
+
+  function _doPatient() {
+    const id  = (document.getElementById('lp-id')?.value  || '').trim().toUpperCase();
+    const pin = (document.getElementById('lp-pin')?.value || '').trim();
+    if (!id || !pin) { _err('login', 'Veuillez remplir tous les champs.'); return; }
+    if (!id.match(/^MC-\d{4}-[A-Z]{2}-[A-Z0-9]{8}$/)) {
+      _err('login', '❌ Format invalide. Ex : MC-2026-CD-A3B7X9Q2'); return; }
     const patient = DB.getPatientById(id);
-    if (!patient) { showErr('❌ Numéro de fiche introuvable. Contactez votre médecin.'); return; }
+    if (!patient) { _err('login', '❌ Numéro de fiche introuvable. Contactez votre médecin.'); return; }
+    if (pin.length < 4) { _err('login', '❌ PIN trop court — minimum 4 chiffres.'); return; }
 
-    // Premier accès : créer le PIN
     const accounts = DB.getAccounts();
-    const existing = accounts.find(a => a.patient_id === id);
+    const existing = accounts.find(a => a.patient_id === id && a.role === 'patient');
 
     if (!existing) {
-      // Première connexion → définir le PIN
-      if (pin.length < 4) { showErr('Le PIN doit contenir au moins 4 chiffres.'); return; }
-      const acc = {
-        uid:        `PAT_${id}`,
-        username:   id,
-        password:   pin,
-        role:       'patient',
-        name:       `${patient.firstname} ${patient.lastname}`,
-        patient_id: id,
-        created_at: new Date().toISOString(),
-      };
+      // Premier accès → créer le PIN
+      const acc = { uid:`PAT_${id}`, username:id, password:pin, role:'patient',
+                    name:`${patient.firstname} ${patient.lastname}`, patient_id:id,
+                    created_at:new Date().toISOString() };
       accounts.push(acc);
       DB.saveAccounts(accounts);
       localStorage.setItem('mc_my_patient_id', id);
-      setUser(acc);
-      ACL.logAccess(id, acc.uid, 'patient_first_login');
-      document.getElementById('auth-screen').style.display = 'none';
-      App.afterLogin(acc);
-      App.toast(`✅ Bienvenue, ${patient.firstname} ! PIN créé.`);
+      _save(acc); _launch(acc);
+      App.toast(`✅ Bienvenue ${patient.firstname} ! PIN créé avec succès.`);
       return;
     }
-
-    if (existing.password !== pin) { showErr('❌ PIN incorrect.'); return; }
+    if (existing.password !== pin) { _err('login', '❌ PIN incorrect.'); return; }
     localStorage.setItem('mc_my_patient_id', id);
-    setUser(existing);
-    ACL.logAccess(id, existing.uid, 'patient_login');
-    document.getElementById('auth-screen').style.display = 'none';
-    App.afterLogin(existing);
+    _save(existing); _launch(existing);
   }
 
-  /* ── LOGIN MÉDECIN (N° Ordre + mot de passe) ───── */
-  function loginDoctor() {
-    const orderNum = document.getElementById('l-order')?.value?.trim().toUpperCase();
-    const password = document.getElementById('l-pass')?.value;
-
-    if (!orderNum || !password) { showErr('Veuillez remplir tous les champs.'); return; }
-
-    // Vérifier le registre officiel
-    if (!ACL.isDoctorVerified(orderNum)) {
-      showErr('❌ N° d\'Ordre Médical non reconnu.\nContactez l\'administrateur pour enregistrement.');
-      return;
-    }
-
-    const accounts  = DB.getAccounts();
-    const existing  = accounts.find(a => a.order_num === orderNum && a.role === 'doctor');
-
+  function _doDoctor() {
+    const num  = (document.getElementById('ld-num')?.value  || '').trim().toUpperCase();
+    const pass = (document.getElementById('ld-pass')?.value || '').trim();
+    if (!num || !pass) { _err('login', 'Veuillez remplir tous les champs.'); return; }
+    if (!ACL.isDoctorVerified(num)) {
+      _err('login', '❌ N° d\'Ordre non reconnu dans le registre.\nDemandez à l\'administrateur de vous enregistrer, ou utilisez un numéro de démo.'); return; }
+    const accounts = DB.getAccounts();
+    const existing = accounts.find(a => a.order_num === num && a.role === 'doctor');
     if (existing) {
-      if (existing.password !== password) { showErr('❌ Mot de passe incorrect.'); return; }
-      setUser(existing);
-      finishDoctorLogin(existing);
-      return;
+      if (existing.password !== pass) { _err('login', '❌ Mot de passe incorrect.'); return; }
+      _save(existing); _launchDoctor(existing); return;
     }
-
-    // Premier accès : créer le compte
-    const docInfo = ACL.getVerifiedDoctors().find(d => d.order_num === orderNum);
-    const acc = {
-      uid:       `DOC_${orderNum}`,
-      username:  orderNum,
-      password,
-      role:      'doctor',
-      name:      docInfo?.name || `Médecin ${orderNum}`,
-      order_num: orderNum,
-      specialty: docInfo?.specialty || '',
-      country:   docInfo?.country   || '',
-      created_at: new Date().toISOString(),
-    };
-    accounts.push(acc);
-    DB.saveAccounts(accounts);
-    setUser(acc);
-    finishDoctorLogin(acc);
-    App.toast(`✅ Compte créé — Bienvenue Dr. ${acc.name}`);
+    // Compte non encore créé → erreur, doit s'inscrire d'abord
+    _err('login', '⚠️ Compte non trouvé. Allez dans l\'onglet Inscription pour créer votre compte médecin.');
   }
 
-  function finishDoctorLogin(acc) {
+  function _doPharmacist() {
+    const num  = (document.getElementById('lph-num')?.value  || '').trim().toUpperCase();
+    const pass = (document.getElementById('lph-pass')?.value || '').trim();
+    if (!num || !pass) { _err('login', 'Veuillez remplir tous les champs.'); return; }
+    if (!ACL.isPharmacistVerified(num)) {
+      _err('login', '❌ N° Matricule non reconnu. Contactez l\'administrateur.'); return; }
+    const accounts = DB.getAccounts();
+    const existing = accounts.find(a => a.matricule === num && a.role === 'pharmacist');
+    if (existing) {
+      if (existing.password !== pass) { _err('login', '❌ Mot de passe incorrect.'); return; }
+      _save(existing); _launch(existing); return;
+    }
+    _err('login', '⚠️ Compte non trouvé. Allez dans l\'onglet Inscription pour créer votre compte.');
+  }
+
+  function _doNurse() {
+    const num  = (document.getElementById('ln-num')?.value  || '').trim().toUpperCase();
+    const pass = (document.getElementById('ln-pass')?.value || '').trim();
+    if (!num || !pass) { _err('login', 'Veuillez remplir tous les champs.'); return; }
+    if (!ACL.isNurseVerified(num)) {
+      _err('login', '❌ N° Matricule infirmier non reconnu.'); return; }
+    const accounts = DB.getAccounts();
+    const existing = accounts.find(a => a.matricule === num && a.role === 'nurse');
+    if (existing) {
+      if (existing.password !== pass) { _err('login', '❌ Mot de passe incorrect.'); return; }
+      _save(existing); _launch(existing); return;
+    }
+    _err('login', '⚠️ Compte non trouvé. Allez dans l\'onglet Inscription.');
+  }
+
+  /* ══ ACTIONS INSCRIPTION ════════════════════════ */
+
+  function _regDoctor() {
+    const num   = (document.getElementById('rd-num')?.value   || '').trim().toUpperCase();
+    const pass  = (document.getElementById('rd-pass')?.value  || '').trim();
+    const pass2 = (document.getElementById('rd-pass2')?.value || '').trim();
+    if (!num || !pass) { _err('reg', 'Veuillez remplir tous les champs.'); return; }
+    if (pass !== pass2) { _err('reg', '❌ Les mots de passe ne correspondent pas.'); return; }
+    if (pass.length < 6) { _err('reg', '❌ Mot de passe trop court (min. 6 caractères).'); return; }
+    if (!ACL.isDoctorVerified(num)) {
+      _err('reg', `❌ N° d'Ordre "${num}" non trouvé dans le registre.\n\nNuméros disponibles (démo) :\nOM-CD-2024-0042 · OM-CD-2024-0117\nOM-SN-2023-0089 · OM-CI-2024-0203`); return; }
+    const accounts = DB.getAccounts();
+    if (accounts.find(a => a.order_num === num)) {
+      _err('reg', '⚠️ Un compte existe déjà pour ce numéro. Utilisez l\'onglet Connexion.'); return; }
+    const docInfo = ACL.getVerifiedDoctors().find(d => d.order_num === num);
+    const acc = { uid:`DOC_${num}`, username:num, password:pass, role:'doctor',
+                  name:docInfo?.name||`Médecin ${num}`, order_num:num,
+                  specialty:docInfo?.specialty||'', country:docInfo?.country||'',
+                  created_at:new Date().toISOString() };
+    accounts.push(acc); DB.saveAccounts(accounts);
+    _save(acc);
+    App.toast(`✅ Bienvenue Dr. ${acc.name} !`);
+    _launchDoctor(acc);
+  }
+
+  function _regPharmacist() {
+    const num   = (document.getElementById('rph-num')?.value   || '').trim().toUpperCase();
+    const pass  = (document.getElementById('rph-pass')?.value  || '').trim();
+    const pass2 = (document.getElementById('rph-pass2')?.value || '').trim();
+    if (!num || !pass) { _err('reg', 'Veuillez remplir tous les champs.'); return; }
+    if (pass !== pass2) { _err('reg', '❌ Les mots de passe ne correspondent pas.'); return; }
+    if (pass.length < 6) { _err('reg', '❌ Mot de passe trop court.'); return; }
+    if (!ACL.isPharmacistVerified(num)) {
+      _err('reg', `❌ Matricule "${num}" non trouvé.\n\nNuméros disponibles (démo) :\nPH-CD-2024-0015 · PH-CD-2024-0032 · PH-SN-2023-0077`); return; }
+    const accounts = DB.getAccounts();
+    if (accounts.find(a => a.matricule === num && a.role === 'pharmacist')) {
+      _err('reg', '⚠️ Compte déjà existant. Utilisez l\'onglet Connexion.'); return; }
+    const phInfo = ACL.getVerifiedPharmacists().find(p => p.matricule === num);
+    const acc = { uid:`PH_${num}`, username:num, password:pass, role:'pharmacist',
+                  name:phInfo?.name||`Pharmacien ${num}`, pharmacy:phInfo?.pharmacy||'',
+                  matricule:num, country:phInfo?.country||'',
+                  created_at:new Date().toISOString() };
+    accounts.push(acc); DB.saveAccounts(accounts);
+    _save(acc);
+    App.toast(`✅ Bienvenue ${acc.name} !`);
+    _launch(acc);
+  }
+
+  function _regNurse() {
+    const num   = (document.getElementById('rn-num')?.value   || '').trim().toUpperCase();
+    const pass  = (document.getElementById('rn-pass')?.value  || '').trim();
+    const pass2 = (document.getElementById('rn-pass2')?.value || '').trim();
+    if (!num || !pass) { _err('reg', 'Veuillez remplir tous les champs.'); return; }
+    if (pass !== pass2) { _err('reg', '❌ Les mots de passe ne correspondent pas.'); return; }
+    if (pass.length < 6) { _err('reg', '❌ Mot de passe trop court.'); return; }
+    if (!ACL.isNurseVerified(num)) {
+      _err('reg', `❌ Matricule "${num}" non trouvé.\n\nNuméros disponibles (démo) :\nINF-CD-2024-0089 · INF-CM-2024-0034`); return; }
+    const accounts = DB.getAccounts();
+    if (accounts.find(a => a.matricule === num && a.role === 'nurse')) {
+      _err('reg', '⚠️ Compte déjà existant. Utilisez l\'onglet Connexion.'); return; }
+    const nurseInfo = ACL.getVerifiedNurses().find(n => n.matricule === num);
+    const acc = { uid:`NUR_${num}`, username:num, password:pass, role:'nurse',
+                  name:nurseInfo?.name||`Infirmier ${num}`, matricule:num,
+                  created_at:new Date().toISOString() };
+    accounts.push(acc); DB.saveAccounts(accounts);
+    _save(acc);
+    App.toast(`✅ Bienvenue ${acc.name} !`);
+    _launch(acc);
+  }
+
+  /* ══ LAUNCH ════════════════════════════════════ */
+  function _launch(acc) {
     document.getElementById('auth-screen').style.display = 'none';
-    // Auto-sélectionner le premier hôpital si disponible
+    App.afterLogin(acc);
+  }
+
+  function _launchDoctor(acc) {
     const hosps = HospitalsRegistry.getDoctorHospitals(acc.uid);
     if (hosps.length > 0 && !HospitalsRegistry.getCurrentHospital()) {
       sessionStorage.setItem('mc_current_hospital', hosps[0].hid);
     }
-    App.afterLogin(acc);
+    _launch(acc);
   }
 
-  /* ── LOGIN PHARMACIEN ───────────────────────────── */
-  function loginPharmacist() {
-    const mat      = document.getElementById('l-mat')?.value?.trim().toUpperCase();
-    const password = document.getElementById('l-pass-ph')?.value;
-    if (!mat || !password) { showErr('Veuillez remplir tous les champs.'); return; }
-
-    if (!ACL.isPharmacistVerified(mat)) {
-      showErr('❌ N° Matricule non reconnu.\nContactez l\'administrateur pour enregistrement.');
-      return;
-    }
-
-    const accounts = DB.getAccounts();
-    const existing = accounts.find(a => a.matricule === mat && a.role === 'pharmacist');
-
-    if (existing) {
-      if (existing.password !== password) { showErr('❌ Mot de passe incorrect.'); return; }
-      setUser(existing);
-      document.getElementById('auth-screen').style.display = 'none';
-      App.afterLogin(existing);
-      return;
-    }
-
-    const phInfo = ACL.getVerifiedPharmacists().find(p => p.matricule === mat);
-    const acc = {
-      uid:       `PH_${mat}`,
-      username:  mat,
-      password,
-      role:      'pharmacist',
-      name:      phInfo?.name     || `Pharmacien ${mat}`,
-      pharmacy:  phInfo?.pharmacy || '',
-      matricule: mat,
-      country:   phInfo?.country  || '',
-      created_at: new Date().toISOString(),
-    };
-    accounts.push(acc);
-    DB.saveAccounts(accounts);
-    setUser(acc);
-    document.getElementById('auth-screen').style.display = 'none';
-    App.afterLogin(acc);
-    App.toast(`✅ Bienvenue, ${acc.name}`);
-  }
-
-  /* ── LOGIN INFIRMIER ────────────────────────────── */
-  function loginNurse() {
-    const mat      = document.getElementById('l-nurse')?.value?.trim().toUpperCase();
-    const password = document.getElementById('l-pass-n')?.value;
-    if (!mat || !password) { showErr('Veuillez remplir tous les champs.'); return; }
-
-    if (!ACL.isNurseVerified(mat)) {
-      showErr('❌ N° Matricule infirmier non reconnu.');
-      return;
-    }
-
-    const accounts = DB.getAccounts();
-    const existing = accounts.find(a => a.matricule === mat && a.role === 'nurse');
-    if (existing) {
-      if (existing.password !== password) { showErr('❌ Mot de passe incorrect.'); return; }
-      setUser(existing);
-      document.getElementById('auth-screen').style.display = 'none';
-      App.afterLogin(existing);
-      return;
-    }
-
-    const nurseInfo = ACL.getVerifiedNurses().find(n => n.matricule === mat);
-    const acc = {
-      uid:`NUR_${mat}`, username:mat, password, role:'nurse',
-      name: nurseInfo?.name || `Infirmier ${mat}`,
-      matricule:mat, created_at:new Date().toISOString(),
-    };
-    accounts.push(acc); DB.saveAccounts(accounts);
-    setUser(acc);
-    document.getElementById('auth-screen').style.display = 'none';
-    App.afterLogin(acc);
-  }
-
-  /* ── FORMULAIRE D'INSCRIPTION RÔLE PRO ─────────── */
-  function showRegisterForm(role) {
-    document.querySelectorAll('#tab-register .role-btn').forEach(b =>
-      b.classList.toggle('active', b.dataset.role===role));
-
-    const formArea = document.getElementById('register-form-area');
-    if (role === 'doctor') formArea.innerHTML = `
-      <p class="auth-register-info" style="margin-top:.75rem">
-        Entrez votre <strong>N° d'Ordre Médical</strong> officiel puis choisissez un mot de passe.
-        Votre numéro sera vérifié dans le registre des médecins.
-      </p>
-      <form onsubmit="Auth.registerDoctor(event)">
-        <label class="inp-lbl">N° Ordre Médical *</label>
-        <input type="text" id="r-order" class="inp" required placeholder="OM-CD-2024-XXXX"
-               style="text-transform:uppercase" oninput="this.value=this.value.toUpperCase()">
-        <label class="inp-lbl" style="margin-top:.4rem">Mot de passe *</label>
-        <input type="password" id="r-pass" class="inp" required placeholder="Min. 6 caractères" minlength="6">
-        <button type="submit" class="btn-p" style="margin-top:.75rem">✅ Créer mon compte médecin</button>
-      </form>`;
-
-    if (role === 'pharmacist') formArea.innerHTML = `
-      <p class="auth-register-info" style="margin-top:.75rem">
-        Entrez votre <strong>N° Matricule / RCCM</strong> officiel et choisissez un mot de passe.
-      </p>
-      <form onsubmit="Auth.registerPharmacist(event)">
-        <label class="inp-lbl">N° Matricule RCCM *</label>
-        <input type="text" id="r-mat" class="inp" required placeholder="PH-CD-2024-XXXX"
-               style="text-transform:uppercase" oninput="this.value=this.value.toUpperCase()">
-        <label class="inp-lbl" style="margin-top:.4rem">Mot de passe *</label>
-        <input type="password" id="r-pass-ph" class="inp" required placeholder="Min. 6 caractères" minlength="6">
-        <button type="submit" class="btn-p" style="margin-top:.75rem">✅ Créer mon compte pharmacien</button>
-      </form>`;
-  }
-
-  function registerDoctor(e) {
-    e.preventDefault();
-    const orderNum = document.getElementById('r-order').value.trim().toUpperCase();
-    const password = document.getElementById('r-pass').value;
-    if (!ACL.isDoctorVerified(orderNum)) {
-      showErr('❌ N° d\'Ordre non trouvé dans le registre. Contactez l\'administrateur.'); return;
-    }
-    switchTab('login');
-    selectRole('doctor');
-    document.getElementById('l-order').value = orderNum;
-    document.getElementById('l-pass').value  = password;
-    loginDoctor();
-  }
-
-  function registerPharmacist(e) {
-    e.preventDefault();
-    const mat      = document.getElementById('r-mat').value.trim().toUpperCase();
-    const password = document.getElementById('r-pass-ph').value;
-    if (!ACL.isPharmacistVerified(mat)) {
-      showErr('❌ Matricule non trouvé. Contactez l\'administrateur.'); return;
-    }
-    switchTab('login');
-    selectRole('pharmacist');
-    document.getElementById('l-mat').value      = mat;
-    document.getElementById('l-pass-ph').value  = password;
-    loginPharmacist();
-  }
-
-  /* ── ADMIN LOGIN ────────────────────────────────── */
-  function loginAdmin(username, password) {
-    if (username === ADMIN.username && password === ADMIN.password) {
-      setUser(ADMIN);
-      document.getElementById('auth-screen').style.display = 'none';
-      App.afterLogin(ADMIN);
-      return true;
-    }
-    return false;
-  }
-
-  /* ── UTILS ──────────────────────────────────────── */
-  function switchTab(tab) {
-    document.getElementById('tab-login').style.display    = tab==='login'    ? '' : 'none';
-    document.getElementById('tab-register').style.display = tab==='register' ? '' : 'none';
-    document.querySelectorAll('.auth-tab').forEach((b,i) =>
-      b.classList.toggle('active', (i===0&&tab==='login')||(i===1&&tab==='register')));
-  }
-
-  function showErr(msg) {
-    const el = document.getElementById('auth-err');
-    if (el) { el.textContent = msg; el.style.display = 'block'; }
+  /* ══ HELPERS ════════════════════════════════════ */
+  function _err(scope, msg) {
+    const id  = scope === 'login' ? 'auth-err' : 'reg-err';
+    const el  = document.getElementById(id);
+    if (el) { el.innerHTML = msg.replace(/\n/g,'<br>'); el.style.display = 'block'; }
   }
 
   function getRoleIcon(role)  { return ROLE_ICONS[role]  || '👤'; }
@@ -402,12 +453,67 @@ const Auth = (() => {
 
   return {
     getUser, isLogged, logout, showLogin,
-    switchTab, selectRole, showRegisterForm,
-    loginPatient, loginDoctor, loginPharmacist, loginNurse, loginAdmin,
-    registerDoctor, registerPharmacist,
-    finishDoctorLogin,
+    _tab, _loginRole, _registerRole,
+    _doPatient, _doDoctor, _doPharmacist, _doNurse,
+    _regDoctor, _regPharmacist, _regNurse,
     getRoleIcon, getRoleLabel,
   };
 })();
 
-window.Auth = Auth;
+/* ══ ACCÈS ADMIN (5 clics sur le logo) ════════════ */
+(function() {
+  let clicks = 0, timer;
+  document.addEventListener('click', function(e) {
+    if (e.target.closest('.auth-logo') || e.target.closest('.landing-logo')) {
+      clicks++;
+      clearTimeout(timer);
+      timer = setTimeout(() => clicks = 0, 2000);
+      if (clicks >= 5) {
+        clicks = 0;
+        _showAdminLogin();
+      }
+    }
+  });
+})();
+
+function _showAdminLogin() {
+  App.openModal('⚙️ Accès Administrateur', `
+    <form onsubmit="Auth._doAdmin(event)">
+      <div class="form-group">
+        <label class="inp-lbl">Identifiant admin</label>
+        <input type="text" id="adm-user" class="inp" placeholder="admin" autocomplete="off">
+      </div>
+      <div class="form-group">
+        <label class="inp-lbl">Mot de passe</label>
+        <input type="password" id="adm-pass" class="inp" placeholder="••••••••••••">
+      </div>
+      <div id="adm-err" class="auth-error" style="display:none"></div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-ghost" onclick="App.closeModal()">Annuler</button>
+        <button type="submit" class="btn btn-primary">⚙️ Connexion Admin</button>
+      </div>
+    </form>`);
+}
+
+function _doAdmin(e) {
+  e.preventDefault();
+  const user = (document.getElementById('adm-user')?.value || '').trim();
+  const pass = (document.getElementById('adm-pass')?.value || '').trim();
+  const ADMIN = { uid:'admin_root', username:'admin', password:'MedConnect@2026!',
+                  role:'admin', name:'Administrateur MedConnect' };
+  if (user === ADMIN.username && pass === ADMIN.password) {
+    App.closeModal();
+    sessionStorage.setItem('mc_user', JSON.stringify(ADMIN));
+    document.getElementById('auth-screen').style.display = 'none';
+    App.afterLogin(ADMIN);
+    App.toast('⚙️ Bienvenue Administrateur');
+  } else {
+    const el = document.getElementById('adm-err');
+    if (el) { el.textContent = '❌ Identifiants incorrects.'; el.style.display = 'block'; }
+  }
+}
+
+/* Exposer _doAdmin globalement */
+Auth._showAdminLogin = _showAdminLogin;
+Auth._doAdmin        = _doAdmin;
+window.Auth          = Auth;
