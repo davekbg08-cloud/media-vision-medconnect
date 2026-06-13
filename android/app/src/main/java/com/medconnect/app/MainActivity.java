@@ -4,6 +4,7 @@ import android.Manifest;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.webkit.GeolocationPermissions;
+import android.webkit.PermissionRequest;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -12,13 +13,16 @@ import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import java.util.Arrays;
 
 public class MainActivity extends AppCompatActivity {
 
     private WebView myWebView;
     private static final int LOCATION_PERMISSION_REQUEST_CODE = 100;
+    private static final int CAMERA_PERMISSION_REQUEST_CODE = 101;
     private GeolocationPermissions.Callback locationCallback;
     private String locationOrigin;
+    private PermissionRequest pendingPermissionRequest;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -56,6 +60,23 @@ public class MainActivity extends AppCompatActivity {
                     callback.invoke(origin, true, false);
                 }
             }
+
+            @Override
+            public void onPermissionRequest(PermissionRequest request) {
+                boolean requestsCamera = Arrays.asList(request.getResources())
+                        .contains(PermissionRequest.RESOURCE_VIDEO_CAPTURE);
+
+                if (requestsCamera &&
+                        ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+                    pendingPermissionRequest = request;
+                    ActivityCompat.requestPermissions(MainActivity.this,
+                            new String[]{Manifest.permission.CAMERA},
+                            CAMERA_PERMISSION_REQUEST_CODE);
+                    return;
+                }
+
+                request.grant(request.getResources());
+            }
         });
 
         myWebView.loadUrl("file:///android_asset/index.html");
@@ -73,6 +94,15 @@ public class MainActivity extends AppCompatActivity {
                 if (locationCallback != null && locationOrigin != null) {
                     locationCallback.invoke(locationOrigin, false, false);
                 }
+            }
+        } else if (requestCode == CAMERA_PERMISSION_REQUEST_CODE) {
+            if (pendingPermissionRequest != null) {
+                if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                    pendingPermissionRequest.grant(pendingPermissionRequest.getResources());
+                } else {
+                    pendingPermissionRequest.deny();
+                }
+                pendingPermissionRequest = null;
             }
         }
     }

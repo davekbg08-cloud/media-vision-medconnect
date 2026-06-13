@@ -196,7 +196,7 @@ const Settings = (() => {
   function openAddDoctor() {
     App.openModal('➕ Ajouter Médecin Vérifié', `
       <form onsubmit="Settings.saveDoctor(event)">
-        <div class="form-group"><label>N° Ordre Médical *</label><input type="text" id="ad-num" required placeholder="OM-CD-2024-XXXX" style="text-transform:uppercase"></div>
+        <div class="form-group"><label>N° Ordre Médical officiel *</label><input type="text" id="ad-num" required placeholder="Numéro officiel" style="text-transform:uppercase"></div>
         <div class="form-group"><label>Nom complet *</label><input type="text" id="ad-name" required></div>
         <div class="form-group"><label>Spécialité</label><input type="text" id="ad-spec" placeholder="Médecine générale, Cardiologie…"></div>
         <div class="form-group"><label>Hôpital / Clinique</label><input type="text" id="ad-hosp"></div>
@@ -230,7 +230,7 @@ const Settings = (() => {
   function openAddPharmacist() {
     App.openModal('➕ Ajouter Pharmacien Vérifié', `
       <form onsubmit="Settings.savePharmacist(event)">
-        <div class="form-group"><label>N° Matricule / RCCM *</label><input type="text" id="ap-num" required placeholder="PH-CD-2024-XXXX" style="text-transform:uppercase"></div>
+        <div class="form-group"><label>N° Matricule / RCCM officiel *</label><input type="text" id="ap-num" required placeholder="Numéro officiel" style="text-transform:uppercase"></div>
         <div class="form-group"><label>Nom du pharmacien *</label><input type="text" id="ap-name" required></div>
         <div class="form-group"><label>Nom de la pharmacie *</label><input type="text" id="ap-pharm" required></div>
         <div class="form-group"><label>Pays *</label>

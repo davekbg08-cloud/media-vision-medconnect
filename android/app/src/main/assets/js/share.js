@@ -359,12 +359,10 @@ window.ShareModule = (() => {
         (errorMessage) => {
           // Silent noise fallback
         }
-      ).catch(err => {
-        console.error("Camera start error:", err);
+      ).catch(() => {
         showScannerError();
       });
     } catch (e) {
-      console.error("Scanner exception:", e);
       showScannerError();
     }
   }
@@ -388,7 +386,6 @@ window.ShareModule = (() => {
       try {
         await html5QrcodeScanner.stop();
       } catch (err) {
-        console.error("Error stopping scanner", err);
       }
     }
     html5QrcodeScanner = null;

@@ -40,9 +40,7 @@ window.MapModule = (() => {
             })
           }).addTo(map).bindPopup('📍 Votre position');
         },
-        () => {
-          console.log('Geolocation non disponible, utilisation de la position par défaut');
-        },
+        () => {},
         { timeout: 10000 }
       );
     }
@@ -75,8 +73,7 @@ window.MapModule = (() => {
       const data = await response.json();
 
       if (!data.elements || data.elements.length === 0) {
-        // Show demo markers if no real data
-        showDemoMarkers(type, center);
+        showNoResults(type);
         return;
       }
 
@@ -119,56 +116,22 @@ window.MapModule = (() => {
       }
 
     } catch (err) {
-      console.error('Overpass API error:', err);
-      showDemoMarkers(type, center);
+      showNoResults(type);
     }
   }
 
-  function showDemoMarkers(type, center) {
+  function showNoResults(type) {
     const resultsDiv = document.getElementById('map-results');
     const icon = type === 'pharmacy' ? '🏪' : '🏥';
-    const color = type === 'pharmacy' ? '#8B5CF6' : '#10B981';
-
-    // Generate demo locations around center
-    const demoPlaces = [];
-    const names = type === 'pharmacy'
-      ? ['Pharmacie Centrale', 'Pharmacie du Peuple', 'Pharmacie Moderne', 'Pharmacie de la Paix', 'Pharmacie Santé Plus']
-      : ['Hôpital Général', 'Clinique Saint-Luc', 'Centre Médical Espoir', 'Hôpital Universitaire', 'Clinique de la Gombe'];
-
-    for (let i = 0; i < 5; i++) {
-      const lat = center.lat + (Math.random() - 0.5) * 0.04;
-      const lng = center.lng + (Math.random() - 0.5) * 0.04;
-      demoPlaces.push({ lat, lng, name: names[i] });
-
-      const marker = L.marker([lat, lng], {
-        icon: L.divIcon({
-          className: 'place-marker',
-          html: `<div style="background:${color};color:white;padding:4px 8px;border-radius:12px;font-size:12px;font-weight:600;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,0.3);">${icon} ${names[i]}</div>`,
-          iconSize: [0, 0],
-        })
-      }).addTo(map).bindPopup(`<strong>${names[i]}</strong>`);
-      markers.push(marker);
-    }
 
     resultsDiv.innerHTML = `
       <div class="glass" style="padding:1rem;border-radius:var(--radius-md);">
-        <h4 style="margin-bottom:0.5rem;">${icon} ${demoPlaces.length} résultat(s) de démonstration</h4>
-        <p style="font-size:0.75rem;color:var(--text-muted);margin-bottom:0.5rem;">Données de démonstration — activez la géolocalisation pour les résultats réels</p>
-        <div style="max-height:200px;overflow-y:auto;">
-          ${demoPlaces.map(p => `
-            <div style="padding:0.5rem 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
-              <strong style="font-size:0.9rem;">${p.name}</strong>
-              <button class="btn btn-sm btn-ghost" onclick="MapModule.focusOn(${p.lat}, ${p.lng})">📍</button>
-            </div>
-          `).join('')}
-        </div>
+        <h4 style="margin-bottom:0.5rem;">${icon} Aucun résultat disponible</h4>
+        <p style="font-size:0.75rem;color:var(--text-muted);margin-bottom:0.5rem;">
+          Aucun établissement réel n'a été trouvé autour de cette zone.
+        </p>
       </div>
     `;
-
-    if (markers.length > 0) {
-      const group = new L.featureGroup(markers);
-      map.fitBounds(group.getBounds().pad(0.1));
-    }
   }
 
   function focusOn(lat, lng) {

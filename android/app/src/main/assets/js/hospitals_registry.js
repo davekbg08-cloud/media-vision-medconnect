@@ -338,22 +338,6 @@ const HospitalsRegistry = (() => {
         onclick="HospitalsRegistry.openRequestAffiliation()">+ Demander une nouvelle affiliation</button>`;
   }
 
-  /* ── INIT DONNÉES DÉMO ─────────────────────────── */
-  function initDemoHospitals() {
-    if (getHospitals().length > 0) return;
-    const h1 = addHospital({ name:'CHU de Kinshasa',      type:'hospital',      country:'CD', city:'Kinshasa',  phone:'+243 999 001 001' });
-    const h2 = addHospital({ name:'Clinique Ngaliema',    type:'clinic',        country:'CD', city:'Kinshasa',  phone:'+243 999 001 002' });
-    const h3 = addHospital({ name:'Hôpital Fann Dakar',   type:'hospital',      country:'SN', city:'Dakar',     phone:'+221 33 839 3000' });
-    const h4 = addHospital({ name:'CHU Abidjan',          type:'hospital',      country:'CI', city:'Abidjan',   phone:'+225 27 21 23 23' });
-    const h5 = addHospital({ name:'Hôpital Lariboisière', type:'hospital',      country:'FR', city:'Paris',     phone:'+33 1 49 95 65 65'});
-    // Affiliations démo pour docteur demo
-    const demoAff = (hid) => {
-      const a = requestAffiliation('u2','Dr. Amina Koné', hid, { silent: true });
-      if (a) respondAffiliation(a.afid, true);
-    };
-    demoAff(h1.hid); demoAff(h2.hid);
-  }
-
   return {
     getHospitals, addHospital, getHospitalById,
     getAffiliations, requestAffiliation, respondAffiliation,
@@ -363,7 +347,6 @@ const HospitalsRegistry = (() => {
     renderHospitalSwitcher, openRequestAffiliation, submitAffiliation,
     openCreateHospital, saveHospital,
     renderManagePage,
-    initDemoHospitals,
   };
 })();
 

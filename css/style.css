@@ -934,12 +934,6 @@ body.rtl .mobile-menu-btn { left:auto; right:.85rem; }
 .auth-error { background: rgba(239,68,68,.1); border: 1px solid var(--danger); color: var(--danger);
               border-radius: var(--radius-sm); padding: .5rem .75rem; font-size: .82rem; margin-bottom: .75rem; }
 
-.demo-accounts { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--border); }
-.demo-btn { display: inline-block; background: var(--surface); border: 1px solid var(--border);
-            color: var(--text-muted); padding: .25rem .65rem; border-radius: 20px; font-size: .77rem;
-            cursor: pointer; margin: .2rem; transition: all .18s; font-family: var(--font); }
-.demo-btn:hover { border-color: var(--primary); color: var(--primary); }
-
 /* ── SIDEBAR USER INFO ───────────────────────────── */
 .sidebar-user {
   font-size: .8rem;
@@ -1309,3 +1303,59 @@ body.rtl .tl-connector { left: auto; right: -1.1rem; }
   font-size: .73rem;
   color: var(--secondary);
 }
+
+/* ══════════════════════════════════════════════════════
+   MedConnect 2.0 — Fix iOS WebView & finitions
+══════════════════════════════════════════════════════ */
+
+/* Fix emoji iOS (stat cards, nav icons) */
+.stat-icon, .nav-icon, .portal-icon, .landing-logo {
+  font-family: "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",
+               "Twemoji Mozilla",sans-serif;
+  font-style: normal;
+  -webkit-text-stroke: 0;
+}
+
+/* Stat cards — une seule par ligne sur mobile */
+@media (max-width: 480px) {
+  .stats-grid { grid-template-columns: 1fr; }
+}
+
+/* Fix sélecteur langue double drapeau */
+.lang-selector select option { font-family: var(--font); }
+
+/* Sidebar déconnexion */
+.sidebar-back {
+  font-size: .76rem;
+  padding: .35rem .8rem;
+  color: var(--text-muted);
+}
+.sidebar-back:hover { color: var(--danger); border-color: rgba(239,68,68,.3); }
+
+/* Auth card scroll sur petits écrans */
+.auth-card { overflow-y: auto; max-height: 95vh; }
+
+/* Spinner Firebase sync */
+.sync-indicator {
+  position: fixed;
+  top: .75rem; right: .75rem;
+  background: rgba(14,165,233,.15);
+  border: 1px solid rgba(14,165,233,.3);
+  border-radius: 20px;
+  padding: .25rem .65rem;
+  font-size: .72rem;
+  color: var(--primary);
+  z-index: 9999;
+  display: none;
+}
+.sync-indicator.visible { display: block; }
+
+/* Connexion Firebase status */
+.firebase-status {
+  font-size: .68rem;
+  color: var(--text-dim);
+  text-align: center;
+  padding: .25rem 0;
+}
+.firebase-status.online  { color: var(--secondary); }
+.firebase-status.offline { color: var(--accent);    }

@@ -3,22 +3,33 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <meta name="description" content="MedConnect 2.0 — Plateforme médicale sécurisée. Identités vérifiées, confidentialité maximale, accès basé sur les rôles.">
-  <title>MedConnect 2.0 — Plateforme Médicale Sécurisée</title>
+  <meta name="description" content="MedConnect 2.0 — Plateforme médicale sécurisée. Identités vérifiées, confidentialité maximale, synchronisation temps réel.">
+  <title>MedConnect 2.0</title>
+
+  <!-- PWA -->
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#0EA5E9">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="MedConnect">
   <link rel="apple-touch-icon" href="assets/icon.png">
+
+  <!-- Leaflet CSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+
+  <!-- App CSS -->
   <link rel="stylesheet" href="css/style.css">
+
+  <!-- Firebase SDK (v9 compat) -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
 </head>
 <body>
 
   <!-- AUTH -->
   <div id="auth-screen" style="display:none"></div>
 
-  <!-- LANDING (accès rapide sans auth) -->
+  <!-- LANDING -->
   <div id="landing" style="display:none">
     <div class="landing-top-bar">
       <div id="lang-selector-container"></div>
@@ -26,9 +37,10 @@
     </div>
     <div class="landing-logo">🏥</div>
     <h1 class="landing-title">MedConnect</h1>
-    <p class="landing-subtitle" id="landing-subtitle">Plateforme Médicale Universelle · Sécurisée</p>
-    <div style="margin-top:1rem;text-align:center">
-      <button class="btn btn-primary" onclick="Auth.showLogin()" style="font-size:1rem;padding:.75rem 2rem">
+    <p class="landing-subtitle" id="landing-subtitle">Plateforme Médicale Universelle Sécurisée</p>
+    <div style="margin-top:1.5rem;text-align:center">
+      <button class="btn btn-primary" onclick="Auth.showLogin()"
+              style="font-size:1rem;padding:.85rem 2.5rem;border-radius:12px">
         🔐 Se connecter
       </button>
     </div>
@@ -40,31 +52,33 @@
   <!-- MOBILE MENU -->
   <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Menu">☰</button>
 
-  <!-- APP -->
+  <!-- APP LAYOUT -->
   <div class="app-layout" id="app-layout">
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-header">
         <div class="sidebar-brand" id="sidebar-brand"><span>🏥</span> MedConnect</div>
-        <!-- Sélecteur d'hôpital pour médecins -->
         <div id="hospital-switcher-container"></div>
-        <button class="sidebar-back" id="sidebar-back-btn" onclick="Auth.logout()">🚪 Déconnexion</button>
+        <button class="sidebar-back" id="sidebar-back-btn" onclick="Auth.logout()">
+          🚪 Déconnexion
+        </button>
       </div>
       <ul class="sidebar-nav" id="sidebar-nav"></ul>
       <div class="sidebar-footer">
         <div id="sidebar-lang-container"></div>
         <div class="sidebar-user" id="sidebar-user"></div>
-        <p style="font-size:.67rem;color:var(--text-dim)">MedConnect v2.0 © 2026</p>
+        <p style="font-size:.67rem;color:var(--text-dim);margin-top:.3rem">MedConnect v2.0 © 2026</p>
+        <p style="font-size:.65rem;color:var(--text-dim)">📞 +243 856 373 707</p>
       </div>
     </aside>
     <main class="main-content" id="main-content"></main>
   </div>
 
   <!-- MODAL -->
-  <div class="modal-overlay" id="global-modal">
+  <div class="modal-overlay" id="global-modal" role="dialog" aria-modal="true">
     <div class="modal">
       <div class="modal-header">
         <h2 id="modal-title">—</h2>
-        <button class="modal-close" onclick="App.closeModal()">✕</button>
+        <button class="modal-close" onclick="App.closeModal()" aria-label="Fermer">✕</button>
       </div>
       <div id="modal-body"></div>
     </div>
@@ -73,30 +87,45 @@
   <!-- TOASTS -->
   <div class="toast-container" id="toast-container" aria-live="polite"></div>
 
-  <!-- SCRIPTS (ordre crucial) -->
+  <!-- ══════════════ SCRIPTS (ordre crucial) ══════════════ -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- 1. Config Firebase (remplir les valeurs dans ce fichier) -->
+  <script src="js/firebase-config.js"></script>
+
+  <!-- 2. Modules de base -->
   <script src="js/i18n.js"></script>
   <script src="js/db.js"></script>
   <script src="js/currency.js"></script>
   <script src="js/access_control.js"></script>
+
+  <!-- 3. Modules fonctionnels -->
   <script src="js/network.js"></script>
   <script src="js/hospitals_registry.js"></script>
-  <script src="js/auth.js"></script>
   <script src="js/timeline.js"></script>
   <script src="js/appointments.js"></script>
   <script src="js/lab.js"></script>
   <script src="js/map.js"></script>
+
+  <!-- 4. Portails -->
   <script src="js/patient.js"></script>
   <script src="js/hospital.js"></script>
   <script src="js/pharmacy.js"></script>
   <script src="js/share.js"></script>
+
+  <!-- 5. Admin & Settings -->
+  <script src="js/admin.js"></script>
   <script src="js/settings.js"></script>
+
+  <!-- 6. Auth & App (en dernier) -->
+  <script src="js/auth.js"></script>
   <script src="js/app.js"></script>
+
+  <!-- PWA Service Worker -->
   <script>
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('./sw.js')
-        .then(() => console.log('✅ MedConnect 2.0 PWA'))
-        .catch(e => console.warn('SW:', e));
+        .catch(() => {});
     }
   </script>
 </body>
