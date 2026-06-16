@@ -198,6 +198,11 @@ const Auth = (() => {
           oninput="this.value=this.value.toUpperCase()">
       </div>
       <div class="form-group">
+        <label class="inp-lbl">Adresse email *</label>
+        <input type="email" id="${ids[role]}-email" class="inp"
+          placeholder="votre@email.com" required>
+      </div>
+      <div class="form-group">
         <label class="inp-lbl">Choisir un mot de passe * (min. 6 caractères)</label>
         <input type="password" id="${ids[role]}-pass" class="inp" placeholder="••••••" minlength="6">
       </div>
@@ -205,7 +210,17 @@ const Auth = (() => {
         <label class="inp-lbl">Confirmer le mot de passe *</label>
         <input type="password" id="${ids[role]}-pass2" class="inp" placeholder="••••••">
       </div>
-      <button class="btn-p" onclick="${actions[role]}">✅ Envoyer la demande</button>`;
+      <button class="btn-p" onclick="${actions[role]}">✅ Envoyer la demande</button>
+
+      <div class="auth-orientation-box">
+        <p>🌍 <strong>Votre numéro n'est pas encore dans notre registre ?</strong></p>
+        <p>Envoyez votre numéro officiel + une photo de votre carte professionnelle à :</p>
+        <p>📞 WhatsApp : <strong>+243 856 373 707</strong></p>
+        <p>✉️ Email : <strong>hallo.mediavision.tech@gmail.com</strong></p>
+        <p style="color:var(--text-dim);font-size:.72rem;margin-top:.4rem">
+          Délai de traitement : 24 à 48h ouvrables
+        </p>
+      </div>`;
   }
 
   /* ── ACTIONS CONNEXION ────────────────────────────── */
@@ -234,7 +249,30 @@ const Auth = (() => {
     _save(existing); _launch(existing);
   }
 
-  function _doDoctor() {
+  function _hasFirebaseAuth() {
+    return typeof firebaseAuth !== 'undefined' && !!firebaseAuth;
+  }
+
+  async function _signInFirebaseForAccount(account, pass, errorId = 'auth-err') {
+    if (!account?.email) return true;
+    if (!_hasFirebaseAuth()) {
+      _err(errorId, '❌ Firebase Auth indisponible. Réessayez avec une connexion internet.');
+      return false;
+    }
+    try {
+      const credential = await firebaseAuth.signInWithEmailAndPassword(account.email, pass);
+      if (credential?.user?.uid && account.uid !== credential.user.uid) {
+        account.uid = credential.user.uid;
+        account.authUid = credential.user.uid;
+      }
+      return true;
+    } catch {
+      _err(errorId, '❌ Connexion Firebase impossible. Vérifiez votre email/mot de passe.');
+      return false;
+    }
+  }
+
+  async function _doDoctor() {
     const num  = (document.getElementById('ld-num')?.value  || '').trim().toUpperCase();
     const pass = (document.getElementById('ld-pass')?.value || '').trim();
     if (!num || !pass) { _err('auth-err', 'Veuillez remplir tous les champs.'); return; }
@@ -243,11 +281,12 @@ const Auth = (() => {
     if (!existing) { _err('auth-err', '⚠️ Compte introuvable. Inscrivez-vous d\'abord.'); return; }
     if (existing.status === 'pending')  { _err('auth-err', '⏳ Compte en attente de validation par l\'administrateur.'); return; }
     if (existing.status === 'rejected') { _err('auth-err', '❌ Demande rejetée. Contactez l\'administrateur.'); return; }
-    if (existing.password !== pass) { _err('auth-err', '❌ Mot de passe incorrect.'); return; }
+    if (!existing.email && existing.password !== pass) { _err('auth-err', '❌ Mot de passe incorrect.'); return; }
+    if (!await _signInFirebaseForAccount(existing, pass)) return;
     _save(existing); _launchDoctor(existing);
   }
 
-  function _doPharmacist() {
+  async function _doPharmacist() {
     const num  = (document.getElementById('lph-num')?.value  || '').trim().toUpperCase();
     const pass = (document.getElementById('lph-pass')?.value || '').trim();
     if (!num || !pass) { _err('auth-err', 'Veuillez remplir tous les champs.'); return; }
@@ -256,11 +295,12 @@ const Auth = (() => {
     if (!existing) { _err('auth-err', '⚠️ Compte introuvable. Inscrivez-vous d\'abord.'); return; }
     if (existing.status === 'pending')  { _err('auth-err', '⏳ Compte en attente de validation.'); return; }
     if (existing.status === 'rejected') { _err('auth-err', '❌ Demande rejetée.'); return; }
-    if (existing.password !== pass) { _err('auth-err', '❌ Mot de passe incorrect.'); return; }
+    if (!existing.email && existing.password !== pass) { _err('auth-err', '❌ Mot de passe incorrect.'); return; }
+    if (!await _signInFirebaseForAccount(existing, pass)) return;
     _save(existing); _launch(existing);
   }
 
-  function _doNurse() {
+  async function _doNurse() {
     const num  = (document.getElementById('ln-num')?.value  || '').trim().toUpperCase();
     const pass = (document.getElementById('ln-pass')?.value || '').trim();
     if (!num || !pass) { _err('auth-err', 'Veuillez remplir tous les champs.'); return; }
@@ -269,12 +309,30 @@ const Auth = (() => {
     if (!existing) { _err('auth-err', '⚠️ Compte introuvable. Inscrivez-vous d\'abord.'); return; }
     if (existing.status === 'pending')  { _err('auth-err', '⏳ Compte en attente de validation.'); return; }
     if (existing.status === 'rejected') { _err('auth-err', '❌ Demande rejetée.'); return; }
-    if (existing.password !== pass) { _err('auth-err', '❌ Mot de passe incorrect.'); return; }
+    if (!existing.email && existing.password !== pass) { _err('auth-err', '❌ Mot de passe incorrect.'); return; }
+    if (!await _signInFirebaseForAccount(existing, pass)) return;
     _save(existing); _launch(existing);
   }
 
   /* ── ACTIONS INSCRIPTION ──────────────────────────── */
-  function _reg(num, pass, pass2, role, extraField) {
+  async function _createFirebaseUser(email, pass, account) {
+    if (!email || typeof firebaseAuth === 'undefined' || !firebaseAuth) return account;
+    try {
+      const credential = await firebaseAuth.createUserWithEmailAndPassword(email, pass);
+      const uid = credential?.user?.uid || account.uid;
+      const next = { ...account, uid, authUid: uid };
+      return next;
+    } catch (err) {
+      if (err?.code === 'auth/email-already-in-use') {
+        _err('reg-err', '❌ Cette adresse email est déjà utilisée.');
+        return null;
+      }
+      _err('reg-err', '❌ Impossible de créer le compte Firebase Auth pour le moment.');
+      return null;
+    }
+  }
+
+  async function _reg(num, pass, pass2, role, extraField) {
     if (!num || !pass) { _err('reg-err', 'Veuillez remplir tous les champs.'); return false; }
     if (pass !== pass2) { _err('reg-err', '❌ Les mots de passe ne correspondent pas.'); return false; }
     if (pass.length < 6) { _err('reg-err', '❌ Mot de passe trop court (min. 6 caractères).'); return false; }
@@ -285,8 +343,16 @@ const Auth = (() => {
       ? ACL.isPharmacistVerified(num)
       : ACL.isNurseVerified(num);
     if (!verified) {
-      _err('reg-err', `❌ Numéro non reconnu dans le registre.\nContactez l\'administrateur pour enregistrement.`);
+      _err('reg-err', `❌ Numéro non reconnu dans le registre.\nContactez l'administrateur : +243 856 373 707\nou hallo.mediavision.tech@gmail.com`);
       return false;
+    }
+    // Valider l'email
+    const email = extraField?.email || '';
+    if (Object.prototype.hasOwnProperty.call(extraField || {}, 'email') && !email) {
+      _err('reg-err', '❌ Adresse email obligatoire.'); return false;
+    }
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      _err('reg-err', '❌ Adresse email invalide.'); return false;
     }
     const accounts = DB.getAccounts();
     const dup = accounts.find(a => (a.order_num === num || a.matricule === num) && a.role === role);
@@ -302,8 +368,10 @@ const Auth = (() => {
 
     const acc = {
       uid: `${role.slice(0,3).toUpperCase()}_${num}_${Date.now()}`,
-      username: num, password: pass, role,
+      username: num,
+      role,
       name: info?.name || `${LABELS[role]} (${num})`,
+      email: extraField?.email || '',
       status: 'pending',
       created_at: new Date().toISOString(),
       ...extraField,
@@ -312,32 +380,40 @@ const Auth = (() => {
     if (info?.country)   acc.country   = info.country;
     if (info?.pharmacy)  acc.pharmacy  = info.pharmacy;
     if (info?.hospital)  acc.hospital  = info.hospital;
-    accounts.push(acc);
+
+    const finalAccount = await _createFirebaseUser(email, pass, acc);
+    if (!finalAccount) return false;
+
+    accounts.push(finalAccount);
     DB.saveAccounts(accounts);
+    DB.createRegistrationRequest?.(finalAccount);
     return true;
   }
 
-  function _regDoctor() {
+  async function _regDoctor() {
     const num   = (document.getElementById('rd-num')?.value       || '').trim().toUpperCase();
+    const email = (document.getElementById('rd-num-email')?.value || '').trim();
     const pass  = (document.getElementById('rd-num-pass')?.value  || '').trim();
     const pass2 = (document.getElementById('rd-num-pass2')?.value || '').trim();
-    if (!_reg(num, pass, pass2, 'doctor', { order_num: num })) return;
+    if (!await _reg(num, pass, pass2, 'doctor', { order_num: num, email })) return;
     _showPending();
   }
 
-  function _regPharmacist() {
+  async function _regPharmacist() {
     const num   = (document.getElementById('rph-num')?.value       || '').trim().toUpperCase();
+    const email = (document.getElementById('rph-num-email')?.value || '').trim();
     const pass  = (document.getElementById('rph-num-pass')?.value  || '').trim();
     const pass2 = (document.getElementById('rph-num-pass2')?.value || '').trim();
-    if (!_reg(num, pass, pass2, 'pharmacist', { matricule: num })) return;
+    if (!await _reg(num, pass, pass2, 'pharmacist', { matricule: num, email })) return;
     _showPending();
   }
 
-  function _regNurse() {
+  async function _regNurse() {
     const num   = (document.getElementById('rn-num')?.value       || '').trim().toUpperCase();
+    const email = (document.getElementById('rn-num-email')?.value || '').trim();
     const pass  = (document.getElementById('rn-num-pass')?.value  || '').trim();
     const pass2 = (document.getElementById('rn-num-pass2')?.value || '').trim();
-    if (!_reg(num, pass, pass2, 'nurse', { matricule: num })) return;
+    if (!await _reg(num, pass, pass2, 'nurse', { matricule: num, email })) return;
     _showPending();
   }
 
@@ -349,6 +425,8 @@ const Auth = (() => {
         <p style="font-size:.85rem;color:var(--text-muted);line-height:1.6">
           Votre demande est en cours de validation par l'administrateur.
           Vous recevrez une notification dès l'approbation de votre compte.
+          <br><br>
+          Votre demande a été reçue. Veuillez patienter pendant la vérification de vos informations.
         </p>
         <p style="font-size:.8rem;color:var(--text-muted);margin-top:.75rem">
           📞 +243 856 373 707
@@ -467,8 +545,16 @@ const Auth = (() => {
       created_at: new Date().toISOString(),
     }));
 
+    const adminSession = { ...ADMIN, username: u, name };
+    if (u.includes('@') && _hasFirebaseAuth()) {
+      try {
+        const credential = await firebaseAuth.signInWithEmailAndPassword(u, p);
+        if (credential?.user?.uid) adminSession.uid = credential.user.uid;
+      } catch {}
+    }
+
     App.closeModal();
-    _save({ ...ADMIN, username: u, name });
+    _save(adminSession);
     document.getElementById('auth-screen').style.display = 'none';
     App.afterLogin(getUser());
     App.toast('✅ Accès administrateur configuré.');
@@ -501,8 +587,15 @@ const Auth = (() => {
     }
 
     if (u === cfg.username && passwordHash === cfg.passwordHash) {
+      const adminSession = { ...ADMIN, username: cfg.username, name: cfg.name || ADMIN.name };
+      if (cfg.username.includes('@') && _hasFirebaseAuth()) {
+        try {
+          const credential = await firebaseAuth.signInWithEmailAndPassword(cfg.username, p);
+          if (credential?.user?.uid) adminSession.uid = credential.user.uid;
+        } catch {}
+      }
       App.closeModal();
-      _save({ ...ADMIN, username: cfg.username, name: cfg.name || ADMIN.name });
+      _save(adminSession);
       document.getElementById('auth-screen').style.display = 'none';
       App.afterLogin(getUser());
     } else {

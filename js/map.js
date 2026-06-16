@@ -4,8 +4,9 @@ window.MapModule = (() => {
   let map = null;
   let userMarker = null;
   let markers = [];
+  const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
-  function initMap() {
+  function initMap(options = {}) {
     const container = document.getElementById('map-container');
     if (!container) return;
 
@@ -24,7 +25,7 @@ window.MapModule = (() => {
     }).addTo(map);
 
     // Try to get user location
-    if (navigator.geolocation) {
+    if (options.locate !== false && navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
           const { latitude, longitude } = pos.coords;
@@ -134,6 +135,185 @@ window.MapModule = (() => {
     `;
   }
 
+  async function showRegisteredEstablishments() {
+    if (!map) initMap();
+    await new Promise(r => setTimeout(r, 300));
+    clearMarkers();
+
+    const resultsDiv = document.getElementById('map-results');
+    const establishments = (window.HospitalsRegistry?.getHospitals?.() || [])
+      .filter(h => h.status !== 'inactive' && h.latitude !== '' && h.longitude !== '' &&
+        !Number.isNaN(Number(h.latitude)) && !Number.isNaN(Number(h.longitude)));
+
+    if (!establishments.length) {
+      resultsDiv.innerHTML = `
+        <div class="glass" style="padding:1rem;border-radius:var(--radius-sm);">
+          <h4 style="margin-bottom:.5rem;">🏥 Aucun établissement enregistré avec GPS</h4>
+          <p style="font-size:.75rem;color:var(--text-muted);">
+            Ajoutez latitude et longitude depuis Administration > Établissements.
+          </p>
+        </div>`;
+      return;
+    }
+
+    establishments.forEach(h => {
+      const lat = Number(h.latitude);
+      const lng = Number(h.longitude);
+      const marker = L.marker([lat, lng], {
+        icon: L.divIcon({
+          className: 'place-marker',
+          html: `<div style="background:#10B981;color:white;padding:4px 8px;border-radius:12px;font-size:12px;font-weight:600;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,0.3);">🏥 ${esc(h.name)}</div>`,
+          iconSize: [0, 0],
+        })
+      }).addTo(map).bindPopup(`<strong>${esc(h.name)}</strong><br>${esc(h.address || h.city || '')}`);
+      markers.push(marker);
+    });
+
+    resultsDiv.innerHTML = `
+      <div class="glass" style="padding:1rem;border-radius:var(--radius-sm);">
+        <h4 style="margin-bottom:.5rem;">🏥 ${establishments.length} établissement(s) MedConnect</h4>
+        <div style="max-height:200px;overflow-y:auto;">
+          ${establishments.map(h => `
+            <div style="padding:.5rem 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
+              <div>
+                <strong style="font-size:.9rem;">${esc(h.name)}</strong>
+                <p style="font-size:.75rem;color:var(--text-muted);">${esc(h.address || h.city || 'Adresse non disponible')}</p>
+              </div>
+              <button class="btn btn-sm btn-ghost" onclick="MapModule.focusOn(${Number(h.latitude)}, ${Number(h.longitude)})">📍</button>
+            </div>
+          `).join('')}
+        </div>
+      </div>`;
+
+    if (markers.length > 0) {
+      const group = new L.featureGroup(markers);
+      map.fitBounds(group.getBounds().pad(0.1));
+    }
+  }
+
+  function canReadCloud() {
+    return typeof firebaseReady !== 'undefined' && firebaseReady &&
+      typeof firebaseDB !== 'undefined' && firebaseDB;
+  }
+
+  async function getCloudVisiblePharmacies() {
+    if (!canReadCloud()) return [];
+    const rows = [];
+    const queries = [
+      firebaseDB.collection('users')
+        .where('role', '==', 'pharmacist')
+        .where('status', 'in', ['active', 'approved'])
+        .where('isLocationVisible', '==', true),
+      firebaseDB.collection('pharmacies')
+        .where('status', 'in', ['active', 'approved'])
+        .where('isLocationVisible', '==', true),
+    ];
+    for (const query of queries) {
+      try {
+        const snap = await query.get();
+        snap.docs.forEach(doc => rows.push({ uid: doc.id, ...doc.data() }));
+      } catch (e) {}
+    }
+    return rows;
+  }
+
+  async function getVisiblePharmacies() {
+    const byUid = new Map();
+    (DB.getUsers?.() || []).forEach(u => byUid.set(u.uid, u));
+    DB.getAccounts().forEach(a => {
+      if (!byUid.has(a.uid)) byUid.set(a.uid, a);
+      else byUid.set(a.uid, { ...a, ...byUid.get(a.uid) });
+    });
+    (await getCloudVisiblePharmacies()).forEach(u => {
+      if (!u.uid) return;
+      byUid.set(u.uid, { ...(byUid.get(u.uid) || {}), ...u });
+    });
+    return [...byUid.values()].filter(u => {
+      const loc = u.pharmacyLocation;
+      const active = u.status === 'active' || (u.status === 'approved' && loc);
+      return u.role === 'pharmacist' &&
+        active &&
+        u.isLocationVisible === true &&
+        loc &&
+        !Number.isNaN(Number(loc.latitude)) &&
+        !Number.isNaN(Number(loc.longitude));
+    });
+  }
+
+  async function showVisiblePharmacies() {
+    if (!map) initMap({ locate: false });
+    await new Promise(r => setTimeout(r, 300));
+    clearMarkers();
+
+    const resultsDiv = document.getElementById('map-results');
+    const pharmacies = await getVisiblePharmacies();
+
+    if (!pharmacies.length) {
+      resultsDiv.innerHTML = `
+        <div class="glass" style="padding:1rem;border-radius:var(--radius-sm);">
+          <h4 style="margin-bottom:.5rem;">💊 Aucune pharmacie visible</h4>
+          <p style="font-size:.78rem;color:var(--text-muted);">
+            Les pharmacies apparaissent ici après qu'un pharmacien a ajouté sa localisation dans Paramètres > Localisation.
+          </p>
+        </div>`;
+      return;
+    }
+
+    pharmacies.forEach(ph => {
+      const loc = ph.pharmacyLocation;
+      const lat = Number(loc.latitude);
+      const lng = Number(loc.longitude);
+      const name = ph.pharmacy || ph.name || 'Pharmacie';
+      const contact = ph.phone || ph.matricule || ph.username || '';
+      const popup = `
+        <strong>${esc(name)}</strong><br>
+        ${contact ? `<span>${esc(contact)}</span><br>` : ''}
+        <button class="btn btn-ghost btn-xs" style="margin-top:.4rem"
+          onclick="MapModule.openDirections(${lat},${lng})">Itinéraire</button>`;
+      const marker = L.marker([lat, lng], {
+        icon: L.divIcon({
+          className: 'place-marker',
+          html: `<div style="background:#8B5CF6;color:white;padding:4px 8px;border-radius:12px;font-size:12px;font-weight:600;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,0.3);">💊 ${esc(name)}</div>`,
+          iconSize: [0, 0],
+        })
+      }).addTo(map).bindPopup(popup);
+      markers.push(marker);
+    });
+
+    resultsDiv.innerHTML = `
+      <div class="glass" style="padding:1rem;border-radius:var(--radius-sm);">
+        <h4 style="margin-bottom:.5rem;">💊 ${pharmacies.length} pharmacie(s) visible(s)</h4>
+        <div style="max-height:240px;overflow-y:auto;">
+          ${pharmacies.map(ph => {
+            const loc = ph.pharmacyLocation;
+            const name = ph.pharmacy || ph.name || 'Pharmacie';
+            const contact = ph.phone || ph.matricule || ph.username || '';
+            return `
+              <div style="padding:.55rem 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:.75rem;align-items:center;">
+                <div style="min-width:0">
+                  <strong style="font-size:.9rem;">${esc(name)}</strong>
+                  <p style="font-size:.75rem;color:var(--text-muted);">${contact ? esc(contact) : 'Contact non renseigné'}</p>
+                </div>
+                <div style="display:flex;gap:.35rem;flex-shrink:0">
+                  <button class="btn btn-sm btn-ghost" onclick="MapModule.focusOn(${Number(loc.latitude)}, ${Number(loc.longitude)})">📍</button>
+                  <button class="btn btn-sm btn-ghost" onclick="MapModule.openDirections(${Number(loc.latitude)}, ${Number(loc.longitude)})">Itinéraire</button>
+                </div>
+              </div>`;
+          }).join('')}
+        </div>
+      </div>`;
+
+    if (markers.length > 0) {
+      const group = new L.featureGroup(markers);
+      map.fitBounds(group.getBounds().pad(0.1));
+    }
+  }
+
+  function openDirections(lat, lng) {
+    const url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${lat},${lng}`)}`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+
   function focusOn(lat, lng) {
     if (map) {
       map.setView([lat, lng], 16);
@@ -146,6 +326,7 @@ window.MapModule = (() => {
       <div class="page-header">
         <h2>🗺️ ${window.I18n?.t ? I18n.t('map_title') : 'Établissements de Santé'}</h2>
         <div class="header-actions">
+          <button class="btn btn-ghost btn-sm" onclick="MapModule.showRegisteredEstablishments()">🏥 Enregistrés</button>
           <button class="btn btn-ghost btn-sm" onclick="MapModule.searchNearby('hospital')">🏥 Hôpitaux</button>
           <button class="btn btn-ghost btn-sm" onclick="MapModule.searchNearby('pharmacy')">💊 Pharmacies</button>
         </div>
@@ -157,6 +338,26 @@ window.MapModule = (() => {
     setTimeout(initMap, 50);
   }
 
+  function renderPharmacyMap(main) {
+    destroyMap();
+    main.innerHTML = `
+      <div class="page-header">
+        <h2>💊 Carte des pharmacies</h2>
+        <div class="header-actions">
+          <button class="btn btn-ghost btn-sm" onclick="MapModule.showVisiblePharmacies()">💊 Pharmacies visibles</button>
+          <button class="btn btn-ghost btn-sm" onclick="MapModule.searchNearby('pharmacy')">Autour de moi</button>
+        </div>
+      </div>
+      <div class="card" style="padding:.75rem">
+        <div id="map-container" style="height:420px;border-radius:var(--radius-sm);overflow:hidden"></div>
+      </div>
+      <div id="map-results" style="margin-top:1rem"></div>`;
+    setTimeout(() => {
+      initMap({ locate: false });
+      showVisiblePharmacies();
+    }, 50);
+  }
+
   function destroyMap() {
     if (map) {
       map.remove();
@@ -166,5 +367,9 @@ window.MapModule = (() => {
     }
   }
 
-  return { render, initMap, searchNearby, focusOn, destroyMap };
+  return {
+    render, renderPharmacyMap,
+    initMap, searchNearby, showRegisteredEstablishments, showVisiblePharmacies,
+    focusOn, openDirections, destroyMap
+  };
 })();

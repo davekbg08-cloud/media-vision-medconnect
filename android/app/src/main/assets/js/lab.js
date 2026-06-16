@@ -33,9 +33,44 @@ const LabModule = (() => {
     return `${p.firstname || p.prenom || ''} ${p.lastname || p.nom || ''}`.trim();
   }
 
+  function currentEstablishmentFields() {
+    const user = Auth.getUser() || {};
+    const h = window.HospitalsRegistry?.getCurrentHospital?.();
+    return {
+      created_by: user.uid || '',
+      hospital_id: h?.establishmentId || h?.hid || '',
+      establishmentId: h?.establishmentId || h?.hid || '',
+      establishmentName: h?.name || '',
+    };
+  }
+
+  function patientsForContext() {
+    const user = Auth.getUser() || {};
+    if (user.role === 'admin') return DB.getPatients();
+    return window.HospitalsRegistry?.getPatientsForContext?.(user.uid) ||
+      DB.getPatients().filter(p => !p.created_by || p.created_by === user.uid);
+  }
+
+  function labResultsForContext() {
+    const user = Auth.getUser() || {};
+    if (user.role === 'admin') return DB.getAllLabResults();
+    const patientIds = new Set(patientsForContext().map(p => p.id));
+    const h = window.HospitalsRegistry?.getCurrentHospital?.();
+    return DB.getAllLabResults().filter(l =>
+      patientIds.has(l.patient_id) ||
+      l.created_by === user.uid ||
+      (h && (l.establishmentId === h.establishmentId || l.hospital_id === h.establishmentId)));
+  }
+
+  function canUseLabResult(result) {
+    if (!result) return false;
+    if (Auth.getUser()?.role === 'admin') return true;
+    return labResultsForContext().some(l => l.lid === result.lid);
+  }
+
   /* ── RENDER (hospital side) ─────────────────────── */
   function renderForHospital(main) {
-    const results = DB.getAllLabResults().sort((a,b)=>b.date.localeCompare(a.date));
+    const results = labResultsForContext().sort((a,b)=>b.date.localeCompare(a.date));
     main.innerHTML = `
       <div class="page-header">
         <h2>🧪 Laboratoire</h2>
@@ -99,7 +134,7 @@ const LabModule = (() => {
 
   /* ── NEW RESULT FORM ────────────────────────────── */
   function openNew(prefillPatientId) {
-    const patients = DB.getPatients();
+    const patients = patientsForContext();
     App.openModal('🧪 Nouveau Résultat d\'Analyse', `
       <form onsubmit="LabModule.save(event)">
         <div class="form-group">
@@ -161,6 +196,7 @@ const LabModule = (() => {
       value:      document.getElementById('l-val').value,
       notes:      document.getElementById('l-notes').value,
       results,
+      ...currentEstablishmentFields(),
     });
 
     // Notify patient
@@ -180,6 +216,7 @@ const LabModule = (() => {
 
   function printResult(lid) {
     const l = DB.getAllLabResults().find(x => x.lid === lid); if (!l) return;
+    if (!canUseLabResult(l)) { App.toast('Accès analyse non autorisé.', 'error'); return; }
     const p = DB.getPatientById(l.patient_id);
     const w = window.open('', '_blank');
     if (!w) return;
@@ -199,6 +236,8 @@ const LabModule = (() => {
   }
 
   function deleteResult(lid) {
+    const l = DB.getAllLabResults().find(x => x.lid === lid);
+    if (!canUseLabResult(l)) { App.toast('Accès analyse non autorisé.', 'error'); return; }
     if (!confirm('Supprimer ce résultat ?')) return;
     DB.deleteLabResult(lid);
     App.toast('🗑️ Supprimé');

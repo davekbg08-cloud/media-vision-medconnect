@@ -14,6 +14,7 @@ const App = (() => {
       { label:'Vaccinations',      icon:'💉', s:'vaccinations'  },
       { label:'Rendez-vous',       icon:'📅', s:'appointments'  },
       { label:'Messagerie',        icon:'📨', s:'inbox'         },
+      { label:'Carte pharmacies',  icon:'💊', s:'pharmacy_map'  },
       { label:'Carte & GPS',       icon:'🗺️', s:'map'           },
       { label:'Paramètres',        icon:'⚙️', s:'settings'      },
     ],
@@ -34,6 +35,8 @@ const App = (() => {
       { label:'Vaccinations',      icon:'💉', s:'vaccinations'  },
       { label:'Rendez-vous',       icon:'📅', s:'appointments'  },
       { label:'Messagerie',        icon:'📨', s:'inbox'         },
+      { label:'Établissements',    icon:'🏥', s:'hospitals'     },
+      { label:'Carte pharmacies',  icon:'💊', s:'pharmacy_map'  },
       { label:'Carte & GPS',       icon:'🗺️', s:'map'           },
       { label:'Paramètres',        icon:'⚙️', s:'settings'      },
     ],
@@ -43,11 +46,13 @@ const App = (() => {
       { label:'Inventaire',        icon:'📦', s:'inventory'     },
       { label:'Ventes',            icon:'📈', s:'sales'         },
       { label:'Messagerie',        icon:'📨', s:'inbox'         },
+      { label:'Carte pharmacies',  icon:'💊', s:'pharmacy_map'  },
       { label:'Carte & GPS',       icon:'🗺️', s:'map'           },
       { label:'Paramètres',        icon:'⚙️', s:'settings'      },
     ],
     admin: () => [
       { label:'Administration',    icon:'⚙️', s:'dashboard'     },
+      { label:'Établissements',    icon:'🏥', s:'hospitals'     },
       { label:'Rendez-vous',       icon:'📅', s:'appointments'  },
       { label:'Carte & GPS',       icon:'🗺️', s:'map'           },
       { label:'Messagerie',        icon:'📨', s:'inbox'         },
@@ -68,6 +73,7 @@ const App = (() => {
       case 'appointments':  AppointmentsModule.render(main);                                break;
       case 'inbox':         Network.renderInbox(main);                                      break;
       case 'map':           MapModule.render(main);                                         break;
+      case 'pharmacy_map':  MapModule.renderPharmacyMap(main);                              break;
       case 'settings':      Settings.render(main);                                          break;
       case 'hospitals':     HospitalsRegistry.renderManagePage(main);                       break;
 
@@ -126,9 +132,9 @@ const App = (() => {
         ${item.s==='inbox' && unread>0 ? `<span class="badge-dot">${unread}</span>` : ''}
       </li>`).join('');
 
-    // Sélecteur hôpital pour médecins
+    // Sélecteur établissement pour médecins et infirmiers
     const hsc = document.getElementById('hospital-switcher-container');
-    if (hsc && role === 'doctor') {
+    if (hsc && (role === 'doctor' || role === 'nurse')) {
       hsc.innerHTML = HospitalsRegistry.renderHospitalSwitcher(user.uid);
     } else if (hsc) {
       hsc.innerHTML = '';

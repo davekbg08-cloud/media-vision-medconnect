@@ -1,33 +1,33 @@
 /* =====================================================
    MedConnect 2.0 — Configuration Firebase
 
-   ⚠️  REMPLACER LES VALEURS CI-DESSOUS
-       par celles de ton projet Firebase
-       (voir FIREBASE_SETUP.md pour les étapes)
+   Projet Firebase connecté : medconnect-e81ba
    ===================================================== */
 
 const firebaseConfig = {
-  apiKey:            "COLLE-TON-API-KEY-ICI",
-  authDomain:        "TON-PROJET.firebaseapp.com",
-  projectId:         "TON-PROJET-ID",
-  storageBucket:     "TON-PROJET.appspot.com",
-  messagingSenderId: "TON-SENDER-ID",
-  appId:             "TON-APP-ID"
+  apiKey:            "AIzaSyBXYiylAjJnR72IE_vUIrEZcjl1e_HBikI",
+  authDomain:        "medconnect-e81ba.firebaseapp.com",
+  projectId:         "medconnect-e81ba",
+  storageBucket:     "medconnect-e81ba.firebasestorage.app",
+  messagingSenderId: "341398935670",
+  appId:             "1:341398935670:web:59b3f9d9f56f95723ba757",
+  measurementId:     "G-5WJ8G0PKWW"
 };
 
 /* ── INITIALISATION ─────────────────────────────── */
 let firebaseDB   = null;
+let firebaseAuth = null;
 let firebaseReady = false;
 
 function initFirebase() {
   try {
-    // Vérifier si la config a été remplie
-    if (firebaseConfig.apiKey === "COLLE-TON-API-KEY-ICI") {
+    if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
       return;
     }
 
-    firebase.initializeApp(firebaseConfig);
+    if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
     firebaseDB    = firebase.firestore();
+    firebaseAuth  = firebase.auth ? firebase.auth() : null;
     firebaseReady = true;
 
     // Activer la persistance hors-ligne

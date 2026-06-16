@@ -1,0 +1,304 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function currentUserDoc() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
+    }
+
+    function hasCurrentUserDoc() {
+      return signedIn() && exists(currentUserDoc());
+    }
+
+    function currentRoleIs(role) {
+      return signedIn() && (
+        request.auth.token.role == role ||
+        (hasCurrentUserDoc() && get(currentUserDoc()).data.role == role)
+      );
+    }
+
+    function isAdmin() {
+      return signedIn() && (
+        request.auth.token.admin == true ||
+        request.auth.token.role == 'admin' ||
+        (hasCurrentUserDoc() && get(currentUserDoc()).data.role == 'admin')
+      );
+    }
+
+    function ownsUid(uid) {
+      return signedIn() && uid == request.auth.uid;
+    }
+
+    function uidIn(listValue) {
+      return signedIn() && listValue is list && request.auth.uid in listValue;
+    }
+
+    function ownsPatientData(data) {
+      return signedIn() && (
+        data.uid == request.auth.uid ||
+        data.patientUid == request.auth.uid ||
+        data.patient_uid == request.auth.uid ||
+        data.ownerUid == request.auth.uid
+      );
+    }
+
+    function doctorCanRead(data) {
+      return currentRoleIs('doctor') && (
+        data.created_by == request.auth.uid ||
+        data.doctorUid == request.auth.uid ||
+        data.doctor_uid == request.auth.uid ||
+        uidIn(data.doctorUids) ||
+        uidIn(data.authorizedDoctorUids)
+      );
+    }
+
+    function nurseCanRead(data) {
+      return currentRoleIs('nurse') && (
+        data.nurseUid == request.auth.uid ||
+        data.nurse_uid == request.auth.uid ||
+        uidIn(data.nurseUids) ||
+        uidIn(data.authorizedNurseUids)
+      );
+    }
+
+    function pharmacyCanReadPrescription(data) {
+      return currentRoleIs('pharmacist') && (
+        data.pharmacyUid == request.auth.uid ||
+        data.pharmacy_uid == request.auth.uid ||
+        data.receivedByPharmacyUid == request.auth.uid ||
+        uidIn(data.pharmacyUids)
+      );
+    }
+
+    function canReadMedicalData(data) {
+      return isAdmin() ||
+        ownsPatientData(data) ||
+        doctorCanRead(data) ||
+        nurseCanRead(data);
+    }
+
+    function publicUserRole(role) {
+      return role in ['patient', 'doctor', 'nurse', 'pharmacist'];
+    }
+
+    function hasNoSecretFields(data) {
+      return !data.keys().hasAny(['admin', 'password', 'passwordHash']);
+    }
+
+    function visiblePharmacyProfile(data) {
+      return data.role == 'pharmacist' &&
+        data.isLocationVisible == true &&
+        data.status in ['active', 'approved'];
+    }
+
+    function safeSelfUserCreate(uid) {
+      return ownsUid(uid) &&
+        request.resource.data.uid == uid &&
+        publicUserRole(request.resource.data.role) &&
+        request.resource.data.status == 'pending' &&
+        hasNoSecretFields(request.resource.data);
+    }
+
+    function safeSelfUserUpdate(uid) {
+      return ownsUid(uid) &&
+        request.resource.data.uid == uid &&
+        request.resource.data.role == resource.data.role &&
+        request.resource.data.status == resource.data.status &&
+        hasNoSecretFields(request.resource.data);
+    }
+
+    match /users/{uid} {
+      allow create: if isAdmin() || safeSelfUserCreate(uid);
+      allow read: if isAdmin() ||
+        ownsUid(uid) ||
+        visiblePharmacyProfile(resource.data);
+      allow update: if isAdmin() || safeSelfUserUpdate(uid);
+      allow delete: if isAdmin();
+    }
+
+    match /patients/{patientId} {
+      allow read: if canReadMedicalData(resource.data);
+      allow create: if isAdmin() || currentRoleIs('doctor') || currentRoleIs('nurse');
+      allow update, delete: if isAdmin() || doctorCanRead(resource.data);
+    }
+
+    match /doctors/{uid} {
+      allow read: if signedIn();
+      allow create: if isAdmin() ||
+        (
+          ownsUid(uid) &&
+          request.resource.data.uid == uid &&
+          request.resource.data.role == 'doctor' &&
+          request.resource.data.status == 'pending' &&
+          hasNoSecretFields(request.resource.data)
+        );
+      allow update: if isAdmin() ||
+        (
+          ownsUid(uid) &&
+          request.resource.data.role == resource.data.role &&
+          request.resource.data.status == resource.data.status &&
+          hasNoSecretFields(request.resource.data)
+        );
+      allow delete: if isAdmin();
+    }
+
+    match /nurses/{uid} {
+      allow read: if signedIn();
+      allow create: if isAdmin() ||
+        (
+          ownsUid(uid) &&
+          request.resource.data.uid == uid &&
+          request.resource.data.role == 'nurse' &&
+          request.resource.data.status == 'pending' &&
+          hasNoSecretFields(request.resource.data)
+        );
+      allow update: if isAdmin() ||
+        (
+          ownsUid(uid) &&
+          request.resource.data.role == resource.data.role &&
+          request.resource.data.status == resource.data.status &&
+          hasNoSecretFields(request.resource.data)
+        );
+      allow delete: if isAdmin();
+    }
+
+    match /pharmacies/{uid} {
+      allow read: if isAdmin() ||
+        ownsUid(uid) ||
+        (
+          resource.data.isLocationVisible == true &&
+          resource.data.status in ['active', 'approved']
+        );
+      allow create: if isAdmin() ||
+        (
+          ownsUid(uid) &&
+          request.resource.data.uid == uid &&
+          request.resource.data.role == 'pharmacist' &&
+          request.resource.data.status == 'pending' &&
+          hasNoSecretFields(request.resource.data)
+        );
+      allow update: if isAdmin() ||
+        (
+          ownsUid(uid) &&
+          request.resource.data.role == resource.data.role &&
+          request.resource.data.status == resource.data.status &&
+          hasNoSecretFields(request.resource.data)
+        );
+      allow delete: if isAdmin();
+    }
+
+    match /hospitals/{hospitalId} {
+      allow read: if signedIn() && (
+        resource.data.status in ['active', 'approved'] ||
+        uidIn(resource.data.staffUids) ||
+        resource.data.owner_uid == request.auth.uid ||
+        isAdmin()
+      );
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /medical_records/{recordId} {
+      allow read: if canReadMedicalData(resource.data);
+      allow create: if isAdmin() || currentRoleIs('doctor') || currentRoleIs('nurse');
+      allow update, delete: if isAdmin() || doctorCanRead(resource.data);
+    }
+
+    match /prescriptions/{prescriptionId} {
+      allow read: if isAdmin() ||
+        ownsPatientData(resource.data) ||
+        doctorCanRead(resource.data) ||
+        pharmacyCanReadPrescription(resource.data);
+      allow create: if isAdmin() || currentRoleIs('doctor');
+      allow update: if isAdmin() || doctorCanRead(resource.data) || pharmacyCanReadPrescription(resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /appointments/{appointmentId} {
+      allow read: if canReadMedicalData(resource.data);
+      allow create: if isAdmin() || currentRoleIs('doctor') || currentRoleIs('nurse') || ownsPatientData(request.resource.data);
+      allow update, delete: if isAdmin() || doctorCanRead(resource.data) || ownsPatientData(resource.data);
+    }
+
+    match /notifications/{notificationId} {
+      allow read, update: if isAdmin() ||
+        (
+          signedIn() &&
+          (
+            resource.data.to_id == request.auth.uid ||
+            resource.data.recipientUid == request.auth.uid ||
+            resource.data.userUid == request.auth.uid
+          )
+        );
+      allow create: if signedIn();
+      allow delete: if isAdmin();
+    }
+
+    match /registration_requests/{requestId} {
+      allow create: if signedIn() &&
+        request.resource.data.requesterUid == request.auth.uid &&
+        request.resource.data.status == 'pending';
+      allow read: if isAdmin() ||
+        (signedIn() && resource.data.requesterUid == request.auth.uid);
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /establishments/{establishmentId} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /affiliation_requests/{requestId} {
+      allow create: if signedIn() &&
+        request.resource.data.requesterUid == request.auth.uid &&
+        request.resource.data.status == 'pending';
+      allow read: if isAdmin() ||
+        (signedIn() && resource.data.requesterUid == request.auth.uid);
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /mc_accounts/{docId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /mc_patients/{docId} {
+      allow read: if canReadMedicalData(resource.data);
+      allow write: if isAdmin();
+    }
+
+    match /mc_prescriptions/{docId} {
+      allow read: if isAdmin() || ownsPatientData(resource.data) || doctorCanRead(resource.data) || pharmacyCanReadPrescription(resource.data);
+      allow write: if isAdmin();
+    }
+
+    match /mc_appointments/{docId} {
+      allow read: if canReadMedicalData(resource.data);
+      allow write: if isAdmin();
+    }
+
+    match /mc_messages/{docId} {
+      allow read, update: if isAdmin() || (signedIn() && resource.data.to_id == request.auth.uid);
+      allow create: if signedIn();
+      allow delete: if isAdmin();
+    }
+
+    match /mc_hospitals/{docId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    match /mc_affiliations/{docId} {
+      allow read: if isAdmin() || (signedIn() && resource.data.requesterUid == request.auth.uid);
+      allow write: if isAdmin();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -341,6 +341,16 @@ const PatientPortal = (() => {
 
   function printRx(pid) {
     const rx = DB.getPrescriptions().find(x=>x.pid===pid); if (!rx) return;
+    const user = Auth.getUser();
+    const myPatientId = localStorage.getItem('mc_my_patient_id');
+    if (user?.role === 'patient' && String(rx.patient_id) !== String(myPatientId)) {
+      App.toast('Accès ordonnance non autorisé.', 'error');
+      return;
+    }
+    if (user?.role !== 'patient' && user?.role !== 'admin' && !ACL.canAccessPatient(user, rx.patient_id)) {
+      App.toast('Accès ordonnance non autorisé.', 'error');
+      return;
+    }
     const p  = DB.getPatientById(rx.patient_id);
     const w  = window.open('', '_blank');
     w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Ordonnance</title>

@@ -126,8 +126,20 @@ const Network = (() => {
   }
 
   /* ── DOCTOR → PHARMACY ─────────────────────────── */
+  function canSendPrescription(rx) {
+    const user = Auth.getUser();
+    if (!user || !rx) return false;
+    if (user.role === 'admin') return true;
+    if (rx.created_by === user.uid || rx.doctor_uid === user.uid) return true;
+    return ACL.canAccessPatient(user, rx.patient_id || rx.patientId);
+  }
+
   function sendPrescriptionToPharmacy(prescriptionId, pharmacyName) {
     const rx = DB.getPrescriptions().find(p => p.pid === prescriptionId || p.code === prescriptionId); if (!rx) return;
+    if (!canSendPrescription(rx)) {
+      App.toast('Accès ordonnance non autorisé.', 'error');
+      return;
+    }
     const pt = DB.getPatientById(rx.patient_id || rx.patientId);
     const patientId = rx.patient_id || rx.patientId || rx.patientNom || '—';
     const body = [

@@ -1,7 +1,7 @@
 /* =====================================================
    MedConnect 2.0 — Service Worker
    ===================================================== */
-const CACHE = 'medconnect-v2.1';
+const CACHE = 'medconnect-v2.3';
 
 const ASSETS = [
   './', './index.html', './css/style.css',

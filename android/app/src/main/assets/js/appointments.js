@@ -16,10 +16,51 @@ const AppointmentsModule = (() => {
     return `${p.firstname || p.prenom || ''} ${p.lastname || p.nom || ''}`.trim();
   }
 
+  function patientsForContext() {
+    const user = Auth.getUser() || {};
+    if (user.role === 'admin') return DB.getPatients();
+    if (user.role === 'patient') {
+      const pid = localStorage.getItem('mc_my_patient_id');
+      return pid ? DB.getPatients().filter(p => p.id === pid) : [];
+    }
+    return window.HospitalsRegistry?.getPatientsForContext?.(user.uid) ||
+      DB.getPatients().filter(p => !p.created_by || p.created_by === user.uid);
+  }
+
+  function appointmentsForContext() {
+    const user = Auth.getUser() || {};
+    if (user.role === 'admin') return DB.getAppointments();
+    if (user.role === 'patient') {
+      const pid = localStorage.getItem('mc_my_patient_id');
+      return DB.getAppointments().filter(a => String(a.patient_id) === String(pid));
+    }
+    return window.HospitalsRegistry?.getAppointmentsForContext?.(user.uid) ||
+      DB.getAppointments().filter(a => {
+        const patientIds = new Set(patientsForContext().map(p => p.id));
+        return patientIds.has(a.patient_id) || a.created_by === user.uid || a.doctor_uid === user.uid;
+      });
+  }
+
+  function canUseAppointment(aid) {
+    return appointmentsForContext().some(a => a.aid === aid);
+  }
+
+  function currentEstablishmentFields() {
+    const user = Auth.getUser() || {};
+    const h = window.HospitalsRegistry?.getCurrentHospital?.();
+    return {
+      created_by: user.uid || '',
+      doctor_uid: user.role === 'doctor' ? user.uid : '',
+      hospital_id: h?.establishmentId || h?.hid || '',
+      establishmentId: h?.establishmentId || h?.hid || '',
+      establishmentName: h?.name || '',
+    };
+  }
+
   function render(main, filterPatientId) {
     const apts = filterPatientId
       ? DB.getAppointments().filter(a => String(a.patient_id) === String(filterPatientId))
-      : DB.getAppointments();
+      : appointmentsForContext();
     const today = new Date().toISOString().slice(0,10);
     const upcoming = apts.filter(a => a.date >= today && a.status !== 'cancelled').sort((a,b)=>a.date.localeCompare(b.date));
     const past     = apts.filter(a => a.date < today  || a.status === 'cancelled').sort((a,b)=>b.date.localeCompare(a.date));
@@ -75,7 +116,7 @@ const AppointmentsModule = (() => {
   }
 
   function openNew(prefillPatientId) {
-    const patients  = DB.getPatients();
+    const patients  = patientsForContext();
     const tomorrow  = new Date(Date.now()+86400000).toISOString().slice(0,10);
     App.openModal('📅 Nouveau Rendez-vous', `
       <form onsubmit="AppointmentsModule.save(event)">
@@ -108,6 +149,7 @@ const AppointmentsModule = (() => {
       reason:     document.getElementById('apt-reason').value,
       notes:      document.getElementById('apt-notes').value,
       status:     'pending',
+      ...currentEstablishmentFields(),
     });
     if (window.Network?.notify) {
       Network.notify({
@@ -123,12 +165,14 @@ const AppointmentsModule = (() => {
   }
 
   function setStatus(aid, status) {
+    if (!canUseAppointment(aid)) { App.toast('Accès rendez-vous non autorisé.', 'error'); return; }
     DB.updateAppointment(aid, { status });
     App.toast(`RDV → ${STATUS[status].label}`);
     if (window.App?.navigateTo) App.navigateTo('appointments');
   }
 
   function deleteApt(aid) {
+    if (!canUseAppointment(aid)) { App.toast('Accès rendez-vous non autorisé.', 'error'); return; }
     if (!confirm('Supprimer ce rendez-vous ?')) return;
     DB.deleteAppointment(aid);
     App.toast('🗑️ Supprimé');

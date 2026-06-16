@@ -1,67 +1,69 @@
-# 🔥 MedConnect — Configuration Firebase
+# MedConnect — Configuration Firebase
 
-## ÉTAPE 1 — Créer le projet Firebase (5 min)
+## Statut actuel
 
-1. Va sur **https://console.firebase.google.com**
-2. Clique **Créer un projet**
-3. Nom du projet : `medconnect-app`
-4. Google Analytics : Désactiver (pas nécessaire)
-5. Clique **Créer le projet**
+Le projet est connecté à Firebase :
 
----
+- Projet : `medconnect-e81ba`
+- Firestore : base `(default)` en `europe-west1`
+- Application Web : `medconnect-web`
+- Authentification : Email/Password à activer dans la console si ce n'est pas déjà fait
 
-## ÉTAPE 2 — Activer Firestore
+## Firebase Authentication
 
-1. Dans le menu gauche → **Firestore Database**
-2. Clique **Créer une base de données**
-3. Choisir **Mode production**
-4. Région : `europe-west1` (ou la plus proche de toi)
-5. Clique **Activer**
+Dans la console Firebase :
 
----
+1. Ouvre **Authentication**
+2. Clique **Commencer**
+3. Onglet **Sign-in method**
+4. Active **Email/Password**
+5. Crée ensuite un compte administrateur réel et ajoute-lui un rôle `admin` dans `users/{uid}`.
 
-## ÉTAPE 3 — Récupérer la configuration
+## Règles et index Firestore
 
-1. Paramètres du projet (⚙️) → **Paramètres du projet**
-2. Onglet **Général** → Descendre jusqu'à **Vos applications**
-3. Clique l'icône **</>** (Web)
-4. Nom de l'app : `medconnect-web`
-5. Clique **Enregistrer l'application**
-6. Copie le bloc `firebaseConfig` qui apparaît
+Les fichiers sont déjà présents dans le projet :
 
----
+- `firestore.rules`
+- `firestore.indexes.json`
+- `firebase.json`
 
-## ÉTAPE 4 — Coller la config dans ton projet
+Avec Firebase CLI :
 
-Ouvre le fichier `js/firebase-config.js` et remplace :
-
-```javascript
-// REMPLACER CES VALEURS PAR CELLES DE TON PROJET FIREBASE :
-const firebaseConfig = {
-  apiKey:            "COLLE-TON-API-KEY-ICI",
-  authDomain:        "TON-PROJET.firebaseapp.com",
-  projectId:         "TON-PROJET",
-  storageBucket:     "TON-PROJET.appspot.com",
-  messagingSenderId: "TON-SENDER-ID",
-  appId:             "TON-APP-ID"
-};
+```bash
+firebase login
+firebase use --add
+firebase deploy --only firestore:rules,firestore:indexes
 ```
 
----
+## Collections utilisées
 
-## ÉTAPE 5 — Règles de sécurité Firestore
+Firestore crée une collection au premier document écrit. MedConnect écrit maintenant dans :
 
-1. Firestore → onglet **Règles**
-2. Remplacer par le contenu du fichier `firestore.rules`
-3. Cliquer **Publier**
+- `users`
+- `patients`
+- `doctors`
+- `nurses`
+- `pharmacies`
+- `hospitals`
+- `medical_records`
+- `prescriptions`
+- `appointments`
+- `notifications`
+- `registration_requests`
+- `establishments`
+- `affiliation_requests`
 
----
+Les anciennes collections `mc_*` restent présentes pour compatibilité locale pendant la migration.
 
-## ÉTAPE 6 — Déployer sur Netlify
+## Déployer sur Firebase Hosting ou Netlify
 
-1. Va sur **netlify.com**
-2. Drag & drop le dossier `medconnect/`
-3. L'app est en ligne avec Firebase !
+Firebase Hosting :
+
+```bash
+firebase deploy --only hosting
+```
+
+Netlify reste possible, mais les règles/index Firestore doivent toujours être déployés via Firebase CLI ou la console Firebase.
 
 ---
 

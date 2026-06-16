@@ -2,6 +2,7 @@ package com.medconnect.app;
 
 import android.Manifest;
 import android.content.pm.PackageManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.webkit.GeolocationPermissions;
 import android.webkit.PermissionRequest;
@@ -36,8 +37,11 @@ public class MainActivity extends AppCompatActivity {
         webSettings.setDomStorageEnabled(true);
         webSettings.setDatabaseEnabled(true);
         webSettings.setAllowFileAccess(true);
-        webSettings.setAllowContentAccess(true);
+        webSettings.setAllowContentAccess(false);
         webSettings.setGeolocationEnabled(true);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            webSettings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+        }
 
         myWebView.setWebViewClient(new WebViewClient() {
             @Override

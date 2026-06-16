@@ -59,6 +59,7 @@ const Settings = (() => {
       </div>
 
       ${user?.role === 'patient' ? renderPrivacySection(user) : ''}
+      ${user?.role === 'pharmacist' ? renderPharmacyLocationSection(user) : ''}
       ${user?.role === 'admin'   ? renderAdminSection()       : ''}
 
       <!-- COMPTE -->
@@ -83,6 +84,102 @@ const Settings = (() => {
           Aucune donnée envoyée à des serveurs externes.
         </p>
       </div>`;
+  }
+
+  /* ── SECTION LOCALISATION (pharmacien) ─────────── */
+  function getUserProfile(user) {
+    return (DB.getUsers?.() || []).find(u => u.uid === user?.uid) ||
+      DB.getAccounts().find(a => a.uid === user?.uid) ||
+      user || {};
+  }
+
+  function renderPharmacyLocationSection(user) {
+    const profile = getUserProfile(user);
+    const loc = profile.pharmacyLocation || user?.pharmacyLocation || null;
+    const hasLoc = loc && !Number.isNaN(Number(loc.latitude)) && !Number.isNaN(Number(loc.longitude));
+    const visible = profile.isLocationVisible !== false && hasLoc;
+
+    return `
+      <div class="settings-section">
+        <h3>📍 Localisation</h3>
+        <p class="settings-desc">
+          Enregistrez la position GPS de votre pharmacie pour l'afficher sur la carte des pharmacies.
+        </p>
+        <div class="settings-current">
+          <span class="currency-badge">📍</span>
+          <div>
+            <strong>${hasLoc ? `${Number(loc.latitude).toFixed(5)}, ${Number(loc.longitude).toFixed(5)}` : 'Aucune localisation enregistrée'}</strong>
+            <br><small style="color:var(--text-muted)">
+              ${hasLoc && loc?.updatedAt ? `Mise à jour : ${loc.updatedAt.slice(0,16).replace('T',' ')}` : 'Permission GPS requise'}
+            </small>
+          </div>
+        </div>
+        <div class="settings-row">
+          <span>Visible sur la carte</span>
+          <span class="privacy-ok" style="${visible?'':'color:var(--accent);border-color:rgba(245,158,11,.25);background:rgba(245,158,11,.08)'}">
+            ${visible ? 'Oui' : 'Non'}
+          </span>
+        </div>
+        <button class="btn btn-primary btn-sm" style="margin-top:.75rem;width:100%"
+          onclick="Settings.updatePharmacyLocation()">
+          📍 Ajouter / mettre à jour ma localisation
+        </button>
+      </div>`;
+  }
+
+  function updateSessionUser(data) {
+    const user = Auth.getUser();
+    if (!user) return;
+    sessionStorage.setItem('mc_user', JSON.stringify({ ...user, ...data }));
+  }
+
+  function updatePharmacyLocation() {
+    const user = Auth.getUser();
+    if (!user || user.role !== 'pharmacist') {
+      App.toast('Seul le pharmacien connecté peut modifier sa localisation.', 'error');
+      return;
+    }
+    if (!navigator.geolocation) {
+      App.toast('GPS indisponible sur cet appareil.', 'error');
+      return;
+    }
+
+    App.toast('📍 Demande de permission GPS...');
+    navigator.geolocation.getCurrentPosition(pos => {
+      const location = {
+        latitude: pos.coords.latitude,
+        longitude: pos.coords.longitude,
+        updatedAt: new Date().toISOString(),
+      };
+      const patch = {
+        uid: user.uid,
+        role: 'pharmacist',
+        name: user.name || '',
+        phone: user.phone || '',
+        matricule: user.matricule || user.username || '',
+        pharmacy: user.pharmacy || '',
+        pharmacyLocation: location,
+        isLocationVisible: true,
+      };
+
+      DB.upsertUserProfile?.(user.uid, patch);
+
+      const accounts = DB.getAccounts();
+      const idx = accounts.findIndex(a => a.uid === user.uid);
+      if (idx !== -1) {
+        accounts[idx] = { ...accounts[idx], ...patch };
+        DB.saveAccounts(accounts);
+      }
+
+      updateSessionUser(patch);
+      App.toast('✅ Localisation de la pharmacie enregistrée.');
+      Settings.render(document.getElementById('main-content'));
+    }, err => {
+      const msg = err.code === err.PERMISSION_DENIED
+        ? 'Permission GPS refusée.'
+        : 'Impossible de récupérer la localisation GPS.';
+      App.toast(msg, 'error');
+    }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 });
   }
 
   /* ── SECTION CONFIDENTIALITÉ (patient) ─────────── */
@@ -259,7 +356,7 @@ const Settings = (() => {
     Settings.render(document.getElementById('main-content'));
   }
 
-  return { render, openAddDoctor, saveDoctor, openAddPharmacist, savePharmacist };
+  return { render, updatePharmacyLocation, openAddDoctor, saveDoctor, openAddPharmacist, savePharmacist };
 })();
 
 window.Settings = Settings;

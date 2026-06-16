@@ -42,6 +42,50 @@ const DB = (() => {
     } catch (e) {}
   }
 
+  function storeSnapshot(key, snap) {
+    store(key, snap.docs.map(d => d.data()));
+  }
+
+  function listen(query, onData) {
+    try {
+      query.onSnapshot(onData, () => {});
+    } catch (e) {}
+  }
+
+  function roleCollection(role) {
+    return {
+      patient: 'patients',
+      doctor: 'doctors',
+      nurse: 'nurses',
+      pharmacist: 'pharmacies',
+      pharmacy: 'pharmacies',
+    }[role] || null;
+  }
+
+  function publicAccountProfile(account) {
+    const profile = { ...account };
+    delete profile.password;
+    delete profile.passwordHash;
+    return {
+      ...profile,
+      uid: account.uid,
+      role: account.role,
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  function mirrorAccountProfile(account) {
+    if (!account?.uid) return;
+    const profile = publicAccountProfile(account);
+    _push('users', account.uid, profile);
+    const collection = roleCollection(account.role);
+    if (collection) _push(collection, account.uid, profile);
+  }
+
+  function professionalNumber(account) {
+    return account?.order_num || account?.matricule || account?.username || '';
+  }
+
   /* ── SYNC AU DÉMARRAGE ───────────────────────────── */
   async function syncFromFirebase() {
     if (!firebaseReady || !firebaseDB) return;
@@ -49,7 +93,12 @@ const DB = (() => {
       'mc_patients','mc_accounts','mc_consultations','mc_prescriptions',
       'mc_appointments','mc_vaccinations','mc_lab_results',
       'mc_medicines','mc_sales','mc_messages','mc_consents',
+      'users',
+      'patients','doctors','nurses','pharmacies','hospitals',
+      'medical_records','prescriptions','appointments','notifications',
+      'registration_requests',
       'mc_hospitals','mc_affiliations',
+      'establishments','affiliation_requests',
       'mc_verified_doctors','mc_verified_pharms','mc_verified_nurses',
     ];
     for (const col of collections) {
@@ -67,20 +116,38 @@ const DB = (() => {
   function setupRealtimeListeners() {
     if (!firebaseReady || !firebaseDB) return;
     // Patients
-    firebaseDB.collection('mc_patients').onSnapshot(snap => {
-      if (!snap.empty) { store('mc_patients', snap.docs.map(d => d.data())); }
+    listen(firebaseDB.collection('mc_patients'), snap => {
+      if (!snap.empty) storeSnapshot('mc_patients', snap);
     });
     // Messages
-    firebaseDB.collection('mc_messages').onSnapshot(snap => {
-      if (!snap.empty) { store('mc_messages', snap.docs.map(d => d.data())); }
+    listen(firebaseDB.collection('mc_messages'), snap => {
+      if (!snap.empty) storeSnapshot('mc_messages', snap);
     });
     // Rendez-vous
-    firebaseDB.collection('mc_appointments').onSnapshot(snap => {
-      if (!snap.empty) { store('mc_appointments', snap.docs.map(d => d.data())); }
+    listen(firebaseDB.collection('mc_appointments'), snap => {
+      if (!snap.empty) storeSnapshot('mc_appointments', snap);
     });
     // Comptes
-    firebaseDB.collection('mc_accounts').onSnapshot(snap => {
-      if (!snap.empty) { store('mc_accounts', snap.docs.map(d => d.data())); }
+    listen(firebaseDB.collection('mc_accounts'), snap => {
+      if (!snap.empty) storeSnapshot('mc_accounts', snap);
+    });
+    // Profils pharmacies visibles publiquement
+    listen(firebaseDB.collection('users')
+      .where('role', '==', 'pharmacist')
+      .where('status', 'in', ['active', 'approved'])
+      .where('isLocationVisible', '==', true), snap => {
+        storeSnapshot('users', snap);
+    });
+    // Établissements
+    listen(firebaseDB.collection('establishments'), snap => {
+      if (!snap.empty) storeSnapshot('establishments', snap);
+    });
+    // Demandes d'affiliation
+    listen(firebaseDB.collection('affiliation_requests'), snap => {
+      if (!snap.empty) storeSnapshot('affiliation_requests', snap);
+    });
+    listen(firebaseDB.collection('registration_requests'), snap => {
+      if (!snap.empty) storeSnapshot('registration_requests', snap);
     });
   }
 
@@ -100,6 +167,18 @@ const DB = (() => {
     const p = { ...data, id: generatePatientId(data.country_code), created_at: new Date().toISOString() };
     list.push(p); store('mc_patients', list);
     _push('mc_patients', p.id, p);
+    _push('patients', p.id, p);
+    _push('medical_records', p.id, {
+      recordId: p.id,
+      patientId: p.id,
+      patientUid: p.uid || p.patient_uid || '',
+      created_by: p.created_by || '',
+      establishmentId: p.establishmentId || p.hospital_id || '',
+      type: 'patient_record',
+      status: 'active',
+      createdAt: p.created_at,
+      updatedAt: p.created_at,
+    });
     return p;
   }
 
@@ -110,6 +189,17 @@ const DB = (() => {
       list[idx] = { ...list[idx], ...data, id, updated_at: new Date().toISOString() };
       store('mc_patients', list);
       _push('mc_patients', id, list[idx]);
+      _push('patients', id, list[idx]);
+      _push('medical_records', id, {
+        recordId: id,
+        patientId: id,
+        patientUid: list[idx].uid || list[idx].patient_uid || '',
+        created_by: list[idx].created_by || '',
+        establishmentId: list[idx].establishmentId || list[idx].hospital_id || '',
+        type: 'patient_record',
+        status: 'active',
+        updatedAt: list[idx].updated_at,
+      });
       return list[idx];
     }
     return null;
@@ -123,6 +213,8 @@ const DB = (() => {
     store('mc_lab_results',    getAllLabResults().filter(l => l.patient_id !== id));
     store('mc_appointments',   getAppointments().filter(a => a.patient_id !== id));
     _delete('mc_patients', id);
+    _delete('patients', id);
+    _delete('medical_records', id);
   }
 
   function getPatientById(id) { return getPatients().find(p => p.id === id) || null; }
@@ -141,7 +233,60 @@ const DB = (() => {
      COMPTES
   ══════════════════════════════════════════════════ */
   function getAccounts()    { return load('mc_accounts'); }
-  function saveAccounts(l)  { store('mc_accounts', l); l.forEach(a => _push('mc_accounts', a.uid, a)); }
+  function saveAccounts(l)  {
+    store('mc_accounts', l);
+    l.forEach(a => {
+      _push('mc_accounts', a.uid, a);
+      mirrorAccountProfile(a);
+    });
+  }
+
+  function getUsers()       { return load('users'); }
+  function saveUsers(l)     {
+    store('users', l);
+    l.forEach(u => {
+      _push('users', u.uid, u);
+      const collection = roleCollection(u.role);
+      if (collection) _push(collection, u.uid, u);
+    });
+  }
+
+  function getRegistrationRequests() { return load('registration_requests'); }
+  function saveRegistrationRequests(l) {
+    store('registration_requests', l);
+    l.forEach(r => _push('registration_requests', r.requestId, r));
+  }
+
+  function createRegistrationRequest(account) {
+    const list = getRegistrationRequests();
+    const requestId = `REG${Date.now()}`;
+    const req = {
+      requestId,
+      requesterUid: account.uid,
+      requesterName: account.name || '',
+      requesterRole: account.role,
+      professionalNumber: professionalNumber(account),
+      email: account.email || '',
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    list.push(req);
+    saveRegistrationRequests(list);
+    return req;
+  }
+
+  function upsertUserProfile(uid, data) {
+    const users = getUsers();
+    const idx = users.findIndex(u => u.uid === uid);
+    const current = idx !== -1 ? users[idx] : { uid };
+    const next = { ...current, ...data, uid, updatedAt: new Date().toISOString() };
+    if (idx === -1) users.push(next);
+    else users[idx] = next;
+    saveUsers(users);
+    _push('users', uid, next);
+    return next;
+  }
 
   /* ══════════════════════════════════════════════════
      CONSULTATIONS
@@ -153,6 +298,14 @@ const DB = (() => {
     const c = { ...data, cid: `C${Date.now()}`, date: data.date || today() };
     list.push(c); store('mc_consultations', list);
     _push('mc_consultations', c.cid, c);
+    _push('medical_records', c.cid, {
+      ...c,
+      recordId: c.cid,
+      type: 'consultation',
+      patientId: c.patient_id,
+      patientUid: c.patient_uid || '',
+      updatedAt: new Date().toISOString(),
+    });
     return c;
   }
 
@@ -175,6 +328,7 @@ const DB = (() => {
     const p = { ...data, pid: `P${Date.now()}`, date: data.date || today() };
     list.push(p); store('mc_prescriptions', list);
     _push('mc_prescriptions', p.pid, p);
+    _push('prescriptions', p.pid, p);
     return p;
   }
 
@@ -192,6 +346,7 @@ const DB = (() => {
     const a = { ...data, aid: `A${Date.now()}`, created_at: new Date().toISOString() };
     list.push(a); store('mc_appointments', list);
     _push('mc_appointments', a.aid, a);
+    _push('appointments', a.aid, a);
     return a;
   }
 
@@ -202,12 +357,14 @@ const DB = (() => {
       list[idx] = { ...list[idx], ...data, aid };
       store('mc_appointments', list);
       _push('mc_appointments', aid, list[idx]);
+      _push('appointments', aid, list[idx]);
     }
   }
 
   function deleteAppointment(aid) {
     store('mc_appointments', getAppointments().filter(a => a.aid !== aid));
     _delete('mc_appointments', aid);
+    _delete('appointments', aid);
   }
 
   /* ══════════════════════════════════════════════════
@@ -242,6 +399,14 @@ const DB = (() => {
     const l = { ...data, lid: `L${Date.now()}`, date: data.date || today() };
     list.push(l); store('mc_lab_results', list);
     _push('mc_lab_results', l.lid, l);
+    _push('medical_records', l.lid, {
+      ...l,
+      recordId: l.lid,
+      type: 'lab_result',
+      patientId: l.patient_id,
+      patientUid: l.patient_uid || '',
+      updatedAt: new Date().toISOString(),
+    });
     return l;
   }
 
@@ -252,6 +417,7 @@ const DB = (() => {
   function deleteLabResult(lid) {
     store('mc_lab_results', getAllLabResults().filter(l => l.lid !== lid));
     _delete('mc_lab_results', lid);
+    _delete('medical_records', lid);
   }
 
   /* ══════════════════════════════════════════════════
@@ -314,7 +480,10 @@ const DB = (() => {
   function getMessages()    { return load('mc_messages'); }
   function saveMessages(l)  {
     store('mc_messages', l);
-    l.forEach(m => _push('mc_messages', m.mid, m));
+    l.forEach(m => {
+      _push('mc_messages', m.mid, m);
+      _push('notifications', m.mid, m);
+    });
   }
 
   /* ══════════════════════════════════════════════════
@@ -355,7 +524,8 @@ const DB = (() => {
 
   return {
     init, syncFromFirebase, generatePatientId,
-    getAccounts, saveAccounts,
+    getAccounts, saveAccounts, getUsers, saveUsers, upsertUserProfile,
+    getRegistrationRequests, saveRegistrationRequests, createRegistrationRequest,
     getPatients, addPatient, updatePatient, deletePatient, getPatientById, searchPatients,
     getConsultations, addConsultation, getPatientConsultations, deleteConsultation,
     getPrescriptions, addPrescription, getPatientPrescriptions,

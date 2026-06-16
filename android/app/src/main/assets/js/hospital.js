@@ -6,6 +6,68 @@ const HospitalPortal = (() => {
   const t   = k => I18n.t(k);
   const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
+  function currentEstablishmentFields() {
+    const user = Auth.getUser() || {};
+    const h = window.HospitalsRegistry?.getCurrentHospital?.();
+    return {
+      created_by: user.uid || '',
+      created_by_role: user.role || '',
+      created_by_name: user.name || '',
+      hospital_id: h?.establishmentId || h?.hid || '',
+      establishmentId: h?.establishmentId || h?.hid || '',
+      establishmentName: h?.name || '',
+    };
+  }
+
+  function patientsForContext() {
+    const user = Auth.getUser() || {};
+    if (user.role === 'admin') return DB.getPatients();
+    return window.HospitalsRegistry?.getPatientsForContext?.(user.uid) ||
+      DB.getPatients().filter(p => !p.created_by || p.created_by === user.uid);
+  }
+
+  function itemInContext(item, patientIds) {
+    const user = Auth.getUser() || {};
+    if (user.role === 'admin') return true;
+    const h = window.HospitalsRegistry?.getCurrentHospital?.();
+    return patientIds.has(item.patient_id) ||
+      item.created_by === user.uid ||
+      item.doctor_uid === user.uid ||
+      (h && (item.establishmentId === h.establishmentId || item.hospital_id === h.establishmentId));
+  }
+
+  function consultationsForContext() {
+    const patientIds = new Set(patientsForContext().map(p => p.id));
+    return DB.getConsultations().filter(c => itemInContext(c, patientIds));
+  }
+
+  function prescriptionsForContext() {
+    const patientIds = new Set(patientsForContext().map(p => p.id));
+    return DB.getPrescriptions().filter(rx => itemInContext(rx, patientIds));
+  }
+
+  function appointmentsForContext() {
+    const user = Auth.getUser() || {};
+    return window.HospitalsRegistry?.getAppointmentsForContext?.(user.uid) ||
+      DB.getAppointments().filter(a => itemInContext(a, new Set(patientsForContext().map(p => p.id))));
+  }
+
+  function canUsePatient(patientId) {
+    return patientsForContext().some(p => p.id === patientId) ||
+      ACL.canAccessPatient(Auth.getUser(), patientId);
+  }
+
+  function searchContextPatients(q) {
+    const list = patientsForContext();
+    if (!q) return list;
+    const ql = q.toLowerCase();
+    return list.filter(p =>
+      (p.id||'').toLowerCase().includes(ql) ||
+      (p.firstname||'').toLowerCase().includes(ql) ||
+      (p.lastname||'').toLowerCase().includes(ql) ||
+      (p.phone||'').includes(ql));
+  }
+
   function render(section) {
     const main = document.getElementById('main-content');
     switch (section) {
@@ -21,8 +83,20 @@ const HospitalPortal = (() => {
 
   /* ── DASHBOARD ──────────────────────────────────── */
   function renderDashboard(main) {
-    const s   = DB.getStats();
-    const apts = DB.getAppointments().filter(a=>a.status==='pending' && a.date>=new Date().toISOString().slice(0,10)).slice(0,3);
+    const td = new Date().toISOString().slice(0,10);
+    const patients = patientsForContext();
+    const consultations = consultationsForContext();
+    const appointments = appointmentsForContext();
+    const unreadMessages = DB.getMessages().filter(m => m.to_role === Auth.getUser()?.role && !m.read).length;
+    const s = {
+      totalPatients: patients.length,
+      todayPatients: patients.filter(p => (p.created_at || '').startsWith(td)).length,
+      totalConsults: consultations.length,
+      todayConsults: consultations.filter(c => c.date === td).length,
+      pendingApts: appointments.filter(a => a.status === 'pending' && a.date >= td).length,
+      unreadMessages,
+    };
+    const apts = appointments.filter(a=>a.status==='pending' && a.date>=td).slice(0,3);
     main.innerHTML = `
       <div class="page-header">
         <h2>📊 ${t('nav_dashboard')}</h2>
@@ -68,7 +142,7 @@ const HospitalPortal = (() => {
         <button class="btn btn-ghost btn-sm" onclick="App.navigateTo('patients')">Tous →</button>
       </div>
       <div class="records-list">
-        ${DB.getPatients().slice(-4).reverse().map(p=>patRow(p)).join('')
+        ${patients.slice(-4).reverse().map(p=>patRow(p)).join('')
           || `<div class="card empty-state"><p>${t('no_data')}</p></div>`}
       </div>`;
   }
@@ -85,14 +159,14 @@ const HospitalPortal = (() => {
                oninput="HospitalPortal.filter(this.value)">
       </div>
       <div id="pat-list" class="records-list">
-        ${DB.getPatients().reverse().map(p=>patRow(p)).join('')
+        ${patientsForContext().slice().reverse().map(p=>patRow(p)).join('')
           || `<div class="card empty-state"><p>${t('no_data')}</p></div>`}
       </div>`;
   }
 
   function filter(q) {
     document.getElementById('pat-list').innerHTML =
-      DB.searchPatients(q).reverse().map(p=>patRow(p)).join('')
+      searchContextPatients(q).slice().reverse().map(p=>patRow(p)).join('')
       || `<div class="card empty-state"><p>${t('msg_no_record')}</p></div>`;
   }
 
@@ -116,6 +190,7 @@ const HospitalPortal = (() => {
 
   /* ── PATIENT DETAIL ─────────────────────────────── */
   function openDetail(id) {
+    if (!canUsePatient(id)) { App.toast('Accès patient non autorisé.', 'error'); return; }
     const p = DB.getPatientById(id); if (!p) return;
     const age  = p.dob ? Math.floor((Date.now()-new Date(p.dob))/(365.25*24*3600*1000)) : '?';
     const cons = DB.getPatientConsultations(id);
@@ -197,17 +272,20 @@ const HospitalPortal = (() => {
       allergies: document.getElementById('hp-allergies').value,
       chronic:   document.getElementById('hp-chronic').value,
       emergency: document.getElementById('hp-emerg').value,
+      ...currentEstablishmentFields(),
     });
     App.closeModal(); App.toast(`✅ ${t('msg_saved')} — ${p.id}`); App.navigateTo('patients');
   }
 
   function deletePatient(id) {
+    if (!canUsePatient(id)) { App.toast('Accès patient non autorisé.', 'error'); return; }
     if (!confirm(t('msg_confirm_delete'))) return;
     DB.deletePatient(id); App.toast(t('msg_deleted')); App.navigateTo('patients');
   }
 
   /* ── CONSULTATION + ORDONNANCE INTELLIGENTE ───── */
   function openConsult(patientId) {
+    if (!canUsePatient(patientId)) { App.toast('Accès patient non autorisé.', 'error'); return; }
     const p = DB.getPatientById(patientId); if (!p) return;
     App.openModal(`🩺 ${t('new_consultation')} — ${p.firstname} ${p.lastname}`, `
       <div class="id-badge-large">${p.id}</div>
@@ -267,9 +345,10 @@ const HospitalPortal = (() => {
       diagnosis:  diag,
       treatment:  document.getElementById('c-treat').value,
       notes:      document.getElementById('c-notes').value,
+      ...currentEstablishmentFields(),
     });
     if (meds.length) {
-      const rx = DB.addPrescription({ patient_id:patientId, date:document.getElementById('c-date').value, doctor:document.getElementById('c-doc').value, diagnosis:diag, medicines:meds });
+      const rx = DB.addPrescription({ patient_id:patientId, date:document.getElementById('c-date').value, doctor:document.getElementById('c-doc').value, diagnosis:diag, medicines:meds, ...currentEstablishmentFields() });
       // Send to pharmacy
       Network.sendPrescriptionToPharmacy(rx.pid, 'Pharmacie Centrale');
     }
@@ -283,7 +362,7 @@ const HospitalPortal = (() => {
 
   /* ── CONSULTATIONS LIST ─────────────────────────── */
   function renderConsultations(main) {
-    const list = DB.getConsultations().reverse();
+    const list = consultationsForContext().slice().reverse();
     main.innerHTML = `
       <div class="page-header"><h2>🩺 ${t('nav_consultations')}</h2></div>
       ${!list.length ? `<div class="card empty-state"><p>${t('no_data')}</p></div>` : ''}
@@ -305,7 +384,7 @@ const HospitalPortal = (() => {
 
   /* ── PRESCRIPTIONS LIST ─────────────────────────── */
   function renderPrescriptions(main) {
-    const list = DB.getPrescriptions().reverse();
+    const list = prescriptionsForContext().slice().reverse();
     const curs = t('currency');
     main.innerHTML = `
       <div class="page-header"><h2>💊 Ordonnances</h2></div>
