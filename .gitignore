@@ -10,6 +10,8 @@ android/keys/
 .env
 .env.*
 local.properties
+keystore.properties
+android/keystore.properties
 
 # Build outputs
 android/.gradle/
