@@ -1,0 +1,14 @@
+NOUVEAUTES MEDCONNECT 2.0
+
+- Authentification securisee avec 5 roles
+- Timeline medicale complete du patient
+- Module Laboratoire pour la saisie et le suivi des analyses
+- Carnet numerique de vaccinations
+- Rendez-vous medicaux avec notifications
+- Reseau medecin vers pharmacie
+- Ordonnance intelligente avec verification allergies, interactions et stock
+- Pharmacie avancee avec lots, dates d'expiration et alertes
+- Messagerie medicale entre acteurs
+- Nouvelles langues : Deutsch, Русский, हिन्दी, Kiswahili
+- Mode hors ligne ameliore
+- Interface repensee avec theme sombre et clair

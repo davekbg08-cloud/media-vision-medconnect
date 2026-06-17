@@ -80,8 +80,8 @@ const Settings = (() => {
         <p style="font-size:.8rem">MedConnect v2.0 © 2026 — MediaVision Tech</p>
         <p style="font-size:.75rem;margin-top:.2rem">📞 +243 856 373 707 · ✉️ hallo.mediavision.tech@gmail.com</p>
         <p style="font-size:.72rem;margin-top:.35rem;color:var(--text-dim)">
-          Toutes les données sont stockées localement sur votre appareil.<br>
-          Aucune donnée envoyée à des serveurs externes.
+          Les données peuvent être stockées localement pour le mode hors ligne.<br>
+          La synchronisation sécurisée utilise Firebase selon vos droits d'accès.
         </p>
       </div>`;
   }

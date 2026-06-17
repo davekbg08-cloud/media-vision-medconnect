@@ -11,6 +11,7 @@
       "firestore.indexes.json",
       "**/.*",
       "**/node_modules/**",
+      "playstore/**",
       "android/**",
       "occasion/**"
     ],
@@ -30,6 +31,14 @@
       }
     ],
     "rewrites": [
+      {
+        "source": "/privacy",
+        "destination": "/privacy.html"
+      },
+      {
+        "source": "/privacy/**",
+        "destination": "/privacy.html"
+      },
       {
         "source": "**",
         "destination": "/index.html"
