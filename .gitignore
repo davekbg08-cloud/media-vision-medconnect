@@ -9,6 +9,7 @@ android/keys/
 *.keypass
 .env
 .env.*
+.firebase/
 local.properties
 keystore.properties
 android/keystore.properties
