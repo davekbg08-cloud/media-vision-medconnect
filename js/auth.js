@@ -34,8 +34,8 @@ const Auth = (() => {
         <h1 class="auth-title">MedConnect</h1>
         <p class="auth-sub">Plateforme Médicale Sécurisée v2.0</p>
         <div class="auth-tabs">
-          <button id="tbtn-login"    class="auth-tab active" onclick="Auth._tab('login')">🔐 Connexion</button>
-          <button id="tbtn-register" class="auth-tab"        onclick="Auth._tab('register')">📝 Inscription</button>
+          <button id="tbtn-login" class="auth-tab active" onclick="Auth._tab('login')">🔐 Connexion</button>
+          <button id="tbtn-register" class="auth-tab" onclick="Auth._tab('register')">📝 Inscription</button>
         </div>
         <div id="tab-login">${_htmlLogin()}</div>
         <div id="tab-register" style="display:none">${_htmlRegister()}</div>
@@ -48,7 +48,6 @@ const Auth = (() => {
     const lc = document.getElementById('auth-lang');
     if (lc) lc.innerHTML = I18n.renderSelector();
 
-    // Accès admin caché : 5 clics sur le logo
     let clicks = 0, t;
     document.getElementById('auth-logo-clicks')?.addEventListener('click', () => {
       if (++clicks >= 5) { clicks = 0; clearTimeout(t); _adminModal(); }
@@ -81,14 +80,12 @@ const Auth = (() => {
     <div id="register-form" style="margin-top:.75rem"></div>
     <div id="reg-err" class="auth-error" style="display:none"></div>`; }
 
-  /* ── SWITCH ONGLET ────────────────────────────────── */
   function _tab(tab) {
     const isL = tab === 'login';
     document.getElementById('tab-login').style.display    = isL ? '' : 'none';
     document.getElementById('tab-register').style.display = isL ? 'none' : '';
     document.getElementById('tbtn-login').classList.toggle('active', isL);
     document.getElementById('tbtn-register').classList.toggle('active', !isL);
-    // Effacer les erreurs
     ['auth-err','reg-err'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.style.display = 'none';
@@ -103,6 +100,9 @@ const Auth = (() => {
 
     const forms = {
       patient: `
+        <div class="auth-register-info" style="margin-top:.75rem">
+          🔁 <strong>Compte existant :</strong> connectez-vous à votre dossier déjà sauvegardé. Le premier accès est séparé pour éviter les doublons.
+        </div>
         <div class="form-group" style="margin-top:.75rem">
           <label class="inp-lbl">Numéro de fiche unique *</label>
           <input type="text" id="lp-id" class="inp" maxlength="20"
@@ -112,55 +112,58 @@ const Auth = (() => {
         </div>
         <div class="form-group">
           <label class="inp-lbl">PIN (4-6 chiffres) *</label>
-          <input type="password" id="lp-pin" class="inp" maxlength="6"
-            placeholder="••••" inputmode="numeric">
-          <small style="color:var(--text-muted);font-size:.72rem">
-            Premier accès : votre PIN sera créé automatiquement.
-          </small>
+          <input type="password" id="lp-pin" class="inp" maxlength="6" placeholder="••••" inputmode="numeric">
         </div>
-        <button class="btn-p" onclick="Auth._doPatient()">🔐 Accéder à mon dossier</button>`,
+        <button class="btn-p" onclick="Auth._doPatient()">🔐 Se connecter à mon dossier existant</button>
+        <button class="btn btn-ghost" style="width:100%;margin-top:.6rem" onclick="Auth._createPatientPin()">🆕 Premier accès : créer mon PIN</button>`,
 
       doctor: `
         <div class="form-group" style="margin-top:.75rem">
           <label class="inp-lbl">N° Ordre Médical *</label>
-          <input type="text" id="ld-num" class="inp"
-            placeholder="Votre numéro officiel"
-            style="text-transform:uppercase;font-family:monospace"
-            oninput="this.value=this.value.toUpperCase()">
+          <input type="text" id="ld-num" class="inp" placeholder="Votre numéro officiel" style="text-transform:uppercase;font-family:monospace" oninput="this.value=this.value.toUpperCase()">
         </div>
         <div class="form-group">
           <label class="inp-lbl">Mot de passe *</label>
           <input type="password" id="ld-pass" class="inp" placeholder="••••••">
         </div>
-        <button class="btn-p" onclick="Auth._doDoctor()">🔐 Connexion Médecin</button>`,
+        <div class="form-group">
+          <label class="inp-lbl">Email du compte existant</label>
+          <input type="email" id="ld-email" class="inp" placeholder="votre@email.com" autocomplete="email">
+          <small style="color:var(--text-muted);font-size:.72rem">Après installation ou réinstallation, cet email restaure vos données sauvegardées.</small>
+        </div>
+        <button class="btn-p" onclick="Auth._doDoctor()">🔐 Se connecter au compte existant</button>`,
 
       pharmacist: `
         <div class="form-group" style="margin-top:.75rem">
           <label class="inp-lbl">N° Matricule / RCCM *</label>
-          <input type="text" id="lph-num" class="inp"
-            placeholder="Votre numéro officiel"
-            style="text-transform:uppercase;font-family:monospace"
-            oninput="this.value=this.value.toUpperCase()">
+          <input type="text" id="lph-num" class="inp" placeholder="Votre numéro officiel" style="text-transform:uppercase;font-family:monospace" oninput="this.value=this.value.toUpperCase()">
         </div>
         <div class="form-group">
           <label class="inp-lbl">Mot de passe *</label>
           <input type="password" id="lph-pass" class="inp" placeholder="••••••">
         </div>
-        <button class="btn-p" onclick="Auth._doPharmacist()">🔐 Connexion Pharmacien</button>`,
+        <div class="form-group">
+          <label class="inp-lbl">Email du compte existant</label>
+          <input type="email" id="lph-email" class="inp" placeholder="votre@email.com" autocomplete="email">
+          <small style="color:var(--text-muted);font-size:.72rem">Après installation ou réinstallation, cet email restaure vos données sauvegardées.</small>
+        </div>
+        <button class="btn-p" onclick="Auth._doPharmacist()">🔐 Se connecter au compte existant</button>`,
 
       nurse: `
         <div class="form-group" style="margin-top:.75rem">
           <label class="inp-lbl">N° Matricule Infirmier *</label>
-          <input type="text" id="ln-num" class="inp"
-            placeholder="Votre numéro officiel"
-            style="text-transform:uppercase;font-family:monospace"
-            oninput="this.value=this.value.toUpperCase()">
+          <input type="text" id="ln-num" class="inp" placeholder="Votre numéro officiel" style="text-transform:uppercase;font-family:monospace" oninput="this.value=this.value.toUpperCase()">
         </div>
         <div class="form-group">
           <label class="inp-lbl">Mot de passe *</label>
           <input type="password" id="ln-pass" class="inp" placeholder="••••••">
         </div>
-        <button class="btn-p" onclick="Auth._doNurse()">🔐 Connexion Infirmier</button>`,
+        <div class="form-group">
+          <label class="inp-lbl">Email du compte existant</label>
+          <input type="email" id="ln-email" class="inp" placeholder="votre@email.com" autocomplete="email">
+          <small style="color:var(--text-muted);font-size:.72rem">Après installation ou réinstallation, cet email restaure vos données sauvegardées.</small>
+        </div>
+        <button class="btn-p" onclick="Auth._doNurse()">🔐 Se connecter au compte existant</button>`,
     };
     document.getElementById('login-form').innerHTML = forms[role] || '';
   }
@@ -176,31 +179,19 @@ const Auth = (() => {
       pharmacist: `💊 Votre <strong>N° Matricule RCCM</strong> doit être enregistré par l'administrateur.`,
       nurse:      `🩹 Votre <strong>N° Matricule infirmier</strong> doit être enregistré par l'administrateur.`,
     };
-    const labels = {
-      doctor:     'N° Ordre Médical *',
-      pharmacist: 'N° Matricule / RCCM *',
-      nurse:      'N° Matricule Infirmier *',
-    };
-    const ids = {
-      doctor: 'rd-num', pharmacist: 'rph-num', nurse: 'rn-num',
-    };
-    const actions = {
-      doctor: `Auth._regDoctor()`, pharmacist: `Auth._regPharmacist()`, nurse: `Auth._regNurse()`,
-    };
+    const labels = { doctor:'N° Ordre Médical *', pharmacist:'N° Matricule / RCCM *', nurse:'N° Matricule Infirmier *' };
+    const ids = { doctor:'rd-num', pharmacist:'rph-num', nurse:'rn-num' };
+    const actions = { doctor:`Auth._regDoctor()`, pharmacist:`Auth._regPharmacist()`, nurse:`Auth._regNurse()` };
 
     document.getElementById('register-form').innerHTML = `
       <div class="auth-register-info">${infos[role]}</div>
       <div class="form-group">
         <label class="inp-lbl">${labels[role]}</label>
-        <input type="text" id="${ids[role]}" class="inp"
-          placeholder="Votre numéro officiel (tout format accepté)"
-          style="text-transform:uppercase;font-family:monospace"
-          oninput="this.value=this.value.toUpperCase()">
+        <input type="text" id="${ids[role]}" class="inp" placeholder="Votre numéro officiel (tout format accepté)" style="text-transform:uppercase;font-family:monospace" oninput="this.value=this.value.toUpperCase()">
       </div>
       <div class="form-group">
         <label class="inp-lbl">Adresse email *</label>
-        <input type="email" id="${ids[role]}-email" class="inp"
-          placeholder="votre@email.com" required>
+        <input type="email" id="${ids[role]}-email" class="inp" placeholder="votre@email.com" required>
       </div>
       <div class="form-group">
         <label class="inp-lbl">Choisir un mot de passe * (min. 6 caractères)</label>
@@ -217,40 +208,89 @@ const Auth = (() => {
         <p>Envoyez votre numéro officiel + une photo de votre carte professionnelle à :</p>
         <p>📞 WhatsApp : <strong>+243 856 373 707</strong></p>
         <p>✉️ Email : <strong>hallo.mediavision.tech@gmail.com</strong></p>
-        <p style="color:var(--text-dim);font-size:.72rem;margin-top:.4rem">
-          Délai de traitement : 24 à 48h ouvrables
-        </p>
+        <p style="color:var(--text-dim);font-size:.72rem;margin-top:.4rem">Délai de traitement : 24 à 48h ouvrables</p>
       </div>`;
   }
 
-  /* ── ACTIONS CONNEXION ────────────────────────────── */
-  function _doPatient() {
-    const id  = (document.getElementById('lp-id')?.value  || '').trim().toUpperCase();
-    const pin = (document.getElementById('lp-pin')?.value || '').trim();
-    if (!id || !pin) { _err('auth-err', 'Veuillez remplir tous les champs.'); return; }
-    if (!id.startsWith('MC-')) { _err('auth-err', '❌ Format invalide. Ex : MC-2026-CD-A3B7X9Q2'); return; }
-    const patient = DB.getPatientById(id);
-    if (!patient) { _err('auth-err', '❌ Numéro de fiche introuvable. Contactez votre médecin.'); return; }
-    if (pin.length < 4) { _err('auth-err', '❌ PIN trop court — minimum 4 chiffres.'); return; }
-    const accounts = DB.getAccounts();
-    const existing = accounts.find(a => a.patient_id === id && a.role === 'patient');
-    if (!existing) {
-      const acc = { uid:`PAT_${id}`, username:id, password:pin, role:'patient', status:'approved',
-                    name:`${patient.firstname} ${patient.lastname}`, patient_id:id,
-                    created_at:new Date().toISOString() };
-      accounts.push(acc); DB.saveAccounts(accounts);
-      localStorage.setItem('mc_my_patient_id', id);
-      _save(acc); _launch(acc);
-      App.toast(`✅ Bienvenue ${patient.firstname} ! PIN créé.`);
-      return;
-    }
-    if (existing.password !== pin) { _err('auth-err', '❌ PIN incorrect.'); return; }
-    localStorage.setItem('mc_my_patient_id', id);
-    _save(existing); _launch(existing);
+  /* ── OUTILS RESTAURATION ─────────────────────────── */
+  function _hasFirebaseAuth() { return typeof firebaseAuth !== 'undefined' && !!firebaseAuth; }
+  function _hasFirebaseDB() { return typeof firebaseDB !== 'undefined' && !!firebaseDB; }
+  const _professionalField = role => role === 'doctor' ? 'order_num' : 'matricule';
+
+  async function _syncBeforeAuth(label) {
+    try { await DB.syncFromFirebase?.(); }
+    catch (e) { console.warn(`[MedConnect] Sync avant ${label} impossible :`, e); }
   }
 
-  function _hasFirebaseAuth() {
-    return typeof firebaseAuth !== 'undefined' && !!firebaseAuth;
+  function _findPatientAccount(id) {
+    return DB.getAccounts().find(a => a.role === 'patient' && String(a.patient_id || a.username || '').toUpperCase() === id) || null;
+  }
+
+  function _findProfessionalAccount(role, num, email = '') {
+    const field = _professionalField(role);
+    const n = String(num || '').toUpperCase();
+    const e = String(email || '').toLowerCase();
+    return DB.getAccounts().find(a =>
+      a.role === role &&
+      (String(a[field] || a.username || '').toUpperCase() === n || (e && String(a.email || '').toLowerCase() === e))
+    ) || null;
+  }
+
+  function _upsertAccount(account) {
+    if (!account?.uid) return account;
+    const accounts = DB.getAccounts();
+    const field = _professionalField(account.role);
+    const idx = accounts.findIndex(a =>
+      a.uid === account.uid ||
+      (account.role === 'patient' && a.role === 'patient' && String(a.patient_id || a.username || '').toUpperCase() === String(account.patient_id || account.username || '').toUpperCase()) ||
+      (a.role === account.role && String(a[field] || a.username || '').toUpperCase() === String(account[field] || account.username || '').toUpperCase())
+    );
+    if (idx === -1) accounts.push(account);
+    else accounts[idx] = { ...accounts[idx], ...account };
+    DB.saveAccounts(accounts);
+    return account;
+  }
+
+  async function _restoreProfessional(role, num, pass, email) {
+    if (!email) {
+      _err('auth-err', "⚠️ Compte existant introuvable sur cet appareil.<br>Entrez l'email du compte existant pour restaurer vos données sauvegardées.");
+      return null;
+    }
+    if (!_hasFirebaseAuth() || !_hasFirebaseDB()) {
+      _err('auth-err', '❌ Firebase indisponible. Vérifiez la connexion internet puis réessayez.');
+      return null;
+    }
+    try {
+      const credential = await firebaseAuth.signInWithEmailAndPassword(email, pass);
+      const uid = credential?.user?.uid;
+      if (!uid) throw new Error('auth_uid_missing');
+      const doc = await firebaseDB.collection('users').doc(uid).get();
+      if (!doc.exists) { _err('auth-err', '❌ Profil cloud introuvable. Contactez l’administrateur MedConnect.'); return null; }
+      const data = doc.data() || {};
+      const field = _professionalField(role);
+      const account = {
+        ...data,
+        uid: data.uid || uid,
+        authUid: uid,
+        role: data.role || role,
+        username: data.username || data[field] || num,
+        status: data.status || 'pending',
+        updated_at: new Date().toISOString(),
+      };
+      account[field] = account[field] || num;
+      const cloudNumber = String(account[field] || account.username || '').toUpperCase();
+      if (account.role !== role) { _err('auth-err', '❌ Ce compte cloud ne correspond pas au rôle sélectionné.'); return null; }
+      if (cloudNumber && cloudNumber !== String(num).toUpperCase()) { _err('auth-err', '❌ Le numéro professionnel ne correspond pas au compte cloud connecté.'); return null; }
+      if (account.status === 'pending') { _err('auth-err', '⏳ Compte retrouvé, mais il attend encore la validation administrateur.'); return null; }
+      if (account.status === 'rejected') { _err('auth-err', '❌ Compte retrouvé, mais la demande a été rejetée.'); return null; }
+      if (account.status === 'suspended') { _err('auth-err', '🚫 Compte suspendu. Contactez l’administrateur.'); return null; }
+      if (!['approved','active'].includes(String(account.status).toLowerCase())) { _err('auth-err', '⚠️ Statut du compte non valide. Contactez l’administrateur.'); return null; }
+      return _upsertAccount(account);
+    } catch (e) {
+      console.warn('[MedConnect] Restauration compte existant impossible :', e);
+      _err('auth-err', '❌ Restauration du compte existant impossible. Vérifiez email, mot de passe et connexion internet.');
+      return null;
+    }
   }
 
   async function _signInFirebaseForAccount(account, pass, errorId = 'auth-err') {
@@ -266,53 +306,75 @@ const Auth = (() => {
         account.authUid = credential.user.uid;
       }
       return true;
-    } catch {
+    } catch (e) {
+      console.warn('[MedConnect] Connexion Firebase impossible :', e);
       _err(errorId, '❌ Connexion Firebase impossible. Vérifiez votre email/mot de passe.');
       return false;
     }
   }
 
-  async function _doDoctor() {
-    const num  = (document.getElementById('ld-num')?.value  || '').trim().toUpperCase();
-    const pass = (document.getElementById('ld-pass')?.value || '').trim();
-    if (!num || !pass) { _err('auth-err', 'Veuillez remplir tous les champs.'); return; }
+  /* ── ACTIONS CONNEXION ────────────────────────────── */
+  async function _doPatient() {
+    const id  = (document.getElementById('lp-id')?.value  || '').trim().toUpperCase();
+    const pin = (document.getElementById('lp-pin')?.value || '').trim();
+    if (!id || !pin) { _err('auth-err', 'Veuillez remplir tous les champs.'); return; }
+    if (!id.startsWith('MC-')) { _err('auth-err', '❌ Format invalide. Ex : MC-2026-CD-A3B7X9Q2'); return; }
+    if (pin.length < 4) { _err('auth-err', '❌ PIN trop court — minimum 4 chiffres.'); return; }
+    await _syncBeforeAuth('connexion patient');
+    const patient = DB.getPatientById(id);
+    if (!patient) { _err('auth-err', '❌ Numéro de fiche introuvable. Contactez votre médecin.'); return; }
+    const existing = _findPatientAccount(id);
+    if (!existing) {
+      _err('auth-err', '⚠️ Aucun compte patient existant trouvé pour cette fiche.<br>Si c’est votre premier accès, utilisez “Premier accès : créer mon PIN”.');
+      return;
+    }
+    if (existing.password !== pin) { _err('auth-err', '❌ PIN incorrect.'); return; }
+    localStorage.setItem('mc_my_patient_id', id);
+    _save(existing); _launch(existing);
+  }
+
+  async function _createPatientPin() {
+    const id  = (document.getElementById('lp-id')?.value  || '').trim().toUpperCase();
+    const pin = (document.getElementById('lp-pin')?.value || '').trim();
+    if (!id || !pin) { _err('auth-err', 'Veuillez remplir le numéro de fiche et le PIN.'); return; }
+    if (!id.startsWith('MC-')) { _err('auth-err', '❌ Format invalide. Ex : MC-2026-CD-A3B7X9Q2'); return; }
+    if (pin.length < 4) { _err('auth-err', '❌ PIN trop court — minimum 4 chiffres.'); return; }
+    await _syncBeforeAuth('premier accès patient');
+    const patient = DB.getPatientById(id);
+    if (!patient) { _err('auth-err', '❌ Numéro de fiche introuvable. Contactez votre médecin.'); return; }
     const accounts = DB.getAccounts();
-    const existing = accounts.find(a => a.order_num === num && a.role === 'doctor');
-    if (!existing) { _err('auth-err', '⚠️ Compte introuvable. Inscrivez-vous d\'abord.'); return; }
+    const existing = _findPatientAccount(id);
+    if (existing) {
+      _err('auth-err', '⚠️ Un compte existe déjà pour cette fiche. Utilisez “Se connecter à mon dossier existant”.');
+      return;
+    }
+    const acc = { uid:`PAT_${id}`, username:id, password:pin, role:'patient', status:'approved', name:`${patient.firstname} ${patient.lastname}`, patient_id:id, created_at:new Date().toISOString() };
+    accounts.push(acc); DB.saveAccounts(accounts);
+    localStorage.setItem('mc_my_patient_id', id);
+    _save(acc); _launch(acc);
+    App.toast(`✅ Bienvenue ${patient.firstname} ! PIN créé.`);
+  }
+
+  async function _doProfessional(role, numId, passId, emailId, launcher = _launch) {
+    const num   = (document.getElementById(numId)?.value || '').trim().toUpperCase();
+    const pass  = (document.getElementById(passId)?.value || '').trim();
+    const email = (document.getElementById(emailId)?.value || '').trim();
+    if (!num || !pass) { _err('auth-err', 'Veuillez remplir tous les champs obligatoires.'); return; }
+    await _syncBeforeAuth(`connexion ${role}`);
+    let existing = _findProfessionalAccount(role, num, email);
+    if (!existing) existing = await _restoreProfessional(role, num, pass, email);
+    if (!existing) return;
     if (existing.status === 'pending')  { _err('auth-err', '⏳ Compte en attente de validation par l\'administrateur.'); return; }
     if (existing.status === 'rejected') { _err('auth-err', '❌ Demande rejetée. Contactez l\'administrateur.'); return; }
+    if (existing.status === 'suspended') { _err('auth-err', '🚫 Compte suspendu. Contactez l\'administrateur.'); return; }
     if (!existing.email && existing.password !== pass) { _err('auth-err', '❌ Mot de passe incorrect.'); return; }
     if (!await _signInFirebaseForAccount(existing, pass)) return;
-    _save(existing); _launchDoctor(existing);
+    _save(existing); launcher(existing);
   }
 
-  async function _doPharmacist() {
-    const num  = (document.getElementById('lph-num')?.value  || '').trim().toUpperCase();
-    const pass = (document.getElementById('lph-pass')?.value || '').trim();
-    if (!num || !pass) { _err('auth-err', 'Veuillez remplir tous les champs.'); return; }
-    const accounts = DB.getAccounts();
-    const existing = accounts.find(a => a.matricule === num && a.role === 'pharmacist');
-    if (!existing) { _err('auth-err', '⚠️ Compte introuvable. Inscrivez-vous d\'abord.'); return; }
-    if (existing.status === 'pending')  { _err('auth-err', '⏳ Compte en attente de validation.'); return; }
-    if (existing.status === 'rejected') { _err('auth-err', '❌ Demande rejetée.'); return; }
-    if (!existing.email && existing.password !== pass) { _err('auth-err', '❌ Mot de passe incorrect.'); return; }
-    if (!await _signInFirebaseForAccount(existing, pass)) return;
-    _save(existing); _launch(existing);
-  }
-
-  async function _doNurse() {
-    const num  = (document.getElementById('ln-num')?.value  || '').trim().toUpperCase();
-    const pass = (document.getElementById('ln-pass')?.value || '').trim();
-    if (!num || !pass) { _err('auth-err', 'Veuillez remplir tous les champs.'); return; }
-    const accounts = DB.getAccounts();
-    const existing = accounts.find(a => a.matricule === num && a.role === 'nurse');
-    if (!existing) { _err('auth-err', '⚠️ Compte introuvable. Inscrivez-vous d\'abord.'); return; }
-    if (existing.status === 'pending')  { _err('auth-err', '⏳ Compte en attente de validation.'); return; }
-    if (existing.status === 'rejected') { _err('auth-err', '❌ Demande rejetée.'); return; }
-    if (!existing.email && existing.password !== pass) { _err('auth-err', '❌ Mot de passe incorrect.'); return; }
-    if (!await _signInFirebaseForAccount(existing, pass)) return;
-    _save(existing); _launch(existing);
-  }
+  function _doDoctor()     { return _doProfessional('doctor', 'ld-num', 'ld-pass', 'ld-email', _launchDoctor); }
+  function _doPharmacist() { return _doProfessional('pharmacist', 'lph-num', 'lph-pass', 'lph-email', _launch); }
+  function _doNurse()      { return _doProfessional('nurse', 'ln-num', 'ln-pass', 'ln-email', _launch); }
 
   /* ── ACTIONS INSCRIPTION ──────────────────────────── */
   async function _createFirebaseUser(email, pass, account) {
@@ -320,13 +382,13 @@ const Auth = (() => {
     try {
       const credential = await firebaseAuth.createUserWithEmailAndPassword(email, pass);
       const uid = credential?.user?.uid || account.uid;
-      const next = { ...account, uid, authUid: uid };
-      return next;
+      return { ...account, uid, authUid: uid };
     } catch (err) {
       if (err?.code === 'auth/email-already-in-use') {
-        _err('reg-err', '❌ Cette adresse email est déjà utilisée.');
+        _err('reg-err', '❌ Cette adresse email est déjà utilisée. Utilisez l’onglet Connexion pour restaurer le compte existant.');
         return null;
       }
+      console.warn('[MedConnect] Création Firebase Auth impossible :', err);
       _err('reg-err', '❌ Impossible de créer le compte Firebase Auth pour le moment.');
       return null;
     }
@@ -336,46 +398,29 @@ const Auth = (() => {
     if (!num || !pass) { _err('reg-err', 'Veuillez remplir tous les champs.'); return false; }
     if (pass !== pass2) { _err('reg-err', '❌ Les mots de passe ne correspondent pas.'); return false; }
     if (pass.length < 6) { _err('reg-err', '❌ Mot de passe trop court (min. 6 caractères).'); return false; }
-    // Vérifier le registre officiel
-    const verified = role === 'doctor'
-      ? ACL.isDoctorVerified(num)
-      : role === 'pharmacist'
-      ? ACL.isPharmacistVerified(num)
-      : ACL.isNurseVerified(num);
+    await _syncBeforeAuth('inscription');
+
+    const email = extraField?.email || '';
+    if (Object.prototype.hasOwnProperty.call(extraField || {}, 'email') && !email) { _err('reg-err', '❌ Adresse email obligatoire.'); return false; }
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { _err('reg-err', '❌ Adresse email invalide.'); return false; }
+
+    const existing = _findProfessionalAccount(role, num, email) || DB.getUsers().find(u =>
+      u.role === role &&
+      (String(u.order_num || u.matricule || u.username || '').toUpperCase() === num || (email && String(u.email || '').toLowerCase() === email.toLowerCase()))
+    );
+    if (existing) {
+      _err('reg-err', '⚠️ Un compte existe déjà avec ces informations. Utilisez l’onglet Connexion pour restaurer le compte existant.');
+      return false;
+    }
+
+    const verified = role === 'doctor' ? ACL.isDoctorVerified(num) : role === 'pharmacist' ? ACL.isPharmacistVerified(num) : ACL.isNurseVerified(num);
     if (!verified) {
       _err('reg-err', `❌ Numéro non reconnu dans le registre.\nContactez l'administrateur : +243 856 373 707\nou hallo.mediavision.tech@gmail.com`);
       return false;
     }
-    // Valider l'email
-    const email = extraField?.email || '';
-    if (Object.prototype.hasOwnProperty.call(extraField || {}, 'email') && !email) {
-      _err('reg-err', '❌ Adresse email obligatoire.'); return false;
-    }
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      _err('reg-err', '❌ Adresse email invalide.'); return false;
-    }
-    const accounts = DB.getAccounts();
-    const dup = accounts.find(a => (a.order_num === num || a.matricule === num) && a.role === role);
-    if (dup) {
-      if (dup.status === 'pending')  { _err('reg-err', '⏳ Demande déjà envoyée — en attente de validation.'); return false; }
-      if (dup.status === 'approved') { _err('reg-err', '⚠️ Compte déjà existant. Utilisez l\'onglet Connexion.'); return false; }
-    }
-    const info = role === 'doctor'
-      ? ACL.getVerifiedDoctors().find(d => d.order_num === num)
-      : role === 'pharmacist'
-      ? ACL.getVerifiedPharmacists().find(p => p.matricule === num)
-      : ACL.getVerifiedNurses().find(n => n.matricule === num);
 
-    const acc = {
-      uid: `${role.slice(0,3).toUpperCase()}_${num}_${Date.now()}`,
-      username: num,
-      role,
-      name: info?.name || `${LABELS[role]} (${num})`,
-      email: extraField?.email || '',
-      status: 'pending',
-      created_at: new Date().toISOString(),
-      ...extraField,
-    };
+    const info = role === 'doctor' ? ACL.getVerifiedDoctors().find(d => d.order_num === num) : role === 'pharmacist' ? ACL.getVerifiedPharmacists().find(p => p.matricule === num) : ACL.getVerifiedNurses().find(n => n.matricule === num);
+    const acc = { uid:`${role.slice(0,3).toUpperCase()}_${num}_${Date.now()}`, username:num, role, name:info?.name || `${LABELS[role]} (${num})`, email, status:'pending', created_at:new Date().toISOString(), ...extraField };
     if (info?.specialty) acc.specialty = info.specialty;
     if (info?.country)   acc.country   = info.country;
     if (info?.pharmacy)  acc.pharmacy  = info.pharmacy;
@@ -383,7 +428,7 @@ const Auth = (() => {
 
     const finalAccount = await _createFirebaseUser(email, pass, acc);
     if (!finalAccount) return false;
-
+    const accounts = DB.getAccounts();
     accounts.push(finalAccount);
     DB.saveAccounts(accounts);
     DB.createRegistrationRequest?.(finalAccount);
@@ -391,29 +436,29 @@ const Auth = (() => {
   }
 
   async function _regDoctor() {
-    const num   = (document.getElementById('rd-num')?.value       || '').trim().toUpperCase();
+    const num   = (document.getElementById('rd-num')?.value || '').trim().toUpperCase();
     const email = (document.getElementById('rd-num-email')?.value || '').trim();
-    const pass  = (document.getElementById('rd-num-pass')?.value  || '').trim();
+    const pass  = (document.getElementById('rd-num-pass')?.value || '').trim();
     const pass2 = (document.getElementById('rd-num-pass2')?.value || '').trim();
-    if (!await _reg(num, pass, pass2, 'doctor', { order_num: num, email })) return;
+    if (!await _reg(num, pass, pass2, 'doctor', { order_num:num, email })) return;
     _showPending();
   }
 
   async function _regPharmacist() {
-    const num   = (document.getElementById('rph-num')?.value       || '').trim().toUpperCase();
+    const num   = (document.getElementById('rph-num')?.value || '').trim().toUpperCase();
     const email = (document.getElementById('rph-num-email')?.value || '').trim();
-    const pass  = (document.getElementById('rph-num-pass')?.value  || '').trim();
+    const pass  = (document.getElementById('rph-num-pass')?.value || '').trim();
     const pass2 = (document.getElementById('rph-num-pass2')?.value || '').trim();
-    if (!await _reg(num, pass, pass2, 'pharmacist', { matricule: num, email })) return;
+    if (!await _reg(num, pass, pass2, 'pharmacist', { matricule:num, email })) return;
     _showPending();
   }
 
   async function _regNurse() {
-    const num   = (document.getElementById('rn-num')?.value       || '').trim().toUpperCase();
+    const num   = (document.getElementById('rn-num')?.value || '').trim().toUpperCase();
     const email = (document.getElementById('rn-num-email')?.value || '').trim();
-    const pass  = (document.getElementById('rn-num-pass')?.value  || '').trim();
+    const pass  = (document.getElementById('rn-num-pass')?.value || '').trim();
     const pass2 = (document.getElementById('rn-num-pass2')?.value || '').trim();
-    if (!await _reg(num, pass, pass2, 'nurse', { matricule: num, email })) return;
+    if (!await _reg(num, pass, pass2, 'nurse', { matricule:num, email })) return;
     _showPending();
   }
 
@@ -425,15 +470,10 @@ const Auth = (() => {
         <p style="font-size:.85rem;color:var(--text-muted);line-height:1.6">
           Votre demande est en cours de validation par l'administrateur.
           Vous recevrez une notification dès l'approbation de votre compte.
-          <br><br>
-          Votre demande a été reçue. Veuillez patienter pendant la vérification de vos informations.
+          <br><br>Votre demande a été reçue. Veuillez patienter pendant la vérification de vos informations.
         </p>
-        <p style="font-size:.8rem;color:var(--text-muted);margin-top:.75rem">
-          📞 +243 856 373 707
-        </p>
-        <button class="btn-p" style="margin-top:1rem" onclick="Auth._tab('login')">
-          ← Retour à la connexion
-        </button>
+        <p style="font-size:.8rem;color:var(--text-muted);margin-top:.75rem">📞 +243 856 373 707</p>
+        <button class="btn-p" style="margin-top:1rem" onclick="Auth._tab('login')">← Retour à la connexion</button>
       </div>`;
     document.getElementById('reg-err').style.display = 'none';
   }
@@ -444,58 +484,27 @@ const Auth = (() => {
     if (!cfg?.username || !cfg?.passwordHash) {
       App.openModal('⚙️ Configuration Administrateur', `
         <form onsubmit="Auth._setupAdmin(event)">
-          <div class="auth-register-info">
-            Aucun compte administrateur n'est configuré sur cet appareil.
-            Créez le premier accès local sans mot de passe codé dans l'application.
-          </div>
-          <div class="form-group">
-            <label class="inp-lbl">Nom affiché</label>
-            <input type="text" id="adm-setup-name" class="inp" value="Administrateur">
-          </div>
-          <div class="form-group">
-            <label class="inp-lbl">Identifiant administrateur *</label>
-            <input type="text" id="adm-setup-u" class="inp" autocomplete="off" required>
-          </div>
-          <div class="form-group">
-            <label class="inp-lbl">Mot de passe * (min. 8 caractères)</label>
-            <input type="password" id="adm-setup-p" class="inp" minlength="8" required>
-          </div>
-          <div class="form-group">
-            <label class="inp-lbl">Confirmer le mot de passe *</label>
-            <input type="password" id="adm-setup-p2" class="inp" minlength="8" required>
-          </div>
+          <div class="auth-register-info">Aucun compte administrateur n'est configuré sur cet appareil. Créez le premier accès local sans mot de passe codé dans l'application.</div>
+          <div class="form-group"><label class="inp-lbl">Nom affiché</label><input type="text" id="adm-setup-name" class="inp" value="Administrateur"></div>
+          <div class="form-group"><label class="inp-lbl">Identifiant administrateur *</label><input type="text" id="adm-setup-u" class="inp" autocomplete="off" required></div>
+          <div class="form-group"><label class="inp-lbl">Mot de passe * (min. 8 caractères)</label><input type="password" id="adm-setup-p" class="inp" minlength="8" required></div>
+          <div class="form-group"><label class="inp-lbl">Confirmer le mot de passe *</label><input type="password" id="adm-setup-p2" class="inp" minlength="8" required></div>
           <div id="adm-setup-err" class="auth-error" style="display:none"></div>
-          <div class="form-actions">
-            <button type="button" class="btn btn-ghost" onclick="App.closeModal()">Annuler</button>
-            <button type="submit" class="btn btn-primary">Créer l'accès</button>
-          </div>
+          <div class="form-actions"><button type="button" class="btn btn-ghost" onclick="App.closeModal()">Annuler</button><button type="submit" class="btn btn-primary">Créer l'accès</button></div>
         </form>`);
       return;
     }
 
     App.openModal('⚙️ Accès Administrateur', `
       <form onsubmit="Auth._doAdmin(event)">
-        <div class="form-group">
-          <label class="inp-lbl">Identifiant</label>
-          <input type="text" id="adm-u" class="inp" autocomplete="off">
-        </div>
-        <div class="form-group">
-          <label class="inp-lbl">Mot de passe</label>
-          <input type="password" id="adm-p" class="inp">
-        </div>
+        <div class="form-group"><label class="inp-lbl">Identifiant</label><input type="text" id="adm-u" class="inp" autocomplete="off"></div>
+        <div class="form-group"><label class="inp-lbl">Mot de passe</label><input type="password" id="adm-p" class="inp"></div>
         <div id="adm-err" class="auth-error" style="display:none"></div>
-        <div class="form-actions">
-          <button type="button" class="btn btn-ghost" onclick="App.closeModal()">Annuler</button>
-          <button type="submit" class="btn btn-primary">Connexion</button>
-        </div>
+        <div class="form-actions"><button type="button" class="btn btn-ghost" onclick="App.closeModal()">Annuler</button><button type="submit" class="btn btn-primary">Connexion</button></div>
       </form>`);
   }
 
-  function _getAdminConfig() {
-    try { return JSON.parse(localStorage.getItem(ADMIN_CONFIG_KEY) || 'null'); }
-    catch { return null; }
-  }
-
+  function _getAdminConfig() { try { return JSON.parse(localStorage.getItem(ADMIN_CONFIG_KEY) || 'null'); } catch { return null; } }
   async function _sha256(value) {
     if (!crypto?.subtle) throw new Error('crypto_subtle_unavailable');
     const bytes = new TextEncoder().encode(value);
@@ -505,59 +514,28 @@ const Auth = (() => {
 
   async function _setupAdmin(e) {
     e.preventDefault();
-    const name  = (document.getElementById('adm-setup-name')?.value || ADMIN.name).trim() || ADMIN.name;
-    const u     = (document.getElementById('adm-setup-u')?.value || '').trim();
-    const p     = (document.getElementById('adm-setup-p')?.value || '').trim();
-    const p2    = (document.getElementById('adm-setup-p2')?.value || '').trim();
-    const el    = document.getElementById('adm-setup-err');
-
-    const showSetupError = msg => {
-      if (!el) return;
-      el.textContent = msg;
-      el.style.display = 'block';
-    };
-
-    if (!u || !p || !p2) {
-      showSetupError('Veuillez remplir tous les champs obligatoires.');
-      return;
-    }
-    if (p.length < 8) {
-      showSetupError('Le mot de passe doit contenir au moins 8 caractères.');
-      return;
-    }
-    if (p !== p2) {
-      showSetupError('Les mots de passe ne correspondent pas.');
-      return;
-    }
-
+    const name = (document.getElementById('adm-setup-name')?.value || ADMIN.name).trim() || ADMIN.name;
+    const u = (document.getElementById('adm-setup-u')?.value || '').trim();
+    const p = (document.getElementById('adm-setup-p')?.value || '').trim();
+    const p2 = (document.getElementById('adm-setup-p2')?.value || '').trim();
+    const el = document.getElementById('adm-setup-err');
+    const showSetupError = msg => { if (!el) return; el.textContent = msg; el.style.display = 'block'; };
+    if (!u || !p || !p2) { showSetupError('Veuillez remplir tous les champs obligatoires.'); return; }
+    if (p.length < 8) { showSetupError('Le mot de passe doit contenir au moins 8 caractères.'); return; }
+    if (p !== p2) { showSetupError('Les mots de passe ne correspondent pas.'); return; }
     let passwordHash;
-    try {
-      passwordHash = await _sha256(p);
-    } catch {
-      showSetupError('Impossible de sécuriser le mot de passe dans ce navigateur.');
-      return;
-    }
-
-    localStorage.setItem(ADMIN_CONFIG_KEY, JSON.stringify({
-      username: u,
-      name,
-      passwordHash,
-      created_at: new Date().toISOString(),
-    }));
-
-    const adminSession = { ...ADMIN, username: u, name };
+    try { passwordHash = await _sha256(p); } catch { showSetupError('Impossible de sécuriser le mot de passe dans ce navigateur.'); return; }
+    localStorage.setItem(ADMIN_CONFIG_KEY, JSON.stringify({ username:u, name, passwordHash, created_at:new Date().toISOString() }));
+    const adminSession = { ...ADMIN, username:u, name };
     if (u.includes('@') && _hasFirebaseAuth()) {
       try {
         const credential = await firebaseAuth.signInWithEmailAndPassword(u, p);
         if (credential?.user?.uid) adminSession.uid = credential.user.uid;
-      } catch {}
+      } catch (e) { console.warn('[MedConnect] Connexion admin Firebase ignorée :', e); }
     }
-
-    App.closeModal();
-    _save(adminSession);
+    App.closeModal(); _save(adminSession);
     document.getElementById('auth-screen').style.display = 'none';
-    App.afterLogin(getUser());
-    App.toast('✅ Accès administrateur configuré.');
+    App.afterLogin(getUser()); App.toast('✅ Accès administrateur configuré.');
   }
 
   async function _doAdmin(e) {
@@ -566,44 +544,23 @@ const Auth = (() => {
     const p = (document.getElementById('adm-p')?.value || '').trim();
     const cfg = _getAdminConfig();
     const el = document.getElementById('adm-err');
-
-    if (!cfg?.username || !cfg?.passwordHash) {
-      if (el) {
-        el.textContent = 'Compte administrateur non configuré pour cette installation.';
-        el.style.display = 'block';
-      }
-      return;
-    }
-
+    if (!cfg?.username || !cfg?.passwordHash) { if (el) { el.textContent = 'Compte administrateur non configuré pour cette installation.'; el.style.display = 'block'; } return; }
     let passwordHash;
-    try {
-      passwordHash = await _sha256(p);
-    } catch {
-      if (el) {
-        el.textContent = 'Impossible de vérifier le mot de passe dans ce navigateur.';
-        el.style.display = 'block';
-      }
-      return;
-    }
-
+    try { passwordHash = await _sha256(p); } catch { if (el) { el.textContent = 'Impossible de vérifier le mot de passe dans ce navigateur.'; el.style.display = 'block'; } return; }
     if (u === cfg.username && passwordHash === cfg.passwordHash) {
-      const adminSession = { ...ADMIN, username: cfg.username, name: cfg.name || ADMIN.name };
+      const adminSession = { ...ADMIN, username:cfg.username, name:cfg.name || ADMIN.name };
       if (cfg.username.includes('@') && _hasFirebaseAuth()) {
         try {
           const credential = await firebaseAuth.signInWithEmailAndPassword(cfg.username, p);
           if (credential?.user?.uid) adminSession.uid = credential.user.uid;
-        } catch {}
+        } catch (e) { console.warn('[MedConnect] Connexion admin Firebase ignorée :', e); }
       }
-      App.closeModal();
-      _save(adminSession);
+      App.closeModal(); _save(adminSession);
       document.getElementById('auth-screen').style.display = 'none';
       App.afterLogin(getUser());
-    } else {
-      if (el) { el.textContent = '❌ Identifiants incorrects.'; el.style.display = 'block'; }
-    }
+    } else if (el) { el.textContent = '❌ Identifiants incorrects.'; el.style.display = 'block'; }
   }
 
-  /* ── LAUNCH ───────────────────────────────────────── */
   function _launch(acc) {
     const scr = document.getElementById('auth-screen');
     if (scr) scr.style.display = 'none';
@@ -613,28 +570,25 @@ const Auth = (() => {
   function _launchDoctor(acc) {
     if (window.HospitalsRegistry) {
       const hosps = HospitalsRegistry.getDoctorHospitals(acc.uid);
-      if (hosps.length > 0 && !HospitalsRegistry.getCurrentHospital()) {
-        sessionStorage.setItem('mc_current_hospital', hosps[0].hid);
-      }
+      if (hosps.length > 0 && !HospitalsRegistry.getCurrentHospital()) sessionStorage.setItem('mc_current_hospital', hosps[0].hid);
     }
     _launch(acc);
   }
 
-  /* ── UTILS ────────────────────────────────────────── */
   function _err(id, msg) {
     const el = document.getElementById(id);
     if (!el) return;
-    el.innerHTML = msg.replace(/\n/g, '<br>');
+    el.innerHTML = String(msg || '').replace(/\n/g, '<br>');
     el.style.display = msg ? 'block' : 'none';
   }
 
   function getRoleIcon(r)  { return ICONS[r]  || '👤'; }
-  function getRoleLabel(r) { return LABELS[r] || r;    }
+  function getRoleLabel(r) { return LABELS[r] || r; }
 
   return {
     getUser, isLogged, logout, showLogin,
     _tab, _loginRole, _registerRole,
-    _doPatient, _doDoctor, _doPharmacist, _doNurse,
+    _doPatient, _createPatientPin, _doDoctor, _doPharmacist, _doNurse,
     _regDoctor, _regPharmacist, _regNurse,
     _setupAdmin, _doAdmin,
     getRoleIcon, getRoleLabel,
