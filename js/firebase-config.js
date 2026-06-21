@@ -82,6 +82,20 @@ initFirebase();
       </form>`);
   }
 
+  function replaceLocalAdminModal() {
+    const title = document.getElementById('modal-title');
+    const body = document.getElementById('modal-body');
+    if (!title || !body) return;
+    const titleText = String(title.textContent || '');
+    const bodyText = String(body.textContent || '');
+    const isOldLocalModal = titleText.includes('Configuration Administrateur') ||
+      bodyText.includes('Aucun compte administrateur') ||
+      bodyText.includes('Créer le premier accès local');
+    if (isOldLocalModal && !document.getElementById('adm-cloud-email')) {
+      openCloudAdminModal();
+    }
+  }
+
   async function login(event) {
     event?.preventDefault?.();
     const email = (document.getElementById('adm-cloud-email')?.value || '').trim();
@@ -171,16 +185,18 @@ initFirebase();
     Auth.showLogin = function () {
       const result = originalShowLogin?.();
       installCloudAdminTrigger();
+      replaceLocalAdminModal();
       return result;
     };
 
     Auth._setupAdmin = function (event) {
       event?.preventDefault?.();
       try { localStorage.removeItem(ADMIN_CONFIG_KEY); } catch (_) {}
-      showError('adm-setup-err', 'L’accès administrateur local est désactivé. Utilisez le compte administrateur Firebase.');
+      openCloudAdminModal();
     };
     Auth._doAdmin = login;
     installCloudAdminTrigger();
+    replaceLocalAdminModal();
     return true;
   }
 
@@ -188,11 +204,26 @@ initFirebase();
     let attempts = 0;
     const timer = setInterval(() => {
       attempts += 1;
-      if (patchAuth() || attempts > 40) clearInterval(timer);
+      patchAuth();
+      replaceLocalAdminModal();
+      if (attempts > 60) clearInterval(timer);
     }, 250);
   }
 
-  window.MedConnectAdminCloud = { login, openCloudAdminModal, installCloudAdminTrigger, patchAuth };
+  function observeModal() {
+    const target = document.getElementById('global-modal') || document.body;
+    if (!target || target.dataset.adminCloudObserver === '1') return;
+    target.dataset.adminCloudObserver = '1';
+    const observer = new MutationObserver(() => replaceLocalAdminModal());
+    observer.observe(target, { childList: true, subtree: true, characterData: true });
+  }
+
+  window.MedConnectAdminCloud = { login, openCloudAdminModal, installCloudAdminTrigger, patchAuth, replaceLocalAdminModal };
   retryPatch();
-  window.addEventListener('DOMContentLoaded', () => setTimeout(() => { patchAuth(); installCloudAdminTrigger(); }, 0));
+  window.addEventListener('DOMContentLoaded', () => setTimeout(() => {
+    patchAuth();
+    installCloudAdminTrigger();
+    observeModal();
+    replaceLocalAdminModal();
+  }, 0));
 })();
