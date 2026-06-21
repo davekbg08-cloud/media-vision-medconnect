@@ -1,0 +1,60 @@
+name: Build MedConnect Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'android/**'
+      - 'index.html'
+      - 'js/**'
+      - 'css/**'
+      - 'sw.js'
+      - 'manifest.json'
+
+permissions:
+  contents: read
+
+env:
+  APK_NAME: medconnect-v2.4.apk
+
+jobs:
+  build-apk:
+    name: Build APK v2.4
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.2'
+
+      - name: Build release APK
+        working-directory: android
+        run: gradle assembleRelease --no-daemon
+
+      - name: Prepare APK artifact
+        run: |
+          mkdir -p build-output
+          cp android/app/build/outputs/apk/release/app-release.apk "build-output/${APK_NAME}"
+          ls -lh build-output
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: medconnect-v2.4-apk
+          path: build-output/medconnect-v2.4.apk
+          if-no-files-found: error
