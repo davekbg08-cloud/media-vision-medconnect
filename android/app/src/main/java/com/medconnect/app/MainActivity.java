@@ -1,4 +1,4 @@
-package com.medconnect.app;
+package com.mediavision.medconnect;
 
 import android.Manifest;
 import android.content.pm.PackageManager;
@@ -18,6 +18,8 @@ import java.util.Arrays;
 
 public class MainActivity extends AppCompatActivity {
 
+    private static final String MEDCONNECT_PWA_URL = "https://davekbg08-cloud.github.io/media-vision-medconnect/?apk=v2.4.0";
+
     private WebView myWebView;
     private static final int LOCATION_PERMISSION_REQUEST_CODE = 100;
     private static final int CAMERA_PERMISSION_REQUEST_CODE = 101;
@@ -28,7 +30,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        
+
         myWebView = new WebView(this);
         setContentView(myWebView);
 
@@ -36,9 +38,11 @@ public class MainActivity extends AppCompatActivity {
         webSettings.setJavaScriptEnabled(true);
         webSettings.setDomStorageEnabled(true);
         webSettings.setDatabaseEnabled(true);
-        webSettings.setAllowFileAccess(true);
+        webSettings.setAllowFileAccess(false);
         webSettings.setAllowContentAccess(false);
         webSettings.setGeolocationEnabled(true);
+        webSettings.setCacheMode(WebSettings.LOAD_DEFAULT);
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             webSettings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         }
@@ -46,7 +50,12 @@ public class MainActivity extends AppCompatActivity {
         myWebView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, String url) {
-                return false;
+                if (url == null) return false;
+                if (url.startsWith("https://davekbg08-cloud.github.io/media-vision-medconnect")) {
+                    return false;
+                }
+                view.loadUrl(url);
+                return true;
             }
         });
 
@@ -83,7 +92,7 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        myWebView.loadUrl("file:///android_asset/index.html");
+        myWebView.loadUrl(MEDCONNECT_PWA_URL);
     }
 
     @Override
