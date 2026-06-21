@@ -2,7 +2,7 @@
    MedConnect 2.0 — Service Worker
    Optimisation chargement / PWA
    ===================================================== */
-const CACHE = 'medconnect-v2.4-fastload';
+const CACHE = 'medconnect-v2.4';
 
 const ASSETS = [
   './', './index.html', './css/style.css',
@@ -43,7 +43,9 @@ function shouldBypassCache(request) {
     url.includes('firestore.googleapis.com') ||
     url.includes('firebase') ||
     url.includes('googleapis.com/identitytoolkit') ||
-    url.includes('securetoken.googleapis.com');
+    url.includes('securetoken.googleapis.com') ||
+    url.endsWith('.apk') ||
+    url.includes('/downloads/');
 }
 
 function isFreshAppShellRequest(request) {
