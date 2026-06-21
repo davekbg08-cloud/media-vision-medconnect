@@ -135,7 +135,7 @@
   }
 
   function patchAuth() {
-    if (!ready() || Auth.__adminCloudPatchApplied) return;
+    if (!ready() || Auth.__adminCloudPatchApplied) return false;
     Auth.__adminCloudPatchApplied = true;
 
     try { localStorage.removeItem(ADMIN_CONFIG_KEY); } catch (_) {}
@@ -154,8 +154,19 @@
     };
 
     Auth._doAdmin = login;
+    installCloudAdminTrigger();
+    return true;
   }
 
-  window.MedConnectAdminCloud = { login, openCloudAdminModal, installCloudAdminTrigger };
-  patchAuth();
+  function retryPatch() {
+    let attempts = 0;
+    const timer = setInterval(() => {
+      attempts += 1;
+      if (patchAuth() || attempts > 40) clearInterval(timer);
+    }, 250);
+  }
+
+  window.MedConnectAdminCloud = { login, openCloudAdminModal, installCloudAdminTrigger, patchAuth };
+  if (!patchAuth()) retryPatch();
+  window.addEventListener('DOMContentLoaded', () => setTimeout(() => { patchAuth(); installCloudAdminTrigger(); }, 0));
 })();
