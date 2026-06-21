@@ -227,8 +227,10 @@ const App = (() => {
 
     ACL.initRegistry();
 
-    // Sync Firebase
-    await DB.init();
+    // Sync Firebase en arrière-plan : ne bloque plus l'affichage initial.
+    setTimeout(() => {
+      DB.init().catch(error => console.warn('[MedConnect] Sync Firebase non bloquante :', error));
+    }, 0);
 
     // Auto-login si session active
     const user = Auth.getUser();
