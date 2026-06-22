@@ -149,6 +149,22 @@ const DB = (() => {
     listen(firebaseDB.collection('registration_requests'), snap => {
       if (!snap.empty) storeSnapshot('registration_requests', snap);
     });
+    // Ordonnances — pour rafraîchir l'inbox pharmacie/médecin en quasi temps réel
+    listen(firebaseDB.collection('mc_prescriptions'), snap => {
+      if (!snap.empty) storeSnapshot('mc_prescriptions', snap);
+    });
+    // Consultations
+    listen(firebaseDB.collection('mc_consultations'), snap => {
+      if (!snap.empty) storeSnapshot('mc_consultations', snap);
+    });
+    // Inventaire pharmacie (stock partagé entre appareils du même pharmacien)
+    listen(firebaseDB.collection('mc_medicines'), snap => {
+      if (!snap.empty) storeSnapshot('mc_medicines', snap);
+    });
+    // Ventes
+    listen(firebaseDB.collection('mc_sales'), snap => {
+      if (!snap.empty) storeSnapshot('mc_sales', snap);
+    });
   }
 
   /* ── INIT ────────────────────────────────────────── */

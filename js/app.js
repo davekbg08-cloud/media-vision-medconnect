@@ -314,12 +314,41 @@ const App = (() => {
     if (slc) slc.innerHTML = I18n.renderSelector();
   }
 
+  let currentSection = null;
+
   function navigateTo(section) {
+    currentSection = section;
     document.querySelectorAll('.nav-item').forEach(el =>
       el.classList.toggle('active', el.dataset.section === section));
     document.getElementById('main-content').innerHTML = '<div class="loading">⏳</div>';
     closeMobileSidebar();
     setTimeout(() => routeSection(section), 40);
+  }
+
+  /* ── Rafraîchissement auto (1s) ──────────────────────
+     Les listeners Firestore mettent localStorage à jour en
+     quasi temps réel ; ceci ne fait que ré-afficher l'écran
+     courant pour le rendre visible immédiatement.
+     Ne touche jamais un écran où l'utilisateur tape/sélectionne.
+  ──────────────────────────────────────────────────────── */
+  function _isUserTyping() {
+    const el = document.activeElement;
+    if (!el) return false;
+    const tag = el.tagName;
+    const main = document.getElementById('main-content');
+    return (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT')
+      && main && main.contains(el);
+  }
+
+  function _startAutoRefresh() {
+    setInterval(() => {
+      if (!currentSection) return;
+      const modal = document.getElementById('global-modal');
+      if (modal && modal.classList.contains('active')) return; // ne pas casser un formulaire ouvert
+      if (_isUserTyping()) return;                              // ne pas casser une saisie en cours
+      if (!Auth.isLogged()) return;
+      try { routeSection(currentSection); } catch (_) {}
+    }, 1000);
   }
 
   function goHome() { Auth.logout(); }
@@ -377,6 +406,7 @@ const App = (() => {
     });
 
     ACL.initRegistry();
+    _startAutoRefresh();
 
     setTimeout(() => {
       DB.init().catch(error => console.warn('[MedConnect] Sync Firebase non bloquante :', error));
