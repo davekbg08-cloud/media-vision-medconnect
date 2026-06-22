@@ -333,26 +333,81 @@ const HospitalPortal = (() => {
 
   function saveConsult(e, patientId) {
     e.preventDefault();
+    const user = Auth.getUser() || {};
+    const hosp = window.HospitalsRegistry?.getCurrentHospital?.();
+
+    /* ── PARTIE A/E — garde obligatoire avant toute création ── */
+    if (user.role === 'doctor' && !user.order_num) {
+      App.toast("Impossible de créer l'ordonnance : numéro d'ordre manquant.", 'error'); return;
+    }
+    if (user.role === 'doctor' && !hosp) {
+      App.toast("Impossible de créer l'ordonnance : aucun établissement actif. Sélectionnez un établissement.", 'error'); return;
+    }
+
     const diag = document.getElementById('c-diag').value;
     const meds = [...document.querySelectorAll('.rx-item')]
       .map(el => ({ name: el.querySelector('.rx-name').value, dosage: el.querySelector('.rx-dosage').value }))
       .filter(m => m.name?.trim());
+
     DB.addConsultation({
       patient_id: patientId,
       date:       document.getElementById('c-date').value,
       doctor:     document.getElementById('c-doc').value,
+      doctorOrderNumber: user.order_num || '',
+      doctorSpecialty:   user.specialty || '',
       reason:     document.getElementById('c-reason').value,
       diagnosis:  diag,
       treatment:  document.getElementById('c-treat').value,
       notes:      document.getElementById('c-notes').value,
       ...currentEstablishmentFields(),
     });
+
+    App.closeModal();
+
     if (meds.length) {
-      const rx = DB.addPrescription({ patient_id:patientId, date:document.getElementById('c-date').value, doctor:document.getElementById('c-doc').value, diagnosis:diag, medicines:meds, ...currentEstablishmentFields() });
-      // Send to pharmacy
-      Network.sendPrescriptionToPharmacy(rx.pid, 'Pharmacie Centrale');
+      const rx = DB.addPrescription({
+        patient_id: patientId,
+        date:       document.getElementById('c-date').value,
+        doctor:     document.getElementById('c-doc').value,
+        doctor_uid: user.uid || '',
+        doctorOrderNumber: user.order_num || '',
+        doctorSpecialty:   user.specialty || '',
+        diagnosis:  diag,
+        medicines:  meds,
+        ...currentEstablishmentFields(),
+      });
+      openPrescriptionTarget(rx.pid);
+      return;
     }
-    App.closeModal(); App.toast(t('msg_saved')); App.navigateTo('consultations');
+
+    App.toast(t('msg_saved')); App.navigateTo('consultations');
+  }
+
+  /* ── PARTIE E/F — choix de la destination de l'ordonnance ── */
+  function openPrescriptionTarget(pid) {
+    const pharmacies = Network.getAvailablePharmacies();
+    App.openModal('💊 Envoyer l\'ordonnance', `
+      <p style="font-size:.84rem;color:var(--text-muted);margin-bottom:1rem">
+        Choisissez la destination. Par défaut, aucune pharmacie n'a accès à l'ordonnance.
+      </p>
+      <div class="form-group">
+        <label>Destination</label>
+        <select id="rx-target">
+          <option value="patient">Patient seulement (aucune pharmacie)</option>
+          ${pharmacies.map(ph => `<option value="${ph.uid}">${esc(ph.pharmacy || ph.name)}${ph.country?' — '+ph.country:''}</option>`).join('')}
+        </select>
+        ${!pharmacies.length ? `<small style="color:var(--accent)">Aucune pharmacie validée disponible pour le moment.</small>` : ''}
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-primary" onclick="HospitalPortal.confirmPrescriptionTarget('${pid}')">📤 Confirmer l'envoi</button>
+      </div>`);
+  }
+
+  function confirmPrescriptionTarget(pid) {
+    const target = document.getElementById('rx-target')?.value || 'patient';
+    Network.sendPrescriptionToPharmacy(pid, target);
+    App.closeModal();
+    App.navigateTo('consultations');
   }
 
   function delConsult(cid, patientId) {
@@ -412,6 +467,7 @@ const HospitalPortal = (() => {
   return {
     render, filter, openDetail, openNewPatient, saveNewPatient, deletePatient,
     openConsult, addRxItem, runSmartCheck, saveConsult, delConsult,
+    openPrescriptionTarget, confirmPrescriptionTarget,
     renderConsultations, renderPrescriptions,
   };
 })();

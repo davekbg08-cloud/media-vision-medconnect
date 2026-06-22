@@ -205,6 +205,7 @@ const App = (() => {
     ],
     pharmacist: () => [
       { label:'Tableau de Bord',   icon:'📊', s:'dashboard'     },
+      { label:'Ordonnances reçues',icon:'💊', s:'pharmacy_rx'   },
       { label:'Point de Vente',    icon:'🛒', s:'pos'           },
       { label:'Inventaire',        icon:'📦', s:'inventory'     },
       { label:'Ventes',            icon:'📈', s:'sales'         },
@@ -261,6 +262,7 @@ const App = (() => {
       case 'pos':           PharmacyPortal.render('pos');           break;
       case 'inventory':     PharmacyPortal.render('inventory');     break;
       case 'sales':         PharmacyPortal.render('sales');         break;
+      case 'pharmacy_rx':   PharmacyPortal.render('prescriptions'); break;
 
       default:
         main.innerHTML = `<div class="card empty-state"><p>Section : ${section}</p></div>`;

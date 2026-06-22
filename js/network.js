@@ -125,7 +125,7 @@ const Network = (() => {
     App.toast('✅ Message envoyé');
   }
 
-  /* ── DOCTOR → PHARMACY ─────────────────────────── */
+  /* ── DOCTOR → PHARMACY (ciblée, plus de diffusion globale) ── */
   function canSendPrescription(rx) {
     const user = Auth.getUser();
     if (!user || !rx) return false;
@@ -134,14 +134,42 @@ const Network = (() => {
     return ACL.canAccessPatient(user, rx.patient_id || rx.patientId);
   }
 
-  function sendPrescriptionToPharmacy(prescriptionId, pharmacyName) {
-    const rx = DB.getPrescriptions().find(p => p.pid === prescriptionId || p.code === prescriptionId); if (!rx) return;
-    if (!canSendPrescription(rx)) {
-      App.toast('Accès ordonnance non autorisé.', 'error');
+  /** Liste les pharmaciens actifs pouvant recevoir une ordonnance */
+  function getAvailablePharmacies() {
+    return DB.getAccounts().filter(a => a.role === 'pharmacist' && a.status === 'approved');
+  }
+
+  /** PARTIE E/F — envoi ciblé : 'patient' | uid pharmacien précis */
+  function sendPrescriptionToPharmacy(prescriptionId, target) {
+    const rx = DB.getPrescriptions().find(p => p.pid === prescriptionId || p.code === prescriptionId);
+    if (!rx) { App.toast('Ordonnance introuvable.', 'error'); return; }
+    if (!canSendPrescription(rx)) { App.toast('Accès ordonnance non autorisé.', 'error'); return; }
+
+    const pt = DB.getPatientById(rx.patient_id || rx.patientId);
+    const patientId = rx.patient_id || rx.patientId || '—';
+
+    // "patient" seul : aucune pharmacie ne doit voir l'ordonnance
+    if (!target || target === 'patient') {
+      DB.updatePrescription(rx.pid, { pharmacyUid: null, pharmacyName: null, status: 'sent' });
+      notify({
+        to_role: 'patient', to_id: patientId, type: 'prescription',
+        subject: '💊 Ordonnance disponible',
+        body: `Votre ordonnance du ${rx.date} est disponible dans votre espace. Présentez-la à la pharmacie de votre choix.`,
+      });
+      App.toast('✅ Ordonnance enregistrée — patient uniquement');
       return;
     }
-    const pt = DB.getPatientById(rx.patient_id || rx.patientId);
-    const patientId = rx.patient_id || rx.patientId || rx.patientNom || '—';
+
+    // Pharmacie précise (uid réel d'un compte pharmacien)
+    const pharmacist = getAvailablePharmacies().find(p => p.uid === target);
+    if (!pharmacist) { App.toast('Pharmacie introuvable ou non validée.', 'error'); return; }
+
+    DB.updatePrescription(rx.pid, {
+      pharmacyUid:  pharmacist.uid,
+      pharmacyName: pharmacist.pharmacy || pharmacist.name,
+      status:       'sent',
+    });
+
     const body = [
       `Patient : ${patientName(pt)} [${patientId}]`,
       `Diagnostic : ${rx.diagnosis || rx.diagnostic || '—'}`,
@@ -152,21 +180,45 @@ const Network = (() => {
     ].join('\n');
 
     notify({
-      to_role: 'pharmacist',
-      type:    'prescription',
+      to_role: 'pharmacist', to_id: pharmacist.uid, type: 'prescription',
       subject: `💊 Ordonnance patient ${patientId}`,
       body,
     });
-    // Notify patient
     notify({
-      to_role: 'patient',
-      to_id:   patientId,
-      type:    'prescription',
-      subject: `✅ Ordonnance envoyée à ${pharmacyName||'la pharmacie'}`,
-      body:    `Votre ordonnance du ${rx.date} a été transmise. Vous pouvez aller récupérer vos médicaments.`,
+      to_role: 'patient', to_id: patientId, type: 'prescription',
+      subject: `✅ Ordonnance envoyée à ${pharmacist.pharmacy || pharmacist.name}`,
+      body: `Votre ordonnance du ${rx.date} a été transmise. Vous pouvez aller récupérer vos médicaments.`,
     });
-    App.toast('📤 Ordonnance envoyée à la pharmacie');
+    App.toast(`📤 Ordonnance envoyée à ${pharmacist.pharmacy || pharmacist.name}`);
   }
+
+  /* ── PARTIE B — statuts ordonnance côté pharmacie ───────── */
+  const RX_STATUSES = ['sent','received','preparing','ready','delivered','cancelled'];
+
+  function setPrescriptionStatus(pid, status, reason) {
+    const user = Auth.getUser();
+    if (!RX_STATUSES.includes(status)) return;
+    const rx = DB.getPrescriptions().find(p => p.pid === pid);
+    if (!rx) return;
+    DB.updatePrescription(pid, {
+      status, updatedByUid: user?.uid || '', updatedByRole: user?.role || '',
+      ...(reason ? { cancelReason: reason } : {}),
+    });
+    const labels = { received:'reçue', preparing:'en préparation', ready:'prête', delivered:'remise au patient', cancelled:'annulée' };
+    notify({
+      to_role: 'doctor', to_id: rx.doctor_uid || rx.created_by, type: 'prescription',
+      subject: `Ordonnance ${labels[status] || status}`,
+      body: `L'ordonnance du patient ${rx.patient_id || rx.patientId} est désormais : ${labels[status] || status}.`,
+    });
+    notify({
+      to_role: 'patient', to_id: rx.patient_id || rx.patientId, type: 'prescription',
+      subject: `Votre ordonnance est ${labels[status] || status}`,
+      body: `Mise à jour de votre ordonnance du ${rx.date} : ${labels[status] || status}.`,
+    });
+    App.toast(`✅ Statut mis à jour : ${labels[status] || status}`);
+  }
+
+
 
   /* ── SMART PRESCRIPTION CHECK ──────────────────── */
   function smartCheck(patientId, medicines) {
@@ -237,7 +289,7 @@ const Network = (() => {
   return {
     notify, getUnread, markRead,
     renderInbox, openMsg, openCompose, sendMessage,
-    sendPrescriptionToPharmacy,
+    sendPrescriptionToPharmacy, getAvailablePharmacies, setPrescriptionStatus, RX_STATUSES,
     smartCheck, renderSmartCheckResult,
     checkStockForMeds,
   };

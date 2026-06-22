@@ -325,11 +325,22 @@ const DB = (() => {
 
   function addPrescription(data) {
     const list = getPrescriptions();
-    const p = { ...data, pid: `P${Date.now()}`, date: data.date || today() };
+    const p = { ...data, pid: `P${Date.now()}`, date: data.date || today(), status: data.status || 'sent' };
     list.push(p); store('mc_prescriptions', list);
     _push('mc_prescriptions', p.pid, p);
     _push('prescriptions', p.pid, p);
     return p;
+  }
+
+  function updatePrescription(pid, data) {
+    const list = getPrescriptions();
+    const idx  = list.findIndex(p => p.pid === pid);
+    if (idx === -1) return null;
+    list[idx] = { ...list[idx], ...data, pid, updatedAt: new Date().toISOString() };
+    store('mc_prescriptions', list);
+    _push('mc_prescriptions', pid, list[idx]);
+    _push('prescriptions', pid, list[idx]);
+    return list[idx];
   }
 
   function getPatientPrescriptions(pid) {
@@ -528,7 +539,7 @@ const DB = (() => {
     getRegistrationRequests, saveRegistrationRequests, createRegistrationRequest,
     getPatients, addPatient, updatePatient, deletePatient, getPatientById, searchPatients,
     getConsultations, addConsultation, getPatientConsultations, deleteConsultation,
-    getPrescriptions, addPrescription, getPatientPrescriptions,
+    getPrescriptions, addPrescription, updatePrescription, getPatientPrescriptions,
     getAppointments, addAppointment, updateAppointment, deleteAppointment,
     getVaccinations, addVaccination, getPatientVaccinations, deleteVaccination,
     getAllLabResults, addLabResult, getPatientLabResults, deleteLabResult,
