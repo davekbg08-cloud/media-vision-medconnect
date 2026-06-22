@@ -340,9 +340,19 @@ const App = (() => {
       && main && main.contains(el);
   }
 
+  /* Sections sûres à ré-afficher automatiquement : aucune n'a d'état
+     local sensible (panier, carte Leaflet, formulaire multi-étapes).
+     'pos' (panier), 'map'/'pharmacy_map' (recréation Leaflet),
+     'settings' et 'hospitals' sont volontairement exclues. */
+  const AUTO_REFRESH_SAFE = new Set([
+    'my_record','timeline','history','vaccinations','appointments',
+    'inbox','prescriptions','lab','dashboard','patients',
+    'consultations','inventory','sales','pharmacy_rx',
+  ]);
+
   function _startAutoRefresh() {
     setInterval(() => {
-      if (!currentSection) return;
+      if (!currentSection || !AUTO_REFRESH_SAFE.has(currentSection)) return;
       const modal = document.getElementById('global-modal');
       if (modal && modal.classList.contains('active')) return; // ne pas casser un formulaire ouvert
       if (_isUserTyping()) return;                              // ne pas casser une saisie en cours
