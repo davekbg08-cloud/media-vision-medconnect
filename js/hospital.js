@@ -152,7 +152,10 @@ const HospitalPortal = (() => {
     main.innerHTML = `
       <div class="page-header">
         <h2>👥 ${t('nav_patients')}</h2>
-        <button class="btn btn-primary btn-sm" onclick="HospitalPortal.openNewPatient()">+ ${t('btn_new_patient')}</button>
+        <div class="header-actions">
+          <button class="btn btn-ghost btn-sm" onclick="HospitalPortal.openExternalSearch()">🔍 Patient d'un autre établissement</button>
+          <button class="btn btn-primary btn-sm" onclick="HospitalPortal.openNewPatient()">+ ${t('btn_new_patient')}</button>
+        </div>
       </div>
       <div class="search-bar">
         <input type="search" id="h-srch" placeholder="${t('search_placeholder')}"
@@ -162,6 +165,53 @@ const HospitalPortal = (() => {
         ${patientsForContext().slice().reverse().map(p=>patRow(p)).join('')
           || `<div class="card empty-state"><p>${t('no_data')}</p></div>`}
       </div>`;
+  }
+
+  /* ── PARTIE K — accès à un patient hors de mon périmètre ── */
+  function openExternalSearch() {
+    App.openModal('🔍 Rechercher un patient — numéro unique', `
+      <p style="font-size:.83rem;color:var(--text-muted);margin-bottom:.75rem">
+        Pour un patient déjà suivi ailleurs, entrez son numéro unique exact (MC-...).
+        Une demande d'accès lui sera envoyée — il devra l'autoriser.
+      </p>
+      <div class="form-group">
+        <label>Numéro unique patient</label>
+        <input type="text" id="ext-pid" placeholder="MC-2026-CD-XXXXXXXX"
+          style="text-transform:uppercase;font-family:monospace" oninput="this.value=this.value.toUpperCase()">
+      </div>
+      <div id="ext-result"></div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-ghost" onclick="App.closeModal()">Fermer</button>
+        <button type="button" class="btn btn-primary" onclick="HospitalPortal.searchExternalPatient()">Rechercher</button>
+      </div>`);
+  }
+
+  function searchExternalPatient() {
+    const id = (document.getElementById('ext-pid')?.value || '').trim().toUpperCase();
+    const box = document.getElementById('ext-result');
+    const p = DB.getPatientById(id);
+    if (!p) { box.innerHTML = `<p style="color:var(--danger);font-size:.83rem;margin-top:.5rem">${t('msg_no_record')}</p>`; return; }
+    if (canUsePatient(id)) {
+      box.innerHTML = `<p style="color:var(--secondary);font-size:.83rem;margin-top:.5rem">✅ Vous avez déjà accès à ce patient.</p>`;
+      return;
+    }
+    const user = Auth.getUser();
+    const already = ACL.getPatientConsents(id).find(c => c.doctor_id === user.uid && c.status === 'pending');
+    box.innerHTML = `
+      <div class="record-card" style="margin-top:.6rem">
+        <strong>${esc(p.firstname)} ${esc(p.lastname)}</strong> <span class="id-tag">${p.id}</span>
+        <p style="font-size:.82rem;color:var(--text-muted);margin-top:.3rem">Vous n'avez pas accès à ce dossier. Le patient doit autoriser votre demande.</p>
+        ${already
+          ? `<p style="font-size:.8rem;color:var(--accent);margin-top:.4rem">⏳ Demande déjà envoyée — en attente de réponse.</p>`
+          : `<button class="btn btn-primary btn-sm" style="margin-top:.5rem" onclick="HospitalPortal.requestPatientAccess('${id}')">🔐 Demander l'accès</button>`}
+      </div>`;
+  }
+
+  function requestPatientAccess(patientId) {
+    const user = Auth.getUser();
+    ACL.requestConsent(patientId, user.uid, user.name);
+    App.toast('📤 Demande envoyée au patient');
+    App.closeModal();
   }
 
   function filter(q) {
@@ -502,6 +552,7 @@ const HospitalPortal = (() => {
 
   return {
     render, filter, openDetail, openNewPatient, saveNewPatient, deletePatient,
+    openExternalSearch, searchExternalPatient, requestPatientAccess,
     openConsult, addRxItem, runSmartCheck, saveConsult, delConsult,
     openPrescriptionTarget, confirmPrescriptionTarget,
     renderConsultations, renderPrescriptions,
