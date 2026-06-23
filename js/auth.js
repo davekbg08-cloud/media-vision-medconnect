@@ -217,6 +217,22 @@ const Auth = (() => {
   function _hasFirebaseDB() { return typeof firebaseDB !== 'undefined' && !!firebaseDB; }
   const _professionalField = role => role === 'doctor' ? 'order_num' : 'matricule';
 
+  /* ── Vérifie que le compte Firebase Auth a bien role:'admin'
+     dans Firestore (users/{uid}). Sans ce document, isAdmin()
+     refusera TOUTE écriture admin côté serveur — même connecté.
+     Ce document ne peut PAS être créé en self-service (sécurité
+     volontaire : 'admin' est exclu de publicUserRole côté règles).
+     Il doit être ajouté manuellement, une seule fois, par le
+     propriétaire du projet, dans Firebase Console > Firestore >
+     users > {uid} > role: "admin", status: "approved". ──────── */
+  async function _verifyAdminCloudRole(uid) {
+    if (!uid || !_hasFirebaseDB()) return false;
+    try {
+      const doc = await firebaseDB.collection('users').doc(uid).get();
+      return doc.exists && doc.data()?.role === 'admin';
+    } catch (e) { console.warn('[MedConnect] Vérification rôle admin cloud :', e); return false; }
+  }
+
   async function _syncBeforeAuth(label) {
     try { await DB.syncFromFirebase?.(); }
     catch (e) { console.warn(`[MedConnect] Sync avant ${label} impossible :`, e); }
@@ -526,16 +542,24 @@ const Auth = (() => {
     let passwordHash;
     try { passwordHash = await _sha256(p); } catch { showSetupError('Impossible de sécuriser le mot de passe dans ce navigateur.'); return; }
     localStorage.setItem(ADMIN_CONFIG_KEY, JSON.stringify({ username:u, name, passwordHash, created_at:new Date().toISOString() }));
-    const adminSession = { ...ADMIN, username:u, name };
+    const adminSession = { ...ADMIN, username:u, name, cloudSynced:false };
     if (u.includes('@') && _hasFirebaseAuth()) {
       try {
         const credential = await firebaseAuth.signInWithEmailAndPassword(u, p);
-        if (credential?.user?.uid) adminSession.uid = credential.user.uid;
+        if (credential?.user?.uid) {
+          adminSession.uid = credential.user.uid;
+          adminSession.cloudSynced = await _verifyAdminCloudRole(credential.user.uid);
+        }
       } catch (e) { console.warn('[MedConnect] Connexion admin Firebase ignorée :', e); }
     }
     App.closeModal(); _save(adminSession);
     document.getElementById('auth-screen').style.display = 'none';
-    App.afterLogin(getUser()); App.toast('✅ Accès administrateur configuré.');
+    App.afterLogin(getUser());
+    if (!adminSession.cloudSynced) {
+      App.toast('⚠️ Accès admin créé en local uniquement. Pour synchroniser avec Firestore, utilisez un email déjà lié à un compte Firebase Auth, ET demandez l\'ajout manuel de role:"admin" dans Firestore (users/{uid}).', 'error');
+    } else {
+      App.toast('✅ Accès administrateur configuré — synchronisé avec Firestore.');
+    }
   }
 
   async function _doAdmin(e) {
@@ -548,14 +572,19 @@ const Auth = (() => {
     /* ── Filet de secours — accès toujours disponible ──────────
        Garantit un accès admin même si la config locale est vide
        ou inaccessible (réinstallation, nouvel appareil, sync KO).
+       ⚠️ Ce mode N'AUTHENTIFIE PAS via Firebase Auth : les actions
+       admin (approbations, registres) ne se synchroniseront PAS
+       vers Firestore tant qu'un vrai compte admin cloud n'est pas
+       configuré (voir _verifyAdminCloudRole ci-dessus).
     ──────────────────────────────────────────────────────────── */
     const FALLBACK_USER = 'admin';
     const FALLBACK_PASS = 'MedConnect@2026!';
     if (u === FALLBACK_USER && p === FALLBACK_PASS) {
       App.closeModal();
-      _save({ ...ADMIN, username: FALLBACK_USER });
+      _save({ ...ADMIN, username: FALLBACK_USER, cloudSynced: false });
       document.getElementById('auth-screen').style.display = 'none';
       App.afterLogin(getUser());
+      App.toast('⚠️ Accès admin local — vos actions ne seront pas synchronisées tant qu\'un compte admin cloud n\'est pas configuré.', 'error');
       return;
     }
 
@@ -563,16 +592,24 @@ const Auth = (() => {
     let passwordHash;
     try { passwordHash = await _sha256(p); } catch { if (el) { el.textContent = 'Impossible de vérifier le mot de passe dans ce navigateur.'; el.style.display = 'block'; } return; }
     if (u === cfg.username && passwordHash === cfg.passwordHash) {
-      const adminSession = { ...ADMIN, username:cfg.username, name:cfg.name || ADMIN.name };
+      const adminSession = { ...ADMIN, username:cfg.username, name:cfg.name || ADMIN.name, cloudSynced:false };
       if (cfg.username.includes('@') && _hasFirebaseAuth()) {
         try {
           const credential = await firebaseAuth.signInWithEmailAndPassword(cfg.username, p);
-          if (credential?.user?.uid) adminSession.uid = credential.user.uid;
+          if (credential?.user?.uid) {
+            adminSession.uid = credential.user.uid;
+            adminSession.cloudSynced = await _verifyAdminCloudRole(credential.user.uid);
+          }
         } catch (e) { console.warn('[MedConnect] Connexion admin Firebase ignorée :', e); }
       }
       App.closeModal(); _save(adminSession);
       document.getElementById('auth-screen').style.display = 'none';
       App.afterLogin(getUser());
+      if (!adminSession.cloudSynced) {
+        App.toast('⚠️ Compte admin non reconnu côté Firestore (users/{uid}.role doit être "admin"). Actions non synchronisées.', 'error');
+      } else {
+        App.toast('✅ Admin connecté — synchronisé avec Firestore.');
+      }
     } else if (el) { el.textContent = '❌ Identifiants incorrects.'; el.style.display = 'block'; }
   }
 

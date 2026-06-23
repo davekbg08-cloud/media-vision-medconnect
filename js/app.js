@@ -308,7 +308,11 @@ const App = (() => {
     if (su) su.innerHTML = `
       <span>${Auth.getRoleIcon(role)}</span>
       <strong>${user.name}</strong>
-      <br><small style="color:var(--text-muted)">${Auth.getRoleLabel(role)}</small>`;
+      <br><small style="color:var(--text-muted)">${Auth.getRoleLabel(role)}</small>
+      ${role === 'admin' ? `
+        <br><small style="color:${user.cloudSynced ? 'var(--secondary)' : 'var(--danger)'}">
+          ${user.cloudSynced ? '☁️ Synchronisé Firestore' : '⚠️ Local uniquement — non synchronisé'}
+        </small>` : ''}`;
 
     const slc = document.getElementById('sidebar-lang-container');
     if (slc) slc.innerHTML = I18n.renderSelector();
