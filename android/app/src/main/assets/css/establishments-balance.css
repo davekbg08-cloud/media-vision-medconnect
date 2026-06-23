@@ -1,0 +1,105 @@
+/* =====================================================
+   MedConnect — Ajustement visuel Établissements
+   -----------------------------------------------------
+   Objectif : équilibrer la page Établissements sur mobile.
+   - Cartes statistiques moins grandes.
+   - Boutons d’onglets plus réguliers.
+   - État vide moins haut.
+   ===================================================== */
+
+@media (max-width: 768px) {
+  .main-content > .stats-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: .65rem;
+    margin-bottom: 1rem;
+  }
+
+  .main-content > .stats-grid .stat-card {
+    min-height: auto;
+    padding: .85rem .7rem;
+    border-radius: 14px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+
+  .main-content > .stats-grid .stat-icon {
+    font-size: 1.25rem;
+    margin-bottom: .28rem;
+  }
+
+  .main-content > .stats-grid .stat-value {
+    font-size: 1.55rem;
+    line-height: 1.05;
+  }
+
+  .main-content > .stats-grid .stat-label {
+    font-size: .62rem;
+    line-height: 1.25;
+    letter-spacing: .25px;
+    margin-top: .25rem;
+  }
+
+  .main-content > .header-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: .55rem;
+    width: 100%;
+    margin-bottom: 1rem !important;
+  }
+
+  .main-content > .header-actions .chip-filter {
+    width: 100%;
+    justify-content: center;
+    min-height: 38px;
+    padding: .42rem .6rem;
+    font-size: .78rem;
+    line-height: 1.2;
+    white-space: normal;
+    text-align: center;
+  }
+
+  .main-content > .card.empty-state {
+    padding: 1.6rem 1rem;
+    min-height: 130px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 430px) {
+  .main-content > .stats-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .main-content > .stats-grid .stat-card {
+    padding: .75rem .45rem;
+  }
+
+  .main-content > .stats-grid .stat-icon {
+    font-size: 1.1rem;
+  }
+
+  .main-content > .stats-grid .stat-value {
+    font-size: 1.35rem;
+  }
+
+  .main-content > .stats-grid .stat-label {
+    font-size: .56rem;
+  }
+
+  .main-content > .header-actions {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 360px) {
+  .main-content > .stats-grid .stat-label {
+    font-size: .52rem;
+  }
+
+  .main-content > .header-actions {
+    grid-template-columns: 1fr;
+  }
+}
