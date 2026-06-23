@@ -140,6 +140,16 @@
     setTimeout(refreshComposeRecipients, 0);
   }
 
+  function syncTransferToCloud(transfer) {
+    try {
+      const ready = typeof firebaseReady !== 'undefined' ? firebaseReady : window.firebaseReady;
+      const db = typeof firebaseDB !== 'undefined' ? firebaseDB : window.firebaseDB;
+      if (!ready || !db || !transfer?.transferId) return;
+      db.collection('mc_transfers').doc(String(transfer.transferId)).set(transfer, { merge: true });
+      db.collection('transfers').doc(String(transfer.transferId)).set(transfer, { merge: true });
+    } catch (_) {}
+  }
+
   function sendMessage(event) {
     event.preventDefault();
 
@@ -169,6 +179,7 @@
           metadata: { source: 'network_compose' },
         });
 
+        syncTransferToCloud(transfer);
         window.TransferService.createNotificationForTransfer(transfer, { subject, body });
       } else {
         window.Network.notify({
