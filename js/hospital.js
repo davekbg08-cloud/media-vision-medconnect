@@ -349,7 +349,8 @@ const HospitalPortal = (() => {
       .map(el => ({ name: el.querySelector('.rx-name').value, dosage: el.querySelector('.rx-dosage').value }))
       .filter(m => m.name?.trim());
 
-    DB.addConsultation({
+    const est = currentEstablishmentFields();
+    const consult = DB.addConsultation({
       patient_id: patientId,
       date:       document.getElementById('c-date').value,
       doctor:     document.getElementById('c-doc').value,
@@ -359,7 +360,24 @@ const HospitalPortal = (() => {
       diagnosis:  diag,
       treatment:  document.getElementById('c-treat').value,
       notes:      document.getElementById('c-notes').value,
-      ...currentEstablishmentFields(),
+      ...est,
+    });
+
+    DB.addEstablishmentDocument({
+      relatedId:        consult.cid,
+      documentType:     'consultation',
+      documentTitle:     `Consultation — ${document.getElementById('c-reason').value || diag}`,
+      establishmentId:   est.establishmentId || '',
+      establishmentName: est.establishmentName || '',
+      doctorUid:          user.uid || '',
+      doctorName:         document.getElementById('c-doc').value,
+      doctorOrderNumber:  user.order_num || '',
+      patientUid:         patientId,
+      patientCode:        patientId,
+      status:             'active',
+      createdByUid:       user.uid || '',
+      createdByRole:      user.role || '',
+      accessLevel:        'establishment',
     });
 
     App.closeModal();
@@ -374,8 +392,26 @@ const HospitalPortal = (() => {
         doctorSpecialty:   user.specialty || '',
         diagnosis:  diag,
         medicines:  meds,
-        ...currentEstablishmentFields(),
+        ...est,
       });
+
+      DB.addEstablishmentDocument({
+        relatedId:        rx.pid,
+        documentType:      'prescription',
+        documentTitle:      `Ordonnance — ${meds.length} médicament(s)`,
+        establishmentId:    est.establishmentId || '',
+        establishmentName:  est.establishmentName || '',
+        doctorUid:           user.uid || '',
+        doctorName:          document.getElementById('c-doc').value,
+        doctorOrderNumber:   user.order_num || '',
+        patientUid:          patientId,
+        patientCode:         patientId,
+        status:              'active',
+        createdByUid:        user.uid || '',
+        createdByRole:       user.role || '',
+        accessLevel:         'establishment',
+      });
+
       openPrescriptionTarget(rx.pid);
       return;
     }

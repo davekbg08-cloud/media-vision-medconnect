@@ -100,6 +100,7 @@ const DB = (() => {
       'mc_hospitals','mc_affiliations',
       'establishments','affiliation_requests',
       'mc_verified_doctors','mc_verified_pharms','mc_verified_nurses',
+      'establishment_documents',
     ];
     for (const col of collections) {
       try {
@@ -164,6 +165,10 @@ const DB = (() => {
     // Ventes
     listen(firebaseDB.collection('mc_sales'), snap => {
       if (!snap.empty) storeSnapshot('mc_sales', snap);
+    });
+    // Trace documents établissement (audit)
+    listen(firebaseDB.collection('establishment_documents'), snap => {
+      if (!snap.empty) storeSnapshot('establishment_documents', snap);
     });
   }
 
@@ -366,6 +371,24 @@ const DB = (() => {
   /* ══════════════════════════════════════════════════
      RENDEZ-VOUS
   ══════════════════════════════════════════════════ */
+  /* ══════════════════════════════════════════════════
+     PARTIE G — TRACE DOCUMENTS ÉTABLISSEMENT (audit)
+  ══════════════════════════════════════════════════ */
+  function getEstablishmentDocuments() { return load('establishment_documents'); }
+
+  function addEstablishmentDocument(doc) {
+    const list = getEstablishmentDocuments();
+    const d = {
+      documentId: `DOC${Date.now()}`,
+      createdAt:  new Date().toISOString(),
+      auditRequired: true,
+      ...doc,
+    };
+    list.push(d); store('establishment_documents', list);
+    _push('establishment_documents', d.documentId, d);
+    return d;
+  }
+
   function getAppointments() { return load('mc_appointments'); }
 
   function addAppointment(data) {
@@ -556,6 +579,7 @@ const DB = (() => {
     getPatients, addPatient, updatePatient, deletePatient, getPatientById, searchPatients,
     getConsultations, addConsultation, getPatientConsultations, deleteConsultation,
     getPrescriptions, addPrescription, updatePrescription, getPatientPrescriptions,
+    getEstablishmentDocuments, addEstablishmentDocument,
     getAppointments, addAppointment, updateAppointment, deleteAppointment,
     getVaccinations, addVaccination, getPatientVaccinations, deleteVaccination,
     getAllLabResults, addLabResult, getPatientLabResults, deleteLabResult,

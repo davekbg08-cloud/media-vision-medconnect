@@ -11,15 +11,28 @@ const Network = (() => {
     return `${patient.firstname || patient.prenom || ''} ${patient.lastname || patient.nom || ''}`.trim() || '—';
   }
 
-  /* ── NOTIFICATIONS ─────────────────────────────── */
-  function notify({ to_role, to_id, type, subject, body }) {
+  /* ── NOTIFICATIONS ─────────────────────────────────
+     Champs nouveaux ajoutés SANS retirer les anciens :
+     to_role/to_id/read (existants) restent fonctionnels.
+     toUid/fromUid/fromRole/readStatus/priority/createdAt
+     sont les champs propres pour les nouveaux usages.
+  ──────────────────────────────────────────────────── */
+  function notify({ to_role, to_id, type, subject, body, priority }) {
+    const from = window.Auth?.getUser?.();
     const msgs = DB.getMessages();
     msgs.push({
-      mid:     `N${Date.now()}`,
+      mid:        `N${Date.now()}`,
       to_role, to_id, type, subject, body,
-      from:    window.Auth?.getUser?.()?.name || 'MedConnect',
-      date:    new Date().toISOString().slice(0,10),
-      read:    false,
+      toUid:      to_id || null,
+      fromUid:    from?.uid || null,
+      fromRole:   from?.role || 'system',
+      from:       from?.name || 'MedConnect',
+      priority:   priority === 'urgent' ? 'urgent' : 'normal',
+      date:       new Date().toISOString().slice(0,10),
+      createdAt:  new Date().toISOString(),
+      read:       false,
+      readStatus: 'unread',
+      readAt:     null,
     });
     DB.saveMessages(msgs);
   }
@@ -38,25 +51,44 @@ const Network = (() => {
   function getUnread(role, id) {
     const user = window.Auth?.getUser?.();
     if (!id && user?.role === role) {
-      return DB.getMessages().filter(m => messageMatchesUser(m, user) && !m.read).length;
+      return DB.getMessages().filter(m => messageMatchesUser(m, user) && m.readStatus !== 'read' && !m.read).length;
     }
     return DB.getMessages().filter(m =>
-      m.to_role === role && (!id || m.to_id === id) && !m.read
+      m.to_role === role && (!id || m.to_id === id) && m.readStatus !== 'read' && !m.read
     ).length;
   }
 
   function markRead(mid) {
     const msgs = DB.getMessages();
     const m    = msgs.find(x => x.mid === mid);
-    if (m) { m.read = true; DB.saveMessages(msgs); }
+    if (m) {
+      m.read = true;
+      m.readStatus = 'read';
+      m.readAt = new Date().toISOString();
+      DB.saveMessages(msgs);
+    }
   }
 
-  /* ── INBOX UI ──────────────────────────────────── */
+  function markUnread(mid) {
+    const msgs = DB.getMessages();
+    const m    = msgs.find(x => x.mid === mid);
+    if (m) { m.read = false; m.readStatus = 'unread'; m.readAt = null; DB.saveMessages(msgs); }
+  }
+
+  /* ── INBOX UI — non lus en premier, urgents en tête ─── */
   function renderInbox(main) {
     const user = Auth.getUser();
     const msgs = DB.getMessages()
       .filter(m => messageMatchesUser(m, user))
-      .sort((a,b) => b.date.localeCompare(a.date));
+      .sort((a,b) => {
+        const unreadA = a.readStatus !== 'read' && !a.read ? 1 : 0;
+        const unreadB = b.readStatus !== 'read' && !b.read ? 1 : 0;
+        if (unreadA !== unreadB) return unreadB - unreadA;
+        const urgentA = a.priority === 'urgent' ? 1 : 0;
+        const urgentB = b.priority === 'urgent' ? 1 : 0;
+        if (urgentA !== urgentB) return urgentB - urgentA;
+        return (b.createdAt || b.date || '').localeCompare(a.createdAt || a.date || '');
+      });
 
     main.innerHTML = `
       <div class="page-header">
@@ -65,17 +97,21 @@ const Network = (() => {
       </div>
       ${!msgs.length ? `<div class="card empty-state"><p>Aucun message</p></div>` : ''}
       <div class="records-list">
-        ${msgs.map(m => `
-          <div class="record-card ${m.read?'':'unread-msg'}" onclick="Network.openMsg('${m.mid}')">
+        ${msgs.map(m => {
+          const isUnread = m.readStatus !== 'read' && !m.read;
+          return `
+          <div class="record-card ${isUnread?'unread-msg':''}" onclick="Network.openMsg('${m.mid}')">
             <div class="record-header">
               <span>${typeIcon(m.type)}</span>
+              ${m.priority === 'urgent' ? `<span class="chip" style="color:var(--danger);border-color:var(--danger)">🔴 Urgent</span>` : ''}
               <strong>${esc(m.subject)}</strong>
               <span class="record-date">📅 ${m.date}</span>
-              ${!m.read ? `<span class="unread-dot"></span>` : ''}
+              ${isUnread ? `<span class="unread-dot"></span>` : ''}
             </div>
             <p style="font-size:.84rem;color:var(--text-muted)">De : ${esc(m.from)}</p>
             <p style="font-size:.83rem">${esc(m.body).slice(0,100)}${m.body.length>100?'…':''}</p>
-          </div>`).join('')}
+          </div>`;
+        }).join('')}
       </div>`;
   }
 
@@ -90,7 +126,10 @@ const Network = (() => {
     App.openModal(`${typeIcon(m.type)} ${m.subject}`, `
       <p style="font-size:.84rem;color:var(--text-muted)">De : <strong>${esc(m.from)}</strong> · 📅 ${m.date}</p>
       <hr style="border-color:var(--border);margin:1rem 0">
-      <p style="font-size:.9rem;line-height:1.7">${esc(m.body).replace(/\n/g,'<br>')}</p>`);
+      <p style="font-size:.9rem;line-height:1.7">${esc(m.body).replace(/\n/g,'<br>')}</p>
+      <div class="form-actions" style="margin-top:1rem">
+        <button class="btn btn-ghost btn-sm" onclick="Network.markUnread('${m.mid}');App.closeModal();App.navigateTo('inbox')">Marquer non lu</button>
+      </div>`);
   }
 
   function openCompose() {
@@ -102,6 +141,12 @@ const Network = (() => {
             <option value="doctor">👨‍⚕️ Médecin</option>
             <option value="pharmacist">💊 Pharmacien</option>
             <option value="nurse">🩹 Infirmier</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Priorité</label>
+          <select id="msg-priority">
+            <option value="normal">Normale</option>
+            <option value="urgent">🔴 Urgente</option>
           </select>
         </div>
         <div class="form-group"><label>Sujet *</label><input type="text" id="msg-subject" required></div>
@@ -116,10 +161,11 @@ const Network = (() => {
   function sendMessage(e) {
     e.preventDefault();
     notify({
-      to_role: document.getElementById('msg-role').value,
-      type:    'info',
-      subject: document.getElementById('msg-subject').value,
-      body:    document.getElementById('msg-body').value,
+      to_role:  document.getElementById('msg-role').value,
+      type:     'info',
+      priority: document.getElementById('msg-priority').value,
+      subject:  document.getElementById('msg-subject').value,
+      body:     document.getElementById('msg-body').value,
     });
     App.closeModal();
     App.toast('✅ Message envoyé');
@@ -287,7 +333,7 @@ const Network = (() => {
   }
 
   return {
-    notify, getUnread, markRead,
+    notify, getUnread, markRead, markUnread,
     renderInbox, openMsg, openCompose, sendMessage,
     sendPrescriptionToPharmacy, getAvailablePharmacies, setPrescriptionStatus, RX_STATUSES,
     smartCheck, renderSmartCheckResult,

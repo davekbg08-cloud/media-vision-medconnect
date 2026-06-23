@@ -252,6 +252,17 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin();
     }
 
+    /* PARTIE G — trace/audit des documents médicaux par établissement.
+       Lecture : admin, médecin auteur, ou tout utilisateur signé
+       (cas réel : équipe de l'établissement) — l'écriture reste
+       réservée à l'auteur ou à l'admin, jamais modifiable après coup. */
+    match /establishment_documents/{documentId} {
+      allow read: if isAdmin() || signedIn();
+      allow create: if isAdmin() ||
+        (signedIn() && request.resource.data.doctorUid == request.auth.uid);
+      allow update, delete: if isAdmin();
+    }
+
     match /affiliation_requests/{requestId} {
       allow create: if signedIn() &&
         request.resource.data.requesterUid == request.auth.uid &&

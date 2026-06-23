@@ -705,17 +705,36 @@ const HospitalsRegistry = (() => {
   function renderAdminRecords() {
     const hospitals = getHospitals();
     if (!hospitals.length) return `<div class="card empty-state"><p>Aucun établissement enregistré</p></div>`;
+    const recentDocs = (DB.getEstablishmentDocuments?.() || []).slice(-10).reverse();
     return `
       <div class="auth-register-info">
         Accès contrôlé : l'admin peut gérer, un établissement voit ses dossiers, un médecin voit ses patients,
         et un patient voit uniquement son propre dossier.
       </div>
+      ${recentDocs.length ? `
+        <h4 style="margin:.75rem 0 .5rem;font-size:.85rem;color:var(--text-muted)">🗂️ Journal des documents (récents)</h4>
+        <div class="records-list" style="margin-bottom:1rem">
+          ${recentDocs.map(d => `
+            <div class="record-card" style="padding:.6rem .85rem">
+              <div class="record-header">
+                <span>${d.documentType === 'prescription' ? '💊' : d.documentType === 'consultation' ? '🩺' : '📄'}</span>
+                <strong style="font-size:.82rem">${esc(d.documentTitle || d.documentType)}</strong>
+                <span class="chip" style="font-size:.7rem">${esc(d.establishmentName || '—')}</span>
+                <span class="record-date" style="font-size:.72rem">${d.createdAt?.slice(0,16).replace('T',' ') || '—'}</span>
+              </div>
+              <p style="font-size:.74rem;color:var(--text-muted)">
+                Dr. ${esc(d.doctorName || '—')}${d.doctorOrderNumber?' · N° '+esc(d.doctorOrderNumber):''} ·
+                Patient : <span class="id-tag">${esc(d.patientCode || '—')}</span>
+              </p>
+            </div>`).join('')}
+        </div>` : ''}
       <div class="records-list">
         ${hospitals.map(h => {
           const patients = getPatientsForEstablishment(h.establishmentId);
           const pids = patients.map(p => p.id);
           const consultations = DB.getConsultations().filter(c => pids.includes(c.patient_id) || c.establishmentId === h.establishmentId || c.hospital_id === h.establishmentId);
           const labs = DB.getAllLabResults().filter(l => pids.includes(l.patient_id) || l.establishmentId === h.establishmentId || l.hospital_id === h.establishmentId);
+          const rxs = (DB.getPrescriptions?.() || []).filter(p => pids.includes(p.patient_id) || p.establishmentId === h.establishmentId || p.hospital_id === h.establishmentId);
           return `
             <div class="record-card">
               <div class="record-header">
@@ -723,6 +742,7 @@ const HospitalsRegistry = (() => {
                 <strong>${esc(h.name)}</strong>
                 <span class="chip">🩺 ${patients.length} dossier(s)</span>
                 <span class="chip">📋 ${consultations.length} consultation(s)</span>
+                <span class="chip">💊 ${rxs.length} ordonnance(s)</span>
                 <span class="chip">🧪 ${labs.length} analyse(s)</span>
               </div>
               ${patients.slice(0,4).map(p => `
