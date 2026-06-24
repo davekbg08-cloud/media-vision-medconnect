@@ -1,15 +1,14 @@
 /* =====================================================
-   MedConnect — Bouton Retour global
+   MedConnect — Bouton Retour menu principal
    -----------------------------------------------------
-   Ajoute un bouton retour sur toutes les pages internes,
-   sans modifier les portails métier page par page.
+   Bouton global sur mobile : ferme une modale ouverte,
+   sinon retourne directement au menu principal du rôle.
    ===================================================== */
 (function () {
   'use strict';
 
   if (window.MedConnectBackButton?.installed) return;
 
-  const HISTORY_KEY = 'mc_nav_history';
   const DEFAULT_BY_ROLE = {
     patient: 'my_record',
     doctor: 'dashboard',
@@ -17,10 +16,6 @@
     pharmacist: 'dashboard',
     admin: 'dashboard',
   };
-
-  let originalNavigateTo = null;
-  let lastSection = null;
-  let currentSection = null;
 
   function appVisible() {
     const layout = document.getElementById('app-layout');
@@ -37,30 +32,8 @@
     catch (_) { return 'patient'; }
   }
 
-  function readHistory() {
-    try { return JSON.parse(sessionStorage.getItem(HISTORY_KEY) || '[]'); }
-    catch (_) { return []; }
-  }
-
-  function writeHistory(list) {
-    try { sessionStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(-20))); }
-    catch (_) {}
-  }
-
-  function pushHistory(section) {
-    if (!section || section === currentSection) return;
-    const history = readHistory();
-    if (currentSection && history[history.length - 1] !== currentSection) history.push(currentSection);
-    lastSection = currentSection;
-    currentSection = section;
-    writeHistory(history);
-  }
-
-  function popHistory() {
-    const history = readHistory();
-    const previous = history.pop();
-    writeHistory(history);
-    return previous || lastSection || null;
+  function mainSectionForRole() {
+    return DEFAULT_BY_ROLE[getUserRole()] || 'dashboard';
   }
 
   function ensureStyle() {
@@ -111,7 +84,8 @@
     button.id = 'mc-global-back-btn';
     button.className = 'mc-global-back-btn';
     button.type = 'button';
-    button.setAttribute('aria-label', 'Retour');
+    button.setAttribute('aria-label', 'Retour au menu principal');
+    button.title = 'Retour au menu principal';
     button.textContent = '←';
     button.addEventListener('click', goBack);
     document.body.appendChild(button);
@@ -135,49 +109,14 @@
 
   function goBack() {
     if (closeModalIfOpen()) return;
-
-    const previous = popHistory();
-    const fallback = DEFAULT_BY_ROLE[getUserRole()] || 'dashboard';
-    const target = previous && previous !== currentSection ? previous : fallback;
-
+    const target = mainSectionForRole();
     if (window.App?.navigateTo && target) {
-      window.App.navigateTo(target, { fromBackButton: true });
-      return;
+      window.App.navigateTo(target);
     }
-
-    if (window.history.length > 1) window.history.back();
-  }
-
-  function patchAppNavigation() {
-    if (!window.App || originalNavigateTo || typeof App.navigateTo !== 'function') return false;
-    originalNavigateTo = App.navigateTo.bind(App);
-
-    App.navigateTo = function (section, options = {}) {
-      if (!options?.fromBackButton) pushHistory(section);
-      const result = originalNavigateTo(section);
-      setTimeout(updateVisibility, 80);
-      return result;
-    };
-
-    const originalAfterLogin = App.afterLogin?.bind(App);
-    if (originalAfterLogin && !App.__backButtonAfterLoginPatched) {
-      App.afterLogin = function (user) {
-        currentSection = null;
-        lastSection = null;
-        writeHistory([]);
-        const result = originalAfterLogin(user);
-        setTimeout(updateVisibility, 120);
-        return result;
-      };
-      App.__backButtonAfterLoginPatched = true;
-    }
-
-    return true;
   }
 
   function tick() {
     ensureButton();
-    patchAppNavigation();
     updateVisibility();
   }
 
