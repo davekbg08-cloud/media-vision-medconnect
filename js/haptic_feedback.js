@@ -32,6 +32,9 @@
 
   let lastPulseAt = 0;
   let lastTarget = null;
+  const nativeVibrate = typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function'
+    ? navigator.vibrate.bind(navigator)
+    : null;
 
   function injectPressedStyle() {
     if (document.getElementById('mc-haptic-style')) return;
@@ -65,14 +68,30 @@
     }, 95);
   }
 
-  function pulse(el) {
+  function rawVibrate(pattern) {
     const now = Date.now();
-    if (now - lastPulseAt < 80) return;
+    if (now - lastPulseAt < 80) return false;
     lastPulseAt = now;
-    lastTarget = el || lastTarget;
     try {
-      if (navigator?.vibrate) navigator.vibrate(8);
+      return nativeVibrate ? nativeVibrate(pattern || 8) : false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function installVibrateThrottle() {
+    if (!nativeVibrate || navigator.__mcVibrateThrottled) return;
+    try {
+      navigator.vibrate = function (pattern) {
+        return rawVibrate(pattern || 8);
+      };
+      navigator.__mcVibrateThrottled = true;
     } catch (_) {}
+  }
+
+  function pulse(el) {
+    lastTarget = el || lastTarget;
+    rawVibrate(8);
     visualPress(el || lastTarget);
   }
 
@@ -92,6 +111,7 @@
   }
 
   injectPressedStyle();
+  installVibrateThrottle();
   document.addEventListener('pointerdown', onPointerDown, true);
   document.addEventListener('keydown', onKeyDown, true);
 
