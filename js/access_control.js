@@ -108,11 +108,11 @@ const ACL = (() => {
   function requestConsent(patientId, doctorId, doctorName) {
     const list = getConsents();
     if (list.find(c => c.patient_id===patientId && c.doctor_id===doctorId && c.status==='approved')) return;
-    const c = { cid:`CON${Date.now()}`, patient_id:patientId, doctor_id:doctorId,
+    const c = { cid:DB.makeId('CON'), patient_id:patientId, doctor_id:doctorId,
                 doctor_name:doctorName, status:'pending', requested_at:new Date().toISOString() };
     list.push(c); saveConsents(list);
     const msgs = DB.getMessages();
-    msgs.push({ mid:`N${Date.now()}`, to_role:'patient', to_id:patientId, type:'consent_request',
+    msgs.push({ mid:DB.makeId('N'), to_role:'patient', to_id:patientId, type:'consent_request',
       subject:`🔐 Demande d'accès — ${doctorName}`,
       body:`${doctorName} souhaite accéder à votre dossier médical complet.\nAcceptez ou refusez dans Paramètres → Confidentialité.`,
       from:doctorName, date:new Date().toISOString().slice(0,10), read:false, consent_id:c.cid });

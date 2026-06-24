@@ -21,7 +21,7 @@ const Network = (() => {
     const from = window.Auth?.getUser?.();
     const msgs = DB.getMessages();
     msgs.push({
-      mid:        `N${Date.now()}`,
+      mid:        DB.makeId('N'),
       to_role, to_id, type, subject, body,
       toUid:      to_id || null,
       fromUid:    from?.uid || null,

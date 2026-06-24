@@ -54,7 +54,7 @@ const HospitalsRegistry = (() => {
   }
 
   function normalizeEstablishment(raw = {}) {
-    const establishmentId = raw.establishmentId || raw.hid || raw.id || `EST${Date.now()}`;
+    const establishmentId = raw.establishmentId || raw.hid || raw.id || DB.makeId('EST');
     const createdAt = raw.createdAt || raw.created_at || now();
     const updatedAt = raw.updatedAt || raw.updated_at || createdAt;
     const latitude = raw.latitude ?? raw.lat ?? '';
@@ -91,7 +91,7 @@ const HospitalsRegistry = (() => {
     const requesterRole = raw.requesterRole || raw.role || account.role || 'doctor';
     const professionalNumber = raw.professionalNumber || raw.order_num || raw.matricule ||
       account.order_num || account.matricule || account.username || '';
-    const requestId = raw.requestId || raw.afid || `AFF${Date.now()}`;
+    const requestId = raw.requestId || raw.afid || DB.makeId('AFF');
     const createdAt = raw.createdAt || raw.requested_at || raw.created_at || now();
     const updatedAt = raw.updatedAt || raw.decided_at || raw.updated_at || createdAt;
     const requesterName = raw.requesterName || raw.doctor_name || account.name || '';
@@ -150,7 +150,7 @@ const HospitalsRegistry = (() => {
     const list = getHospitals();
     const h = normalizeEstablishment({
       ...data,
-      establishmentId: data.establishmentId || `EST${Date.now()}`,
+      establishmentId: data.establishmentId || DB.makeId('EST'),
       createdAt: data.createdAt || now(),
       updatedAt: now(),
     });
@@ -211,7 +211,7 @@ const HospitalsRegistry = (() => {
     if (existing) return false;
 
     const a = normalizeRequest({
-      requestId: `AFF${Date.now()}`,
+      requestId: DB.makeId('AFF'),
       requesterUid,
       requesterName,
       requesterRole,
