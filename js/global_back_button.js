@@ -68,10 +68,15 @@
     const style = document.createElement('style');
     style.id = 'mc-back-button-style';
     style.textContent = `
+      @media (max-width: 768px) {
+        .main-content {
+          padding-bottom: calc(5.25rem + env(safe-area-inset-bottom, 0px));
+        }
+      }
       .mc-global-back-btn {
         position: fixed;
-        right: calc(.85rem + env(safe-area-inset-right, 0px));
-        top: calc(.75rem + env(safe-area-inset-top, 0px));
+        right: calc(.95rem + env(safe-area-inset-right, 0px));
+        bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
         z-index: 950;
         width: 2.85rem;
         height: 2.85rem;
