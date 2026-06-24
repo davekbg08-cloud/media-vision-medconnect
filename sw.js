@@ -2,14 +2,14 @@
    MedConnect 2.0 — Service Worker
    Optimisation chargement / PWA
    ===================================================== */
-const CACHE = 'medconnect-v2.7';
+const CACHE = 'medconnect-v2.8';
 
 const ASSETS = [
   './', './index.html', './css/style.css', './css/establishments-balance.css',
   './js/firebase-config.js',
   './js/i18n.js', './js/db.js', './js/currency.js',
-  './js/access_control.js', './js/transfer_service.js',
-  './js/network.js', './js/transfer_ui_patch.js',
+  './js/access_control.js', './js/haptic_feedback.js',
+  './js/transfer_service.js', './js/network.js', './js/transfer_ui_patch.js',
   './js/hospitals_registry.js', './js/timeline.js',
   './js/appointments.js', './js/lab.js', './js/map.js',
   './js/patient.js', './js/hospital.js', './js/pharmacy.js',
