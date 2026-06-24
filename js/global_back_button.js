@@ -17,6 +17,9 @@
     admin: 'dashboard',
   };
 
+  let appPatched = false;
+  let authPatched = false;
+
   function appVisible() {
     const layout = document.getElementById('app-layout');
     return !!layout && layout.style.display !== 'none';
@@ -27,9 +30,13 @@
     return !!auth && auth.style.display !== 'none';
   }
 
+  function getUser() {
+    try { return window.Auth?.getUser?.() || null; }
+    catch (_) { return null; }
+  }
+
   function getUserRole() {
-    try { return window.Auth?.getUser?.()?.role || 'patient'; }
-    catch (_) { return 'patient'; }
+    return getUser()?.role || 'patient';
   }
 
   function mainSectionForRole() {
@@ -94,7 +101,7 @@
 
   function updateVisibility() {
     const button = ensureButton();
-    const visible = appVisible() && !authVisible() && !!window.Auth?.isLogged?.();
+    const visible = appVisible() && !authVisible() && !!getUser();
     button.classList.toggle('visible', visible);
   }
 
@@ -112,11 +119,54 @@
     const target = mainSectionForRole();
     if (window.App?.navigateTo && target) {
       window.App.navigateTo(target);
+      setTimeout(updateVisibility, 80);
     }
+  }
+
+  function patchAppHooks() {
+    if (!window.App || appPatched) return;
+
+    if (typeof App.afterLogin === 'function') {
+      const originalAfterLogin = App.afterLogin.bind(App);
+      App.afterLogin = function (...args) {
+        const result = originalAfterLogin(...args);
+        setTimeout(updateVisibility, 80);
+        setTimeout(updateVisibility, 350);
+        return result;
+      };
+    }
+
+    if (typeof App.navigateTo === 'function') {
+      const originalNavigateTo = App.navigateTo.bind(App);
+      App.navigateTo = function (...args) {
+        const result = originalNavigateTo(...args);
+        setTimeout(updateVisibility, 80);
+        return result;
+      };
+    }
+
+    appPatched = true;
+  }
+
+  function patchAuthHooks() {
+    if (!window.Auth || authPatched) return;
+
+    if (typeof Auth.logout === 'function') {
+      const originalLogout = Auth.logout.bind(Auth);
+      Auth.logout = function (...args) {
+        const result = originalLogout(...args);
+        setTimeout(updateVisibility, 80);
+        return result;
+      };
+    }
+
+    authPatched = true;
   }
 
   function tick() {
     ensureButton();
+    patchAppHooks();
+    patchAuthHooks();
     updateVisibility();
   }
 
@@ -125,10 +175,12 @@
   const timer = setInterval(() => {
     attempts += 1;
     tick();
-    if (attempts > 60) clearInterval(timer);
+    if (attempts > 160) clearInterval(timer);
   }, 150);
 
   document.addEventListener('visibilitychange', updateVisibility);
+  window.addEventListener('focus', updateVisibility);
+  window.addEventListener('storage', updateVisibility);
 
   window.MedConnectBackButton = Object.freeze({
     installed: true,
