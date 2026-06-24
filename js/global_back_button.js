@@ -70,19 +70,19 @@
     style.textContent = `
       .mc-global-back-btn {
         position: fixed;
-        left: calc(4.25rem + env(safe-area-inset-left, 0px));
+        right: calc(.85rem + env(safe-area-inset-right, 0px));
         top: calc(.75rem + env(safe-area-inset-top, 0px));
         z-index: 950;
-        width: 3.15rem;
-        height: 3.15rem;
-        border-radius: 1rem;
+        width: 2.85rem;
+        height: 2.85rem;
+        border-radius: .95rem;
         border: 1px solid rgba(148, 163, 184, .22);
         background: rgba(15, 23, 42, .82);
         color: var(--text-main, #f8fafc);
         display: none;
         align-items: center;
         justify-content: center;
-        font-size: 1.45rem;
+        font-size: 1.35rem;
         font-weight: 800;
         box-shadow: 0 10px 24px rgba(0,0,0,.22);
         backdrop-filter: blur(14px);
