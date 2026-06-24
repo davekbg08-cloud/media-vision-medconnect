@@ -86,17 +86,32 @@
     return { verified: false, data: null };
   }
 
+  function professionalNumberOf(item, role) {
+    const field = role === 'doctor' ? 'order_num' : 'matricule';
+    return String(item?.professionalNumber || item?.[field] || item?.username || '').toUpperCase();
+  }
+
   function findLocalDuplicate(role, number, email) {
     const n = String(number || '').toUpperCase();
     const e = String(email || '').toLowerCase();
-    const field = role === 'doctor' ? 'order_num' : 'matricule';
     const accounts = DB?.getAccounts?.() || [];
     const users = DB?.getUsers?.() || [];
-    return [...accounts, ...users].find(item =>
+    const requests = DB?.getRegistrationRequests?.() || [];
+
+    const account = [...accounts, ...users].find(item =>
       item.role === role &&
       (
-        String(item[field] || item.username || '').toUpperCase() === n ||
+        professionalNumberOf(item, role) === n ||
         (e && String(item.email || '').toLowerCase() === e)
+      )
+    );
+    if (account) return account;
+
+    return requests.find(req =>
+      (req.role === role || req.requesterRole === role) &&
+      (
+        String(req.professionalNumber || '').toUpperCase() === n ||
+        (e && String(req.email || '').toLowerCase() === e)
       )
     ) || null;
   }
@@ -182,22 +197,75 @@
     return { account: userProfile, request };
   }
 
-  function showPendingConfirmation() {
+  function renderStatusScreen(status, role, details = {}) {
     const form = document.getElementById('register-form');
     if (!form) return;
+
+    const meta = ROLE_META[role] || { label: 'Utilisateur', icon: '👤' };
+    const name = details.fullName || details.name || details.requesterName || `${meta.label}${details.professionalNumber ? ` (${details.professionalNumber})` : ''}`;
+    const statusText = String(status || '').toLowerCase();
+
+    const configs = {
+      pending: {
+        icon: '⏳',
+        title: 'Demande en attente de validation',
+        color: 'var(--accent)',
+        body: 'Votre demande est déjà enregistrée. Elle sera examinée par l’administrateur. Vous ne devez pas la renvoyer plusieurs fois.',
+        mainButton: '<button class="btn-p" disabled style="opacity:.7;cursor:not-allowed">⏳ Demande en attente</button>',
+        secondButton: '<button class="btn btn-ghost" style="width:100%;margin-top:.65rem" onclick="Auth._tab(\'login\')">🔐 Aller à la connexion</button>',
+      },
+      approved: {
+        icon: '✅',
+        title: 'Compte validé',
+        color: 'var(--secondary)',
+        body: 'Votre compte est validé. Vous pouvez maintenant vous connecter avec votre numéro professionnel, votre email et votre mot de passe.',
+        mainButton: '<button class="btn-p" onclick="Auth._tab(\'login\')">🔐 Se connecter</button>',
+        secondButton: '',
+      },
+      active: {
+        icon: '✅',
+        title: 'Compte actif',
+        color: 'var(--secondary)',
+        body: 'Votre compte est actif. Vous pouvez vous connecter.',
+        mainButton: '<button class="btn-p" onclick="Auth._tab(\'login\')">🔐 Se connecter</button>',
+        secondButton: '',
+      },
+      rejected: {
+        icon: '❌',
+        title: 'Demande refusée',
+        color: 'var(--danger)',
+        body: 'Votre demande a été refusée. Contactez l’administration pour comprendre la raison ou fournir des informations complémentaires.',
+        mainButton: '<button class="btn-p" onclick="Auth._tab(\'login\')">← Retour à la connexion</button>',
+        secondButton: '',
+      },
+      suspended: {
+        icon: '🚫',
+        title: 'Compte suspendu',
+        color: 'var(--danger)',
+        body: 'Votre compte est suspendu. Contactez l’administration.',
+        mainButton: '<button class="btn-p" onclick="Auth._tab(\'login\')">← Retour à la connexion</button>',
+        secondButton: '',
+      },
+    };
+
+    const cfg = configs[statusText] || configs.pending;
+
     form.innerHTML = `
       <div style="text-align:center;padding:1.5rem 1rem">
-        <div style="font-size:2.5rem;margin-bottom:.75rem">📤</div>
-        <h3 style="color:var(--secondary);margin-bottom:.5rem">Demande envoyée</h3>
+        <div style="font-size:2.7rem;margin-bottom:.75rem">${cfg.icon}</div>
+        <h3 style="color:${cfg.color};margin-bottom:.5rem">${cfg.title}</h3>
         <p style="font-size:.85rem;color:var(--text-muted);line-height:1.6">
-          Votre demande a été envoyée. Elle sera examinée par l’administrateur.
-          <br><br>
-          Vous ne pourrez accéder à MedConnect qu’après validation.
+          <strong>${esc(name)}</strong><br>
+          ${cfg.body}
         </p>
         <p style="font-size:.8rem;color:var(--text-muted);margin-top:.75rem">📞 +243 856 373 707</p>
-        <button class="btn-p" style="margin-top:1rem" onclick="Auth._tab('login')">← Retour à la connexion</button>
+        <div style="margin-top:1rem">${cfg.mainButton}${cfg.secondButton}</div>
       </div>`;
     showError('');
+  }
+
+  function showPendingConfirmation(account = {}) {
+    renderStatusScreen('pending', account.role || 'nurse', account);
   }
 
   async function submitRegistration(role) {
@@ -233,16 +301,12 @@
     }
 
     const duplicate = findLocalDuplicate(role, number, email);
-    if (duplicate?.status === 'pending') {
-      showError('⏳ Votre demande est déjà en attente de validation.');
-      return;
-    }
-    if (duplicate?.status === 'approved' || duplicate?.status === 'active') {
-      showError('✅ Votre compte est déjà validé. Utilisez l’onglet Connexion.');
-      return;
-    }
-    if (duplicate?.status === 'rejected') {
-      showError('❌ Une demande précédente a été refusée. Contactez l’administration.');
+    if (duplicate?.status) {
+      renderStatusScreen(duplicate.status, role, {
+        ...duplicate,
+        professionalNumber: duplicate.professionalNumber || number,
+        email: duplicate.email || email,
+      });
       return;
     }
 
@@ -254,7 +318,12 @@
         credential = await firebaseAuth.createUserWithEmailAndPassword(email, pass);
       } catch (err) {
         if (err?.code === 'auth/email-already-in-use') {
-          showError('❌ Cette adresse email est déjà utilisée. Utilisez l’onglet Connexion pour restaurer le compte existant.');
+          const possibleExisting = findLocalDuplicate(role, number, email);
+          if (possibleExisting?.status) {
+            renderStatusScreen(possibleExisting.status, role, possibleExisting);
+          } else {
+            showError('❌ Cette adresse email est déjà utilisée. Utilisez l’onglet Connexion pour restaurer le compte existant.');
+          }
           return;
         }
         throw err;
@@ -264,15 +333,15 @@
       if (!uid) throw new Error('uid_missing');
 
       if (await firestoreDocExists('users', uid)) {
-        showError('⚠️ Un profil existe déjà pour cette adresse. Utilisez l’onglet Connexion.');
+        renderStatusScreen('approved', role, { professionalNumber: number, email });
         return;
       }
 
       const registry = roleRegistryInfo(role, number);
-      await writeRegistrationToFirestore({ uid, role, number, email, registry });
+      const result = await writeRegistrationToFirestore({ uid, role, number, email, registry });
       await firebaseAuth.signOut().catch(() => {});
       sessionStorage.removeItem('mc_user');
-      showPendingConfirmation();
+      showPendingConfirmation(result.account);
       App?.toast?.('✅ Votre demande a été envoyée. Elle sera examinée par l’administrateur.');
     } catch (err) {
       console.error('[MedConnect] Envoi demande inscription impossible :', err);
