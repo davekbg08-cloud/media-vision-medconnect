@@ -1,0 +1,67 @@
+/* =====================================================
+   MedConnect — Mobile POS layout fix
+   Corrige la superposition du Point de vente sur téléphone
+   ===================================================== */
+
+@media (max-width: 768px) {
+  /* Donne plus d'air sous le bouton menu fixe */
+  .main-content {
+    padding-top: 4.75rem;
+  }
+
+  /* Le POS doit défiler normalement sur mobile : pas de panier flottant */
+  .pos-layout {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    min-height: auto;
+  }
+
+  .pos-products {
+    overflow: visible;
+    padding-bottom: 0 !important;
+  }
+
+  .pos-cart {
+    position: static !important;
+    inset: auto !important;
+    max-height: none !important;
+    width: 100%;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    box-shadow: none;
+    margin-top: .25rem;
+  }
+
+  .pos-cart h3,
+  .pos-cart .form-group,
+  .pos-cart .cart-items,
+  .pos-cart .cart-total,
+  .pos-cart .btn-full {
+    position: relative;
+    z-index: 1;
+  }
+
+  .cart-items {
+    min-height: 90px;
+  }
+
+  .cart-empty {
+    padding: 1.25rem .75rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .main-content {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  .page-header h2 {
+    font-size: 1.35rem;
+  }
+
+  .search-bar {
+    margin-bottom: .85rem;
+  }
+}
