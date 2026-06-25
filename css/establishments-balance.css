@@ -102,6 +102,25 @@
     white-space: normal;
     overflow-wrap: anywhere;
   }
+
+  /* Fenêtre admin vérification : boutons Approuver / Refuser / Fermer visibles */
+  #global-modal .modal .form-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: .6rem;
+    width: 100%;
+  }
+
+  #global-modal .modal .form-actions .btn,
+  #global-modal .modal .form-actions button {
+    width: 100%;
+    max-width: 100%;
+    white-space: normal;
+    min-height: 44px;
+    text-align: center;
+  }
 }
 
 @media (max-width: 430px) {
