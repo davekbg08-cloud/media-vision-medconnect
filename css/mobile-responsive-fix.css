@@ -1,0 +1,313 @@
+/* =====================================================
+   MedConnect — Correctifs responsives mobiles globaux
+   Objectif : éviter les éléments coupés/débordants sur iPhone/mobile
+   Sans modifier la logique ni les données.
+   ===================================================== */
+
+@media (max-width: 768px) {
+  html,
+  body {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  .app-layout {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .main-content {
+    width: 100%;
+    max-width: 100vw;
+    overflow-x: hidden;
+    padding-bottom: 6rem;
+  }
+
+  .page-header {
+    align-items: flex-start;
+    gap: .75rem;
+  }
+
+  .page-header h2,
+  .page-header h3 {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  .header-actions {
+    width: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    gap: .55rem;
+  }
+
+  .header-actions .btn,
+  .header-actions button,
+  .header-actions .chip-filter {
+    flex: 1 1 auto;
+    min-width: min(100%, 150px);
+  }
+
+  .card,
+  .record-card,
+  .info-card,
+  .stat-card,
+  .auth-register-info,
+  .alert-box,
+  .id-card-display {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  .records-list,
+  .info-grid,
+  .stats-grid,
+  .form-grid {
+    max-width: 100%;
+  }
+
+  .record-header,
+  .patient-row,
+  .mini-record,
+  .form-actions,
+  .modal-footer {
+    max-width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .record-header > *,
+  .patient-row-info,
+  .mini-record > *,
+  .record-body,
+  .detail-grid,
+  .info-table,
+  .info-table td {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .patient-row {
+    align-items: flex-start;
+  }
+
+  .patient-row-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .id-tag,
+  .id-number,
+  .id-badge-large,
+  code,
+  .record-date,
+  .record-doctor {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .info-table {
+    table-layout: fixed;
+  }
+
+  .info-table td:first-child {
+    width: 42%;
+  }
+
+  input,
+  select,
+  textarea,
+  button,
+  .btn {
+    max-width: 100%;
+  }
+
+  .btn {
+    white-space: normal;
+    text-align: center;
+  }
+
+  .form-actions,
+  .modal-footer {
+    justify-content: stretch;
+    gap: .6rem;
+  }
+
+  .form-actions .btn,
+  .form-actions button,
+  .modal-footer .btn,
+  .modal-footer button {
+    flex: 1 1 100%;
+    width: 100%;
+    min-height: 42px;
+  }
+
+  .table-wrapper {
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .data-table {
+    min-width: 520px;
+  }
+
+  .rx-item {
+    flex-wrap: wrap;
+  }
+
+  .rx-item .rx-name,
+  .rx-item .rx-dosage {
+    flex: 1 1 100%;
+  }
+
+  .rx-item .btn,
+  .rx-item button {
+    width: 100%;
+  }
+
+  /* Modales : rester dans l’écran et rendre le bas accessible */
+  #global-modal {
+    padding: .75rem;
+    align-items: flex-start;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  #global-modal .modal {
+    width: 100%;
+    max-width: calc(100vw - 1.5rem);
+    max-height: calc(100vh - 1.5rem);
+    overflow-y: auto;
+    overflow-x: hidden;
+    margin: .35rem auto 1rem;
+  }
+
+  #global-modal .modal-header {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: var(--bg-2);
+  }
+
+  #global-modal #modal-body {
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  #global-modal .info-table,
+  #global-modal .detail-grid,
+  #global-modal .record-card,
+  #global-modal .card {
+    max-width: 100%;
+  }
+
+  #global-modal .info-table td {
+    display: table-cell;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+}
+
+@media (max-width: 480px) {
+  .main-content {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  .page-header {
+    margin-bottom: 1rem;
+  }
+
+  .page-header h2 {
+    font-size: 1.32rem;
+  }
+
+  .card,
+  .record-card,
+  .info-card,
+  .id-card-display {
+    padding: .95rem;
+    border-radius: 14px;
+  }
+
+  .stats-grid {
+    gap: .6rem;
+  }
+
+  .stat-card {
+    padding: .85rem .65rem;
+  }
+
+  .info-grid,
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .search-bar {
+    flex-direction: column;
+  }
+
+  .id-card-top {
+    align-items: flex-start;
+  }
+
+  .id-avatar {
+    font-size: 2.35rem;
+  }
+
+  .id-info h3 {
+    font-size: 1rem;
+  }
+
+  .id-number {
+    font-size: .78rem;
+    letter-spacing: .4px;
+  }
+
+  .id-card-chips {
+    gap: .4rem;
+  }
+
+  .chip {
+    font-size: .74rem;
+    line-height: 1.25;
+  }
+
+  .info-table td {
+    font-size: .8rem;
+  }
+
+  .info-table td:first-child {
+    width: 40%;
+    font-size: .75rem;
+  }
+
+  #global-modal .modal {
+    border-radius: 16px;
+  }
+}
+
+@media (max-width: 360px) {
+  .main-content {
+    padding-left: .75rem;
+    padding-right: .75rem;
+  }
+
+  .btn,
+  button {
+    font-size: .8rem;
+  }
+
+  .card,
+  .record-card,
+  .info-card,
+  .id-card-display {
+    padding: .82rem;
+  }
+
+  .info-table td:first-child {
+    width: 38%;
+  }
+}
