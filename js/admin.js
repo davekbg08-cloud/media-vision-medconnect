@@ -130,23 +130,24 @@ const AdminModule = (() => {
     if (changed) DB.saveRegistrationRequests?.(next);
   }
 
-  function pushRegistrationCloud(uid, account, status) {
-    if (!(typeof firebaseReady !== 'undefined' && firebaseReady && typeof firebaseDB !== 'undefined' && firebaseDB) || !uid) return;
+  /** Écrit users/mc_accounts/registration_requests via DB.pushAndReport()
+      (confirme le succès, ne masque plus l'échec — Étape 2). */
+  async function pushRegistrationCloud(uid, account, status) {
+    if (!uid) return false;
     const reviewedAt = now();
     const reviewedBy = currentAdminUid();
-    firebaseDB.collection('users').doc(String(uid)).set({ ...account, status, updatedAt: reviewedAt }, { merge: true }).catch(() => {});
-    firebaseDB.collection('mc_accounts').doc(String(uid)).set({ ...account, status, updatedAt: reviewedAt }, { merge: true }).catch(() => {});
+    const writes = [
+      ['users', uid, { ...account, status, updatedAt: reviewedAt }],
+      ['mc_accounts', uid, { ...account, status, updatedAt: reviewedAt }],
+    ];
     getRequestsSafe()
       .filter(r => r.requesterUid === uid && r.requestId)
-      .forEach(r => firebaseDB.collection('registration_requests').doc(String(r.requestId)).set({
-        ...r,
-        status,
-        updatedAt: reviewedAt,
-        reviewedAt,
-        reviewedBy,
+      .forEach(r => writes.push(['registration_requests', r.requestId, {
+        ...r, status, updatedAt: reviewedAt, reviewedAt, reviewedBy,
         approvedAt: status === 'approved' ? reviewedAt : r.approvedAt || null,
         rejectedAt: status === 'rejected' ? reviewedAt : r.rejectedAt || null,
-      }, { merge: true }).catch(() => {}));
+      }]));
+    return DB.pushAndReport ? DB.pushAndReport(writes) : false;
   }
 
   function statusText(status) {
@@ -278,7 +279,7 @@ const AdminModule = (() => {
   }
 
   /* ══ VALIDATION COMPTES ══════════════════════════════ */
-  function approve(uid) {
+  async function approve(uid) {
     const accounts = getAccountsSafe();
     const idx = accounts.findIndex(a => a.uid === uid);
     if (idx === -1) { App.toast('❌ Compte introuvable pour cette demande.', 'error'); return; }
@@ -290,7 +291,8 @@ const AdminModule = (() => {
     accounts[idx].reviewedBy  = currentAdminUid();
     DB.saveAccounts(accounts);
     updateRegistrationRequests(uid, 'approved');
-    pushRegistrationCloud(uid, accounts[idx], 'approved');
+    const ok = await pushRegistrationCloud(uid, accounts[idx], 'approved');
+    if (!ok) App.toast('⚠️ Enregistré localement, mais Firestore n\'a pas confirmé l\'écriture. Vérifiez la connexion et réessayez.', 'error');
 
     Network?.notify?.({
       to_role: accounts[idx].role, to_id: accounts[idx].uid, type:'info',
@@ -302,7 +304,7 @@ const AdminModule = (() => {
     App.navigateTo('dashboard');
   }
 
-  function reject(uid) {
+  async function reject(uid) {
     if (!confirm('Refuser cette demande après vérification ?')) return;
     const accounts = getAccountsSafe();
     const idx = accounts.findIndex(a => a.uid === uid);
@@ -313,7 +315,8 @@ const AdminModule = (() => {
     accounts[idx].reviewedBy  = currentAdminUid();
     DB.saveAccounts(accounts);
     updateRegistrationRequests(uid, 'rejected');
-    pushRegistrationCloud(uid, accounts[idx], 'rejected');
+    const ok = await pushRegistrationCloud(uid, accounts[idx], 'rejected');
+    if (!ok) App.toast('⚠️ Enregistré localement, mais Firestore n\'a pas confirmé l\'écriture. Vérifiez la connexion et réessayez.', 'error');
 
     Network?.notify?.({
       to_role: accounts[idx].role, to_id: accounts[idx].uid, type:'info',
