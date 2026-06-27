@@ -26,9 +26,9 @@
     const item = document.createElement('li');
     item.className = 'nav-item nav-item-danger-soft';
     item.dataset.section = 'account_maintenance';
-    item.innerHTML = '<span class="nav-icon">🧹</span><span>Suppression compte</span>';
+    item.innerHTML = '<span class="nav-icon">🧹</span><span>Maintenance compte</span>';
     item.addEventListener('click', () => {
-      App.navigateTo('account_maintenance');
+      render(document.getElementById('main-content'));
       closeSidebar();
     });
     if (inbox && inbox.nextSibling) nav.insertBefore(item, inbox.nextSibling);
@@ -85,7 +85,7 @@
             </div>
           </div>`).join('')}
       </div>
-      <div class="alert-box" style="margin-top:1rem">⚠️ Aperçu seulement : l’action finale devra demander une confirmation forte avant toute opération irréversible.</div>`;
+      <div class="alert-box" style="margin-top:1rem">⚠️ Aperçu seulement : l’action finale demandera une confirmation forte.</div>`;
   }
 
   function render(main) {
@@ -93,10 +93,10 @@
     setActive();
     main.innerHTML = `
       <div class="page-header">
-        <h2>🧹 Suppression complète d’un compte</h2>
+        <h2>🧹 Maintenance compte</h2>
         <button class="btn btn-ghost btn-sm" onclick="App.navigateTo('dashboard')">⬅️ Retour administration</button>
       </div>
-      <div class="auth-register-info" style="margin-bottom:1rem">Recherche contrôlée avant nettoyage complet : utilisateur, demandes, établissements liés et dossiers associés.</div>
+      <div class="auth-register-info" style="margin-bottom:1rem">Recherche contrôlée avant action administrative complète : utilisateur, demandes, établissements liés et dossiers associés.</div>
       <div class="card">
         <div class="form-group">
           <label>Email, UID, matricule, numéro d’ordre ou numéro de fiche</label>
@@ -127,10 +127,21 @@
   function install() {
     patchNavigation();
     ensureMenuEntry();
-    setTimeout(ensureMenuEntry, 200);
-    setTimeout(ensureMenuEntry, 700);
+    const nav = document.getElementById('sidebar-nav');
+    if (nav && !nav.dataset.accountMaintenanceWatcher) {
+      nav.dataset.accountMaintenanceWatcher = '1';
+      new MutationObserver(() => ensureMenuEntry()).observe(nav, { childList: true });
+    }
+    let tries = 0;
+    const timer = setInterval(() => {
+      tries += 1;
+      patchNavigation();
+      ensureMenuEntry();
+      if (tries >= 20) clearInterval(timer);
+    }, 500);
   }
 
   window.AdminAccountMaintenance = { render, search, ensureMenuEntry };
-  window.addEventListener('DOMContentLoaded', install);
+  if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', install);
+  else install();
 })();
