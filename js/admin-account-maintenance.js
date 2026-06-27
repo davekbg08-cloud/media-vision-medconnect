@@ -1,4 +1,4 @@
-/* MedConnect — Maintenance compte depuis le tableau Administration. */
+/* MedConnect — Maintenance compte depuis le bas du tableau Administration. */
 (function () {
   function esc(value) {
     return String(value || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -8,7 +8,31 @@
     try { return Auth?.getUser?.()?.role === 'admin'; } catch (_) { return false; }
   }
 
-  function setActive() {
+  function isAdminMainPage() {
+    const main = document.getElementById('main-content');
+    if (!main || !isAdmin()) return false;
+    const title = main.querySelector('.page-header h2')?.textContent || '';
+    return title.includes('Administration') || title.includes('Maintenance compte');
+  }
+
+  /* Le tableau admin ne doit pas se reconstruire toutes les secondes :
+     sinon le scroll, les boutons et la saisie deviennent instables. */
+  function protectAdminPageFromAutoRefresh() {
+    if (window.__mcAdminIntervalGuard) return;
+    window.__mcAdminIntervalGuard = true;
+    const originalSetInterval = window.setInterval.bind(window);
+    window.setInterval = function (callback, delay, ...args) {
+      if (delay === 1000 && typeof callback === 'function') {
+        return originalSetInterval(function () {
+          if (isAdminMainPage()) return;
+          return callback.apply(this, arguments);
+        }, delay, ...args);
+      }
+      return originalSetInterval(callback, delay, ...args);
+    };
+  }
+
+  function setActiveDashboard() {
     document.querySelectorAll('.nav-item').forEach(item => {
       item.classList.toggle('active', item.dataset.section === 'dashboard');
     });
@@ -69,7 +93,7 @@
 
   function render(main) {
     if (!main || !isAdmin()) return;
-    setActive();
+    setActiveDashboard();
     main.innerHTML = `
       <div class="page-header">
         <h2>🧹 Maintenance compte</h2>
@@ -88,56 +112,41 @@
       <div id="maintenance-results"><div class="card empty-state"><p>Saisis un identifiant pour afficher l’aperçu avant action.</p></div></div>`;
   }
 
-  function addDashboardButton() {
+  function addBottomButton() {
     if (!isAdmin()) return;
     const main = document.getElementById('main-content');
-    if (!main || main.querySelector('#account-maintenance-button')) return;
-    const header = main.querySelector('.page-header');
-    if (!header) return;
-    const button = document.createElement('button');
-    button.id = 'account-maintenance-button';
-    button.className = 'btn btn-ghost btn-sm account-maintenance-button';
-    button.type = 'button';
-    button.textContent = '🧹 Maintenance compte';
-    button.addEventListener('click', () => render(main));
-    header.appendChild(button);
+    if (!main || main.querySelector('#account-maintenance-bottom')) return;
+    const card = document.createElement('div');
+    card.id = 'account-maintenance-bottom';
+    card.className = 'card account-maintenance-bottom';
+    card.innerHTML = `
+      <button class="btn btn-ghost btn-full account-maintenance-bottom-btn" type="button">
+        <span style="font-size:1.25rem">🧹</span>
+        <span><strong>Maintenance des comptes</strong><br><small>Rechercher un compte et afficher l’aperçu avant action</small></span>
+      </button>`;
+    card.querySelector('button').addEventListener('click', () => render(main));
+    main.appendChild(card);
   }
 
   function patchDashboard() {
-    if (!window.AdminModule || AdminModule.__maintenanceButtonPatchApplied) return false;
-    AdminModule.__maintenanceButtonPatchApplied = true;
+    if (!window.AdminModule || AdminModule.__maintenanceBottomPatchApplied) return false;
+    AdminModule.__maintenanceBottomPatchApplied = true;
     const originalRenderDashboard = AdminModule.renderDashboard.bind(AdminModule);
     AdminModule.renderDashboard = function (main) {
       const result = originalRenderDashboard(main);
-      setTimeout(addDashboardButton, 0);
-      return result;
-    };
-    return true;
-  }
-
-  function patchNavigation() {
-    if (!window.App || App.__accountMaintenancePatchApplied) return false;
-    App.__accountMaintenancePatchApplied = true;
-    const originalNavigateTo = App.navigateTo.bind(App);
-    App.navigateTo = function (section) {
-      if (section === 'account_maintenance') {
-        render(document.getElementById('main-content'));
-        return;
-      }
-      const result = originalNavigateTo(section);
-      if (section === 'dashboard') setTimeout(addDashboardButton, 80);
+      setTimeout(addBottomButton, 0);
       return result;
     };
     return true;
   }
 
   function install() {
+    protectAdminPageFromAutoRefresh();
     patchDashboard();
-    patchNavigation();
-    setTimeout(addDashboardButton, 200);
+    setTimeout(addBottomButton, 200);
   }
 
-  window.AdminAccountMaintenance = { render, search, addDashboardButton };
+  window.AdminAccountMaintenance = { render, search, addBottomButton };
   if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', install);
   else install();
 })();
