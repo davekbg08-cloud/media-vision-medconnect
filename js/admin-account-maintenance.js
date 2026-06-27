@@ -1,4 +1,4 @@
-/* MedConnect — entrée Maintenance compte admin. */
+/* MedConnect — Maintenance compte depuis le tableau Administration. */
 (function () {
   function esc(value) {
     return String(value || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -8,31 +8,10 @@
     try { return Auth?.getUser?.()?.role === 'admin'; } catch (_) { return false; }
   }
 
-  function closeSidebar() {
-    try { App?.closeMobileSidebar?.(); } catch (_) {}
-  }
-
   function setActive() {
     document.querySelectorAll('.nav-item').forEach(item => {
-      item.classList.toggle('active', item.dataset.section === 'account_maintenance');
+      item.classList.toggle('active', item.dataset.section === 'dashboard');
     });
-  }
-
-  function ensureMenuEntry() {
-    if (!isAdmin()) return;
-    const nav = document.getElementById('sidebar-nav');
-    if (!nav || nav.querySelector('[data-section="account_maintenance"]')) return;
-    const inbox = nav.querySelector('[data-section="inbox"]');
-    const item = document.createElement('li');
-    item.className = 'nav-item nav-item-danger-soft';
-    item.dataset.section = 'account_maintenance';
-    item.innerHTML = '<span class="nav-icon">🧹</span><span>Maintenance compte</span>';
-    item.addEventListener('click', () => {
-      render(document.getElementById('main-content'));
-      closeSidebar();
-    });
-    if (inbox && inbox.nextSibling) nav.insertBefore(item, inbox.nextSibling);
-    else nav.appendChild(item);
   }
 
   function findMatches(query) {
@@ -109,39 +88,56 @@
       <div id="maintenance-results"><div class="card empty-state"><p>Saisis un identifiant pour afficher l’aperçu avant action.</p></div></div>`;
   }
 
+  function addDashboardButton() {
+    if (!isAdmin()) return;
+    const main = document.getElementById('main-content');
+    if (!main || main.querySelector('#account-maintenance-button')) return;
+    const header = main.querySelector('.page-header');
+    if (!header) return;
+    const button = document.createElement('button');
+    button.id = 'account-maintenance-button';
+    button.className = 'btn btn-ghost btn-sm account-maintenance-button';
+    button.type = 'button';
+    button.textContent = '🧹 Maintenance compte';
+    button.addEventListener('click', () => render(main));
+    header.appendChild(button);
+  }
+
+  function patchDashboard() {
+    if (!window.AdminModule || AdminModule.__maintenanceButtonPatchApplied) return false;
+    AdminModule.__maintenanceButtonPatchApplied = true;
+    const originalRenderDashboard = AdminModule.renderDashboard.bind(AdminModule);
+    AdminModule.renderDashboard = function (main) {
+      const result = originalRenderDashboard(main);
+      setTimeout(addDashboardButton, 0);
+      return result;
+    };
+    return true;
+  }
+
   function patchNavigation() {
     if (!window.App || App.__accountMaintenancePatchApplied) return false;
     App.__accountMaintenancePatchApplied = true;
     const originalNavigateTo = App.navigateTo.bind(App);
     App.navigateTo = function (section) {
       if (section === 'account_maintenance') {
-        closeSidebar();
         render(document.getElementById('main-content'));
         return;
       }
-      return originalNavigateTo(section);
+      const result = originalNavigateTo(section);
+      if (section === 'dashboard') setTimeout(addDashboardButton, 80);
+      return result;
     };
     return true;
   }
 
   function install() {
+    patchDashboard();
     patchNavigation();
-    ensureMenuEntry();
-    const nav = document.getElementById('sidebar-nav');
-    if (nav && !nav.dataset.accountMaintenanceWatcher) {
-      nav.dataset.accountMaintenanceWatcher = '1';
-      new MutationObserver(() => ensureMenuEntry()).observe(nav, { childList: true });
-    }
-    let tries = 0;
-    const timer = setInterval(() => {
-      tries += 1;
-      patchNavigation();
-      ensureMenuEntry();
-      if (tries >= 20) clearInterval(timer);
-    }, 500);
+    setTimeout(addDashboardButton, 200);
   }
 
-  window.AdminAccountMaintenance = { render, search, ensureMenuEntry };
+  window.AdminAccountMaintenance = { render, search, addDashboardButton };
   if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', install);
   else install();
 })();
