@@ -126,12 +126,7 @@ const Auth = (() => {
           <label class="inp-lbl">Mot de passe *</label>
           <input type="password" id="ld-pass" class="inp" placeholder="••••••">
         </div>
-        <div class="form-group">
-          <label class="inp-lbl">Email du compte existant</label>
-          <input type="email" id="ld-email" class="inp" placeholder="votre@email.com" autocomplete="email">
-          <small style="color:var(--text-muted);font-size:.72rem">Après installation ou réinstallation, cet email restaure vos données sauvegardées.</small>
-        </div>
-        <button class="btn-p" onclick="Auth._doDoctor()">🔐 Se connecter au compte existant</button>`,
+        <button class="btn-p" onclick="Auth._doDoctor()">🔐 Se connecter</button>`,
 
       pharmacist: `
         <div class="form-group" style="margin-top:.75rem">
@@ -142,12 +137,7 @@ const Auth = (() => {
           <label class="inp-lbl">Mot de passe *</label>
           <input type="password" id="lph-pass" class="inp" placeholder="••••••">
         </div>
-        <div class="form-group">
-          <label class="inp-lbl">Email du compte existant</label>
-          <input type="email" id="lph-email" class="inp" placeholder="votre@email.com" autocomplete="email">
-          <small style="color:var(--text-muted);font-size:.72rem">Après installation ou réinstallation, cet email restaure vos données sauvegardées.</small>
-        </div>
-        <button class="btn-p" onclick="Auth._doPharmacist()">🔐 Se connecter au compte existant</button>`,
+        <button class="btn-p" onclick="Auth._doPharmacist()">🔐 Se connecter</button>`,
 
       nurse: `
         <div class="form-group" style="margin-top:.75rem">
@@ -158,12 +148,7 @@ const Auth = (() => {
           <label class="inp-lbl">Mot de passe *</label>
           <input type="password" id="ln-pass" class="inp" placeholder="••••••">
         </div>
-        <div class="form-group">
-          <label class="inp-lbl">Email du compte existant</label>
-          <input type="email" id="ln-email" class="inp" placeholder="votre@email.com" autocomplete="email">
-          <small style="color:var(--text-muted);font-size:.72rem">Après installation ou réinstallation, cet email restaure vos données sauvegardées.</small>
-        </div>
-        <button class="btn-p" onclick="Auth._doNurse()">🔐 Se connecter au compte existant</button>`,
+        <button class="btn-p" onclick="Auth._doNurse()">🔐 Se connecter</button>`,
     };
     document.getElementById('login-form').innerHTML = forms[role] || '';
   }
@@ -242,13 +227,11 @@ const Auth = (() => {
     return DB.getAccounts().find(a => a.role === 'patient' && String(a.patient_id || a.username || '').toUpperCase() === id) || null;
   }
 
-  function _findProfessionalAccount(role, num, email = '') {
+  function _findProfessionalAccount(role, num) {
     const field = _professionalField(role);
     const n = String(num || '').toUpperCase();
-    const e = String(email || '').toLowerCase();
     return DB.getAccounts().find(a =>
-      a.role === role &&
-      (String(a[field] || a.username || '').toUpperCase() === n || (e && String(a.email || '').toLowerCase() === e))
+      a.role === role && String(a[field] || a.username || '').toUpperCase() === n
     ) || null;
   }
 
@@ -267,46 +250,75 @@ const Auth = (() => {
     return account;
   }
 
-  async function _restoreProfessional(role, num, pass, email) {
-    if (!email) {
-      _err('auth-err', "⚠️ Compte existant introuvable sur cet appareil.<br>Entrez l'email du compte existant pour restaurer vos données sauvegardées.");
+  /* PARTIE M (sync) — la restauration n'est plus une option séparée :
+     on cherche le compte cloud par numéro professionnel SEUL, puis on
+     utilise l'email retrouvé (s'il existe) pour la session Firebase
+     Auth en arrière-plan. L'utilisateur ne voit jamais de champ email. */
+  async function _restoreProfessional(role, num, pass) {
+    if (!_hasFirebaseDB()) {
+      _err('auth-err', 'Compte introuvable ou non encore validé. Vérifiez le numéro professionnel et le mot de passe. Si vous venez de faire une inscription, attendez la validation de l\'administrateur.');
       return null;
     }
-    if (!_hasFirebaseAuth() || !_hasFirebaseDB()) {
-      _err('auth-err', '❌ Firebase indisponible. Vérifiez la connexion internet puis réessayez.');
-      return null;
-    }
+    const field = _professionalField(role);
+    const roleCol = { doctor:'doctors', nurse:'nurses', pharmacist:'pharmacies' }[role];
+    const numUpper = String(num || '').toUpperCase();
+    let data = null, foundUid = null;
+
     try {
-      const credential = await firebaseAuth.signInWithEmailAndPassword(email, pass);
-      const uid = credential?.user?.uid;
-      if (!uid) throw new Error('auth_uid_missing');
-      const doc = await firebaseDB.collection('users').doc(uid).get();
-      if (!doc.exists) { _err('auth-err', '❌ Profil cloud introuvable. Contactez l’administrateur MedConnect.'); return null; }
-      const data = doc.data() || {};
-      const field = _professionalField(role);
-      const account = {
-        ...data,
-        uid: data.uid || uid,
-        authUid: uid,
-        role: data.role || role,
-        username: data.username || data[field] || num,
-        status: data.status || 'pending',
-        updated_at: new Date().toISOString(),
-      };
-      account[field] = account[field] || num;
-      const cloudNumber = String(account[field] || account.username || '').toUpperCase();
-      if (account.role !== role) { _err('auth-err', '❌ Ce compte cloud ne correspond pas au rôle sélectionné.'); return null; }
-      if (cloudNumber && cloudNumber !== String(num).toUpperCase()) { _err('auth-err', '❌ Le numéro professionnel ne correspond pas au compte cloud connecté.'); return null; }
-      if (account.status === 'pending') { _err('auth-err', '⏳ Compte retrouvé, mais il attend encore la validation administrateur.'); return null; }
-      if (account.status === 'rejected') { _err('auth-err', '❌ Compte retrouvé, mais la demande a été rejetée.'); return null; }
-      if (account.status === 'suspended') { _err('auth-err', '🚫 Compte suspendu. Contactez l’administrateur.'); return null; }
-      if (!['approved','active'].includes(String(account.status).toLowerCase())) { _err('auth-err', '⚠️ Statut du compte non valide. Contactez l’administrateur.'); return null; }
-      return _upsertAccount(account);
+      if (roleCol) {
+        const snap = await firebaseDB.collection(roleCol)
+          .where(field, '==', numUpper).limit(1).get();
+        if (!snap.empty) { data = snap.docs[0].data(); foundUid = snap.docs[0].id; }
+      }
+      if (!data) {
+        const snap = await firebaseDB.collection('users')
+          .where('role', '==', role).where(field, '==', numUpper).limit(1).get();
+        if (!snap.empty) { data = snap.docs[0].data(); foundUid = snap.docs[0].id; }
+      }
     } catch (e) {
-      console.warn('[MedConnect] Restauration compte existant impossible :', e);
-      _err('auth-err', '❌ Restauration du compte existant impossible. Vérifiez email, mot de passe et connexion internet.');
+      console.warn('[MedConnect] Recherche compte cloud impossible :', e);
+    }
+
+    if (!data) {
+      _err('auth-err', 'Compte introuvable ou non encore validé. Vérifiez le numéro professionnel et le mot de passe. Si vous venez de faire une inscription, attendez la validation de l\'administrateur.');
       return null;
     }
+
+    const account = {
+      ...data,
+      uid: data.uid || foundUid,
+      role: data.role || role,
+      username: data.username || data[field] || numUpper,
+      status: data.status || 'pending',
+      updated_at: new Date().toISOString(),
+    };
+    account[field] = account[field] || numUpper;
+
+    if (account.status === 'pending')   { _err('auth-err', 'Compte en attente de validation.'); return null; }
+    if (account.status === 'rejected')  { _err('auth-err', 'Demande rejetée. Contactez l\'administrateur.'); return null; }
+    if (account.status === 'suspended') { _err('auth-err', 'Compte suspendu. Contactez l\'administrateur.'); return null; }
+    if (!['approved','active'].includes(String(account.status).toLowerCase())) {
+      _err('auth-err', 'Compte introuvable ou non encore validé. Vérifiez le numéro professionnel et le mot de passe.');
+      return null;
+    }
+
+    // Vérifie le mot de passe : via Firebase Auth si un email est lié au profil,
+    // sinon via le mot de passe local stocké à l'inscription (compatibilité).
+    if (account.email && _hasFirebaseAuth()) {
+      try {
+        const credential = await firebaseAuth.signInWithEmailAndPassword(account.email, pass);
+        if (credential?.user?.uid) account.authUid = credential.user.uid;
+      } catch (e) {
+        console.warn('[MedConnect] Vérification mot de passe Firebase Auth impossible :', e);
+        _err('auth-err', 'Mot de passe incorrect.');
+        return null;
+      }
+    } else if (account.password && account.password !== pass) {
+      _err('auth-err', 'Mot de passe incorrect.');
+      return null;
+    }
+
+    return _upsertAccount(account);
   }
 
   async function _signInFirebaseForAccount(account, pass, errorId = 'auth-err') {
@@ -371,14 +383,13 @@ const Auth = (() => {
     App.toast(`✅ Bienvenue ${patient.firstname} ! PIN créé.`);
   }
 
-  async function _doProfessional(role, numId, passId, emailId, launcher = _launch) {
+  async function _doProfessional(role, numId, passId, launcher = _launch) {
     const num   = (document.getElementById(numId)?.value || '').trim().toUpperCase();
     const pass  = (document.getElementById(passId)?.value || '').trim();
-    const email = (document.getElementById(emailId)?.value || '').trim();
     if (!num || !pass) { _err('auth-err', 'Veuillez remplir tous les champs obligatoires.'); return; }
     await _syncBeforeAuth(`connexion ${role}`);
-    let existing = _findProfessionalAccount(role, num, email);
-    if (!existing) existing = await _restoreProfessional(role, num, pass, email);
+    let existing = _findProfessionalAccount(role, num);
+    if (!existing) existing = await _restoreProfessional(role, num, pass);
     if (!existing) return;
     if (existing.status === 'pending')  { _err('auth-err', '⏳ Compte en attente de validation par l\'administrateur.'); return; }
     if (existing.status === 'rejected') { _err('auth-err', '❌ Demande rejetée. Contactez l\'administrateur.'); return; }
@@ -388,9 +399,9 @@ const Auth = (() => {
     _save(existing); launcher(existing);
   }
 
-  function _doDoctor()     { return _doProfessional('doctor', 'ld-num', 'ld-pass', 'ld-email', _launchDoctor); }
-  function _doPharmacist() { return _doProfessional('pharmacist', 'lph-num', 'lph-pass', 'lph-email', _launch); }
-  function _doNurse()      { return _doProfessional('nurse', 'ln-num', 'ln-pass', 'ln-email', _launch); }
+  function _doDoctor()     { return _doProfessional('doctor', 'ld-num', 'ld-pass', _launchDoctor); }
+  function _doPharmacist() { return _doProfessional('pharmacist', 'lph-num', 'lph-pass', _launch); }
+  function _doNurse()      { return _doProfessional('nurse', 'ln-num', 'ln-pass', _launch); }
 
   /* ── ACTIONS INSCRIPTION ──────────────────────────── */
   async function _createFirebaseUser(email, pass, account) {
