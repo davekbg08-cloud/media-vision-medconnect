@@ -455,10 +455,30 @@ const Auth = (() => {
 
     const finalAccount = await _createFirebaseUser(email, pass, acc);
     if (!finalAccount) return false;
+
+    // Écriture locale immédiate (cache, hors-ligne) — comme avant.
     const accounts = DB.getAccounts();
     accounts.push(finalAccount);
     DB.saveAccounts(accounts);
-    DB.createRegistrationRequest?.(finalAccount);
+    const regRequest = DB.createRegistrationRequest?.(finalAccount);
+
+    // Confirmation cloud réelle (Étape 5) : on n'affiche "Demande
+    // envoyée" que si les écritures critiques ont bien atteint
+    // Firestore — mc_accounts, registration_requests, users, et la
+    // collection de rôle publique (doctors/nurses/pharmacies).
+    const roleCol = { doctor:'doctors', pharmacist:'pharmacies', nurse:'nurses' }[role];
+    const writes = [
+      ['mc_accounts', finalAccount.uid, finalAccount],
+      ['users', finalAccount.uid, finalAccount],
+    ];
+    if (regRequest) writes.push(['registration_requests', regRequest.requestId, regRequest]);
+    if (roleCol)    writes.push([roleCol, finalAccount.uid, finalAccount]);
+
+    const confirmed = DB.pushAndReport ? await DB.pushAndReport(writes) : false;
+    if (!confirmed) {
+      _err('reg-err', 'Demande enregistrée localement, mais synchronisation cloud non confirmée. Vérifiez la connexion puis réessayez.');
+      return 'local-only';
+    }
     return true;
   }
 
@@ -467,7 +487,8 @@ const Auth = (() => {
     const email = (document.getElementById('rd-num-email')?.value || '').trim();
     const pass  = (document.getElementById('rd-num-pass')?.value || '').trim();
     const pass2 = (document.getElementById('rd-num-pass2')?.value || '').trim();
-    if (!await _reg(num, pass, pass2, 'doctor', { order_num:num, email })) return;
+    const result = await _reg(num, pass, pass2, 'doctor', { order_num:num, email });
+    if (result !== true) return;
     _showPending();
   }
 
@@ -476,7 +497,8 @@ const Auth = (() => {
     const email = (document.getElementById('rph-num-email')?.value || '').trim();
     const pass  = (document.getElementById('rph-num-pass')?.value || '').trim();
     const pass2 = (document.getElementById('rph-num-pass2')?.value || '').trim();
-    if (!await _reg(num, pass, pass2, 'pharmacist', { matricule:num, email })) return;
+    const result = await _reg(num, pass, pass2, 'pharmacist', { matricule:num, email });
+    if (result !== true) return;
     _showPending();
   }
 
@@ -485,7 +507,8 @@ const Auth = (() => {
     const email = (document.getElementById('rn-num-email')?.value || '').trim();
     const pass  = (document.getElementById('rn-num-pass')?.value || '').trim();
     const pass2 = (document.getElementById('rn-num-pass2')?.value || '').trim();
-    if (!await _reg(num, pass, pass2, 'nurse', { matricule:num, email })) return;
+    const result = await _reg(num, pass, pass2, 'nurse', { matricule:num, email });
+    if (result !== true) return;
     _showPending();
   }
 
