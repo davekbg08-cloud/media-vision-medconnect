@@ -185,17 +185,24 @@ const AdminModule = (() => {
   }
 
   /* ══ DASHBOARD ══════════════════════════════════════ */
-  async function renderDashboard(main) {
+  function renderDashboard(main) {
     try {
       main = main || document.getElementById('main-content');
       if (!main) return;
 
-      // Cloud-first (décision explicite) : on resynchronise avant
-      // d'afficher, pour ne jamais rater une demande arrivée depuis
-      // un autre appareil pendant que l'admin n'était pas connecté.
-      if (DB.syncFromFirebase) {
-        try { await DB.syncFromFirebase(); }
-        catch (e) { console.warn('[MedConnect] Sync admin dashboard :', e); }
+      // Cloud-first, mais jamais bloquant : l'écran s'affiche
+      // immédiatement avec le cache disponible, puis se rafraîchit
+      // discrètement dès que la sync réseau aboutit (ou abandonne
+      // après timeout). Un réseau lent/absent ne doit plus jamais
+      // figer l'admin sur un sablier vide.
+      if (DB.syncFromFirebaseInBackground) {
+        DB.syncFromFirebaseInBackground(ok => {
+          const stillOnDashboard = document.querySelector('.nav-item.active')?.dataset?.section === 'dashboard';
+          const stillAdmin = Auth.getUser?.()?.role === 'admin';
+          if (ok && stillOnDashboard && stillAdmin) {
+            renderDashboard(document.getElementById('main-content'));
+          }
+        });
       }
 
       const accounts  = getAccountsSafe();

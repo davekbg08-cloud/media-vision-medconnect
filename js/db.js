@@ -146,15 +146,33 @@ const DB = (() => {
       'mc_verified_doctors','mc_verified_pharms','mc_verified_nurses',
       'establishment_documents',
     ];
-    for (const col of collections) {
-      try {
-        const snap = await firebaseDB.collection(col).get();
-        if (!snap.empty) {
-          const data = snap.docs.map(d => d.data());
-          store(col, data);
-        }
-      } catch (e) {}
+    // Chaque collection en parallèle avec un timeout individuel : un
+    // réseau lent ou une requête bloquée ne doit jamais figer toute
+    // l'app (observé : admin resté sur un sablier vide en LTE faible).
+    const PER_COLLECTION_TIMEOUT_MS = 6000;
+    function withTimeout(promise, ms) {
+      return Promise.race([
+        promise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
+      ]);
     }
+    await Promise.all(collections.map(async col => {
+      try {
+        const snap = await withTimeout(firebaseDB.collection(col).get(), PER_COLLECTION_TIMEOUT_MS);
+        if (!snap.empty) store(col, snap.docs.map(d => d.data()));
+      } catch (e) {
+        console.warn(`[MedConnect] Sync ${col} ignorée (lente/indisponible) :`, e?.message || e);
+      }
+    }));
+  }
+
+  /** Version non bloquante : lance la sync en arrière-plan sans jamais
+      faire attendre l'appelant. À utiliser partout où l'affichage ne
+      doit pas dépendre du réseau (ex: dashboard admin). */
+  function syncFromFirebaseInBackground(onDone) {
+    syncFromFirebase()
+      .then(() => onDone?.(true))
+      .catch(e => { console.warn('[MedConnect] Sync arrière-plan :', e); onDone?.(false); });
   }
 
   /* ── LISTENERS TEMPS RÉEL ────────────────────────── */
@@ -618,7 +636,7 @@ const DB = (() => {
   }
 
   return {
-    init, syncFromFirebase, generatePatientId, makeId, pushAndReport,
+    init, syncFromFirebase, syncFromFirebaseInBackground, generatePatientId, makeId, pushAndReport,
     getAccounts, saveAccounts, getUsers, saveUsers, upsertUserProfile,
     getRegistrationRequests, saveRegistrationRequests, createRegistrationRequest,
     getPatients, savePatients, addPatient, updatePatient, deletePatient, getPatientById, searchPatients,
