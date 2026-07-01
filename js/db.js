@@ -226,6 +226,7 @@ const DB = (() => {
      PATIENTS
   ══════════════════════════════════════════════════ */
   function getPatients()   { return load('mc_patients'); }
+  function savePatients(list) { store('mc_patients', list); }
 
   function addPatient(data) {
     const list = getPatients();
@@ -620,7 +621,7 @@ const DB = (() => {
     init, syncFromFirebase, generatePatientId, makeId, pushAndReport,
     getAccounts, saveAccounts, getUsers, saveUsers, upsertUserProfile,
     getRegistrationRequests, saveRegistrationRequests, createRegistrationRequest,
-    getPatients, addPatient, updatePatient, deletePatient, getPatientById, searchPatients,
+    getPatients, savePatients, addPatient, updatePatient, deletePatient, getPatientById, searchPatients,
     getConsultations, addConsultation, getPatientConsultations, deleteConsultation,
     getPrescriptions, addPrescription, updatePrescription, getPatientPrescriptions,
     getEstablishmentDocuments, addEstablishmentDocument,

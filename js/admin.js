@@ -185,10 +185,18 @@ const AdminModule = (() => {
   }
 
   /* ══ DASHBOARD ══════════════════════════════════════ */
-  function renderDashboard(main) {
+  async function renderDashboard(main) {
     try {
       main = main || document.getElementById('main-content');
       if (!main) return;
+
+      // Cloud-first (décision explicite) : on resynchronise avant
+      // d'afficher, pour ne jamais rater une demande arrivée depuis
+      // un autre appareil pendant que l'admin n'était pas connecté.
+      if (DB.syncFromFirebase) {
+        try { await DB.syncFromFirebase(); }
+        catch (e) { console.warn('[MedConnect] Sync admin dashboard :', e); }
+      }
 
       const accounts  = getAccountsSafe();
       const rows      = getRegistrationRows();

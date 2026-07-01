@@ -223,6 +223,41 @@ const Auth = (() => {
     catch (e) { console.warn(`[MedConnect] Sync avant ${label} impossible :`, e); }
   }
 
+  /* ── Recherche cloud-first ciblée ────────────────────
+     Décision explicite : plutôt que de dépendre uniquement de
+     DB.syncFromFirebase() (télécharge des collections entières,
+     lent, et peut échouer partiellement sans que rien ne le
+     signale), on interroge directement le document précis
+     recherché. Un ancien compte ne doit JAMAIS retomber sur un
+     écran d'inscription — on cherche activement avant de conclure
+     qu'il n'existe pas. Utilisé pour les 4 rôles : patient,
+     médecin, pharmacien, infirmier.
+  ──────────────────────────────────────────────────────── */
+  async function _fetchAccountByDocId(docId) {
+    if (!docId || !_hasFirebaseDB()) return null;
+    try {
+      const doc = await firebaseDB.collection('mc_accounts').doc(docId).get();
+      return doc.exists ? doc.data() : null;
+    } catch (e) { console.warn('[MedConnect] Recherche compte cloud (mc_accounts) impossible :', e); return null; }
+  }
+
+  async function _fetchAccountByField(collection, field, value) {
+    if (!collection || !field || !value || !_hasFirebaseDB()) return null;
+    try {
+      const snap = await firebaseDB.collection(collection).where(field, '==', value).limit(1).get();
+      return snap.empty ? null : snap.docs[0].data();
+    } catch (e) { console.warn(`[MedConnect] Recherche compte cloud (${collection}) impossible :`, e); return null; }
+  }
+
+  function _mergeAccountLocally(account) {
+    if (!account?.uid) return account;
+    const accounts = DB.getAccounts();
+    const idx = accounts.findIndex(a => a.uid === account.uid);
+    if (idx === -1) accounts.push(account); else accounts[idx] = { ...accounts[idx], ...account };
+    DB.saveAccounts(accounts);
+    return account;
+  }
+
   function _findPatientAccount(id) {
     return DB.getAccounts().find(a => a.role === 'patient' && String(a.patient_id || a.username || '').toUpperCase() === id) || null;
   }
@@ -349,11 +384,24 @@ const Auth = (() => {
     if (!id.startsWith('MC-')) { _err('auth-err', '❌ Format invalide. Ex : MC-2026-CD-A3B7X9Q2'); return; }
     if (pin.length < 4) { _err('auth-err', '❌ PIN trop court — minimum 4 chiffres.'); return; }
     await _syncBeforeAuth('connexion patient');
-    const patient = DB.getPatientById(id);
+
+    let patient = DB.getPatientById(id);
+    if (!patient) {
+      const cloudPatient = _hasFirebaseDB() ? await (async () => {
+        try { const doc = await firebaseDB.collection('mc_patients').doc(id).get(); return doc.exists ? doc.data() : null; }
+        catch (e) { console.warn('[MedConnect] Recherche fiche patient cloud impossible :', e); return null; }
+      })() : null;
+      if (cloudPatient) {
+        const patients = DB.getPatients();
+        if (!patients.find(p => p.id === id)) { patients.push(cloudPatient); DB.savePatients(patients); }
+        patient = cloudPatient;
+      }
+    }
     if (!patient) { _err('auth-err', '❌ Numéro de fiche introuvable. Contactez votre médecin.'); return; }
-    const existing = _findPatientAccount(id);
+
+    let existing = _findPatientAccount(id) || _mergeAccountLocally(await _fetchAccountByDocId(`PAT_${id}`));
     if (!existing) {
-      _err('auth-err', '⚠️ Aucun compte patient existant trouvé pour cette fiche.<br>Si c’est votre premier accès, utilisez “Premier accès : créer mon PIN”.');
+      _err('auth-err', '⚠️ Aucun compte trouvé pour cette fiche, ni localement ni dans le cloud.<br>Si c’est votre tout premier accès, utilisez “Premier accès : créer mon PIN”.');
       return;
     }
     if (existing.password !== pin) { _err('auth-err', '❌ PIN incorrect.'); return; }
@@ -412,12 +460,15 @@ const Auth = (() => {
       return { ...account, uid, authUid: uid };
     } catch (err) {
       if (err?.code === 'auth/email-already-in-use') {
-        _err('reg-err', '❌ Cette adresse email est déjà utilisée. Utilisez l’onglet Connexion pour restaurer le compte existant.');
-        return null;
+        // Ne bloque jamais l'inscription : cas fréquent (email familial
+        // partagé). Le compte reste identifié par son numéro
+        // professionnel — la connexion se fait toujours par numéro
+        // + mot de passe, jamais par email.
+        console.warn('[MedConnect] Email déjà utilisé côté Firebase Auth — poursuite avec identifiant local.', err);
+        return account;
       }
-      console.warn('[MedConnect] Création Firebase Auth impossible :', err);
-      _err('reg-err', '❌ Impossible de créer le compte Firebase Auth pour le moment.');
-      return null;
+      console.warn('[MedConnect] Création Firebase Auth impossible, poursuite en mode dégradé :', err);
+      return account;
     }
   }
 
@@ -431,12 +482,22 @@ const Auth = (() => {
     if (Object.prototype.hasOwnProperty.call(extraField || {}, 'email') && !email) { _err('reg-err', '❌ Adresse email obligatoire.'); return false; }
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { _err('reg-err', '❌ Adresse email invalide.'); return false; }
 
-    const existing = _findProfessionalAccount(role, num, email) || DB.getUsers().find(u =>
-      u.role === role &&
-      (String(u.order_num || u.matricule || u.username || '').toUpperCase() === num || (email && String(u.email || '').toLowerCase() === email.toLowerCase()))
+    const existing = _findProfessionalAccount(role, num) || DB.getUsers().find(u =>
+      u.role === role && String(u.order_num || u.matricule || u.username || '').toUpperCase() === num
     );
     if (existing) {
-      _err('reg-err', '⚠️ Un compte existe déjà avec ces informations. Utilisez l’onglet Connexion pour restaurer le compte existant.');
+      const status = String(existing.status || '').toLowerCase();
+      if (status === 'pending') {
+        _err('reg-err', '⏳ Une demande existe déjà avec ce numéro et attend la validation de l\'administrateur.');
+      } else if (status === 'approved' || status === 'active') {
+        _err('reg-err', '✅ Ce compte existe déjà et il est validé. Utilisez l\'onglet Connexion avec votre numéro et votre mot de passe.');
+      } else if (status === 'rejected') {
+        _err('reg-err', '❌ Une demande existe déjà avec ce numéro, mais elle a été rejetée. Contactez l\'administrateur.');
+      } else if (status === 'suspended') {
+        _err('reg-err', '🚫 Ce compte existe déjà mais il est suspendu. Contactez l\'administrateur.');
+      } else {
+        _err('reg-err', '⚠️ Un compte existe déjà avec ce numéro. Utilisez l\'onglet Connexion.');
+      }
       return false;
     }
 
@@ -461,24 +522,30 @@ const Auth = (() => {
     accounts.push(finalAccount);
     DB.saveAccounts(accounts);
     const regRequest = DB.createRegistrationRequest?.(finalAccount);
+    const roleCol = { doctor:'doctors', pharmacist:'pharmacies', nurse:'nurses' }[role];
 
     // Confirmation cloud réelle (Étape 5) : on n'affiche "Demande
     // envoyée" que si les écritures critiques ont bien atteint
     // Firestore — mc_accounts, registration_requests, users, et la
     // collection de rôle publique (doctors/nurses/pharmacies).
-    const roleCol = { doctor:'doctors', pharmacist:'pharmacies', nurse:'nurses' }[role];
-    const writes = [
+    const criticalWrites = [
       ['mc_accounts', finalAccount.uid, finalAccount],
-      ['users', finalAccount.uid, finalAccount],
     ];
-    if (regRequest) writes.push(['registration_requests', regRequest.requestId, regRequest]);
-    if (roleCol)    writes.push([roleCol, finalAccount.uid, finalAccount]);
+    if (regRequest) criticalWrites.push(['registration_requests', regRequest.requestId, regRequest]);
 
-    const confirmed = DB.pushAndReport ? await DB.pushAndReport(writes) : false;
-    if (!confirmed) {
+    const secondaryWrites = [['users', finalAccount.uid, finalAccount]];
+    if (roleCol) secondaryWrites.push([roleCol, finalAccount.uid, finalAccount]);
+
+    const criticalOk = DB.pushAndReport ? await DB.pushAndReport(criticalWrites) : false;
+    if (!criticalOk) {
       _err('reg-err', 'Demande enregistrée localement, mais synchronisation cloud non confirmée. Vérifiez la connexion puis réessayez.');
       return 'local-only';
     }
+    // Écritures secondaires (users, collection de rôle) : peuvent échouer
+    // sans session Firebase Auth réelle (email déjà pris, hors-ligne...).
+    // La demande est déjà visible côté admin via mc_accounts/
+    // registration_requests — on ne bloque plus l'utilisateur pour ça.
+    if (DB.pushAndReport) await DB.pushAndReport(secondaryWrites);
     return true;
   }
 
