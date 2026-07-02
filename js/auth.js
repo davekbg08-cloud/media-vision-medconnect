@@ -7,6 +7,7 @@ const Auth = (() => {
   const LABELS = { patient:'Patient', doctor:'Médecin', pharmacist:'Pharmacien', nurse:'Infirmier(e)', admin:'Administrateur' };
   const ADMIN  = { uid:'admin_root', role:'admin', name:'Administrateur' };
   const ADMIN_CONFIG_KEY = 'mc_admin_config';
+  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
   /* ── SESSION ──────────────────────────────────────── */
   function getUser()  { try { return JSON.parse(sessionStorage.getItem('mc_user')||'null'); } catch { return null; } }
@@ -289,56 +290,100 @@ const Auth = (() => {
      on cherche le compte cloud par numéro professionnel SEUL, puis on
      utilise l'email retrouvé (s'il existe) pour la session Firebase
      Auth en arrière-plan. L'utilisateur ne voit jamais de champ email. */
-  async function _restoreProfessional(role, num, pass) {
-    if (!_hasFirebaseDB()) {
-      _err('auth-err', 'Compte introuvable ou non encore validé. Vérifiez le numéro professionnel et le mot de passe. Si vous venez de faire une inscription, attendez la validation de l\'administrateur.');
-      return null;
-    }
-    const field = _professionalField(role);
+  /* ── PARTIE 1 : recherche Firestore-first ────────────
+     Ordre imposé : collection de rôle (doctors/nurses/pharmacies)
+     → users → mc_accounts. Ne décide rien, ne vérifie rien : se
+     contente de trouver et normaliser le document. */
+  async function resolveProfessionalAccountFromFirestore(role, professionalNumber) {
+    if (!_hasFirebaseDB()) return null;
+    const field   = _professionalField(role);
     const roleCol = { doctor:'doctors', nurse:'nurses', pharmacist:'pharmacies' }[role];
-    const numUpper = String(num || '').toUpperCase();
-    let data = null, foundUid = null;
+    const num     = String(professionalNumber || '').toUpperCase();
+    let data = null, foundId = null;
 
     try {
       if (roleCol) {
-        const snap = await firebaseDB.collection(roleCol)
-          .where(field, '==', numUpper).limit(1).get();
-        if (!snap.empty) { data = snap.docs[0].data(); foundUid = snap.docs[0].id; }
+        const snap = await firebaseDB.collection(roleCol).where(field, '==', num).limit(1).get();
+        if (!snap.empty) { data = snap.docs[0].data(); foundId = snap.docs[0].id; }
       }
       if (!data) {
-        const snap = await firebaseDB.collection('users')
-          .where('role', '==', role).where(field, '==', numUpper).limit(1).get();
-        if (!snap.empty) { data = snap.docs[0].data(); foundUid = snap.docs[0].id; }
+        const snap = await firebaseDB.collection('users').where('role', '==', role).where(field, '==', num).limit(1).get();
+        if (!snap.empty) { data = snap.docs[0].data(); foundId = snap.docs[0].id; }
+      }
+      if (!data) {
+        const snap = await firebaseDB.collection('mc_accounts').where('role', '==', role).where(field, '==', num).limit(1).get();
+        if (!snap.empty) { data = snap.docs[0].data(); foundId = snap.docs[0].id; }
       }
     } catch (e) {
-      console.warn('[MedConnect] Recherche compte cloud impossible :', e);
+      console.warn('[MedConnect] resolveProfessionalAccountFromFirestore :', e);
     }
-
-    if (!data) {
-      _err('auth-err', 'Compte introuvable ou non encore validé. Vérifiez le numéro professionnel et le mot de passe. Si vous venez de faire une inscription, attendez la validation de l\'administrateur.');
-      return null;
-    }
+    if (!data) return null;
 
     const account = {
       ...data,
-      uid: data.uid || foundUid,
-      role: data.role || role,
-      username: data.username || data[field] || numUpper,
-      status: data.status || 'pending',
-      updated_at: new Date().toISOString(),
+      uid:      data.uid || foundId,
+      role:     data.role || role,
+      username: data.username || data[field] || num,
+      email:    data.email || '',
+      status:   data.status || 'pending',
     };
-    account[field] = account[field] || numUpper;
+    account[field] = account[field] || num;
+    return account;
+  }
 
-    if (account.status === 'pending')   { _err('auth-err', 'Compte en attente de validation.'); return null; }
-    if (account.status === 'rejected')  { _err('auth-err', 'Demande rejetée. Contactez l\'administrateur.'); return null; }
-    if (account.status === 'suspended') { _err('auth-err', 'Compte suspendu. Contactez l\'administrateur.'); return null; }
-    if (!['approved','active'].includes(String(account.status).toLowerCase())) {
-      _err('auth-err', 'Compte introuvable ou non encore validé. Vérifiez le numéro professionnel et le mot de passe.');
-      return null;
+  /* ── PARTIE 3 : écran détaillé "Demande refusée" ─────
+     Même écran, que le rejet vienne d'un ancien compte, d'un
+     nouveau compte, ou d'une tentative de réinscription. */
+  function showRejectedAccountScreen(role, professionalNumber, account) {
+    const scr = document.getElementById('auth-screen');
+    if (!scr) return;
+    scr.style.display = 'flex';
+    scr.innerHTML = `
+      <div class="auth-card" style="text-align:center;padding:2rem 1.5rem">
+        <div style="font-size:3rem;color:var(--danger);margin-bottom:.5rem">❌</div>
+        <h2 style="margin-bottom:.4rem">Demande refusée</h2>
+        <p style="color:var(--text-muted);margin-bottom:1rem">
+          ${esc(LABELS[role] || role)} · N° ${esc(professionalNumber || account?.username || '—')}
+        </p>
+        <p style="margin-bottom:1.25rem">
+          Votre demande a été refusée. Contactez l'administration pour comprendre la raison
+          ou fournir des informations complémentaires.
+        </p>
+        <a class="btn-p" style="display:inline-block;text-decoration:none;margin-bottom:.75rem"
+           href="https://wa.me/243856373707" target="_blank" rel="noopener">📞 Contacter sur WhatsApp</a>
+        <br>
+        <button class="btn btn-ghost" onclick="Auth.showLogin()">← Retour à la connexion</button>
+      </div>`;
+  }
+
+  /* ── PARTIE 2 : décision AVANT toute tentative Firebase Auth ──
+     Ne renvoie true QUE si le compte est approved/active. Dans
+     tous les autres cas, affiche le message/écran adapté et
+     renvoie false — Firebase Auth n'est alors jamais sollicité. */
+  function handleAccountStatusBeforeAuth(account, role, professionalNumber) {
+    if (!account) {
+      _err('auth-err', 'Compte introuvable ou non encore validé.');
+      return false;
     }
+    const status = String(account.status || '').toLowerCase();
+    if (status === 'rejected') { showRejectedAccountScreen(role, professionalNumber, account); return false; }
+    if (status === 'pending') { _err('auth-err', 'Votre demande est en attente de validation.'); return false; }
+    if (status === 'suspended') { _err('auth-err', 'Compte suspendu. Contactez l\'administrateur.'); return false; }
+    if (!['approved','active'].includes(status)) {
+      _err('auth-err', 'Compte introuvable ou non encore validé.');
+      return false;
+    }
+    return true;
+  }
 
-    // Vérifie le mot de passe : via Firebase Auth si un email est lié au profil,
-    // sinon via le mot de passe local stocké à l'inscription (compatibilité).
+  /* ── _restoreProfessional : conservée pour compatibilité,
+     ne fait plus double-emploi — délègue entièrement aux 3
+     fonctions ci-dessus. Retourne un compte normalisé ou null,
+     sans afficher elle-même de message contradictoire. */
+  async function _restoreProfessional(role, num, pass) {
+    const account = await resolveProfessionalAccountFromFirestore(role, num);
+    if (!handleAccountStatusBeforeAuth(account, role, num)) return null;
+
     if (account.email && _hasFirebaseAuth()) {
       try {
         const credential = await firebaseAuth.signInWithEmailAndPassword(account.email, pass);
@@ -352,7 +397,6 @@ const Auth = (() => {
       _err('auth-err', 'Mot de passe incorrect.');
       return null;
     }
-
     return _upsertAccount(account);
   }
 
@@ -432,19 +476,35 @@ const Auth = (() => {
   }
 
   async function _doProfessional(role, numId, passId, launcher = _launch) {
-    const num   = (document.getElementById(numId)?.value || '').trim().toUpperCase();
-    const pass  = (document.getElementById(passId)?.value || '').trim();
+    const num  = (document.getElementById(numId)?.value  || '').trim().toUpperCase();
+    const pass = (document.getElementById(passId)?.value || '').trim();
     if (!num || !pass) { _err('auth-err', 'Veuillez remplir tous les champs obligatoires.'); return; }
-    await _syncBeforeAuth(`connexion ${role}`);
-    let existing = _findProfessionalAccount(role, num);
-    if (!existing) existing = await _restoreProfessional(role, num, pass);
-    if (!existing) return;
-    if (existing.status === 'pending')  { _err('auth-err', '⏳ Compte en attente de validation par l\'administrateur.'); return; }
-    if (existing.status === 'rejected') { _err('auth-err', '❌ Demande rejetée. Contactez l\'administrateur.'); return; }
-    if (existing.status === 'suspended') { _err('auth-err', '🚫 Compte suspendu. Contactez l\'administrateur.'); return; }
-    if (!existing.email && existing.password !== pass) { _err('auth-err', '❌ Mot de passe incorrect.'); return; }
-    if (!await _signInFirebaseForAccount(existing, pass)) return;
-    _save(existing); launcher(existing);
+
+    // Firestore d'abord (source principale). localStorage n'intervient
+    // qu'en repli si Firestore est indisponible (hors-ligne, etc.).
+    let account = await resolveProfessionalAccountFromFirestore(role, num);
+    let fromCache = false;
+    if (!account) {
+      account = _findProfessionalAccount(role, num);
+      fromCache = !!account;
+    }
+    if (!account) { _err('auth-err', 'Compte introuvable ou non encore validé.'); return; }
+
+    // Statut vérifié AVANT toute tentative Firebase Auth — un compte
+    // pending/rejected/suspended ne doit jamais déclencher de message
+    // technique Firebase.
+    if (!handleAccountStatusBeforeAuth(account, role, num)) return;
+
+    if (account.email && _hasFirebaseAuth()) {
+      const ok = await _signInFirebaseForAccount(account, pass);
+      if (!ok) return;
+    } else if (account.password && account.password !== pass) {
+      _err('auth-err', 'Mot de passe incorrect.');
+      return;
+    }
+
+    if (!fromCache) _upsertAccount(account);
+    _save(account); launcher(account);
   }
 
   function _doDoctor()     { return _doProfessional('doctor', 'ld-num', 'ld-pass', _launchDoctor); }
@@ -492,7 +552,8 @@ const Auth = (() => {
       } else if (status === 'approved' || status === 'active') {
         _err('reg-err', '✅ Ce compte existe déjà et il est validé. Utilisez l\'onglet Connexion avec votre numéro et votre mot de passe.');
       } else if (status === 'rejected') {
-        _err('reg-err', '❌ Une demande existe déjà avec ce numéro, mais elle a été rejetée. Contactez l\'administrateur.');
+        showRejectedAccountScreen(role, num, existing);
+        return false;
       } else if (status === 'suspended') {
         _err('reg-err', '🚫 Ce compte existe déjà mais il est suspendu. Contactez l\'administrateur.');
       } else {
