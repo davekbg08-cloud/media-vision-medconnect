@@ -29,6 +29,50 @@ service cloud.firestore {
       );
     }
 
+    /* ── Abonnement établissement (contrat mobile ↔ desktop) ──
+       Aucun document subscriptions/{hospitalId} => traité comme
+       "active" par défaut (rétro-compatibilité : ne bloque pas les
+       établissements existants tant que l'abonnement n'a pas été
+       explicitement configuré). */
+    function subscriptionDoc(hospitalId) {
+      return /databases/$(database)/documents/subscriptions/$(hospitalId);
+    }
+    function subscriptionStatus(hospitalId) {
+      return hospitalId != null && exists(subscriptionDoc(hospitalId))
+        ? get(subscriptionDoc(hospitalId)).data.status
+        : 'active';
+    }
+    function hospitalSubscriptionOk(hospitalId) {
+      return subscriptionStatus(hospitalId) in ['active', 'grace_period'];
+    }
+    // Utilisée telle quelle uniquement pour /patients : la création
+    // de patient reste bloquée par abonnement expiré/suspendu quelle
+    // que soit la plateforme (desktop ET mobile/PWA — confirmé
+    // explicitement : c'est la seule action que le mobile bloque
+    // aussi).
+    function hospitalCanWrite(hospitalId) {
+      return hospitalSubscriptionOk(hospitalId);
+    }
+    // Utilisée pour consultations/prescriptions/labRequests/
+    // labResults/appointments/messages/hospitalMembers : le mobile/PWA
+    // reste autorisé à écrire même hôpital expiré (le soin courant ne
+    // doit jamais être coupé pour une facture desktop impayée) ; seul
+    // le desktop est réellement bloqué. Le signal sourceDevice vient
+    // du document envoyé par le client (voir note de risque résiduel
+    // dans le rapport final : un client malveillant pourrait usurper
+    // ce champ — accepté comme limite connue, pas de nouveau système
+    // d'auth introduit pour ce chantier).
+    function hospitalCanWriteFromDevice(hospitalId, deviceValue) {
+      return hospitalSubscriptionOk(hospitalId) || deviceValue != 'desktop';
+    }
+    // Le code applicatif écrit establishmentId (parfois hospital_id
+    // en repli historique) — jamais un champ "hospitalId" littéral.
+    // Ce helper évite de répéter ce repli dans chaque règle.
+    function resolveHospitalId(data) {
+      return data.establishmentId != null ? data.establishmentId
+        : (data.hospital_id != null ? data.hospital_id : data.hospitalId);
+    }
+
     function ownsUid(uid) {
       return signedIn() && uid == request.auth.uid;
     }
@@ -122,7 +166,14 @@ service cloud.firestore {
 
     match /patients/{patientId} {
       allow read: if canReadMedicalData(resource.data);
-      allow create: if isAdmin() || currentRoleIs('doctor') || currentRoleIs('nurse');
+      // Création bloquée si abonnement expiré/suspendu — confirmé :
+      // c'est la SEULE action que le mobile/PWA bloque aussi (voir
+      // hospitalCanWrite, sans distinction de plateforme ici).
+      allow create: if isAdmin() ||
+        ((currentRoleIs('doctor') || currentRoleIs('nurse')) &&
+         hospitalCanWrite(request.resource.data.establishmentId != null
+           ? request.resource.data.establishmentId
+           : request.resource.data.hospital_id));
       allow update, delete: if isAdmin() || doctorCanRead(resource.data);
     }
 
@@ -212,14 +263,25 @@ service cloud.firestore {
         ownsPatientData(resource.data) ||
         doctorCanRead(resource.data) ||
         pharmacyCanReadPrescription(resource.data);
-      allow create: if isAdmin() || currentRoleIs('doctor');
-      allow update: if isAdmin() || doctorCanRead(resource.data) || pharmacyCanReadPrescription(resource.data);
+      allow create: if isAdmin() ||
+        (currentRoleIs('doctor') &&
+         hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
+      // La pharmacie ciblée peut toujours mettre à jour le statut
+      // même abonnement expiré/suspendu (une ordonnance déjà envoyée
+      // doit pouvoir être honorée) ; le médecin auteur reste soumis
+      // à la même règle desktop/mobile que la création.
+      allow update: if isAdmin() ||
+        pharmacyCanReadPrescription(resource.data) ||
+        (doctorCanRead(resource.data) &&
+         hospitalCanWriteFromDevice(resolveHospitalId(resource.data), request.resource.data.sourceDevice));
       allow delete: if isAdmin();
     }
 
     match /appointments/{appointmentId} {
       allow read: if canReadMedicalData(resource.data);
-      allow create: if isAdmin() || currentRoleIs('doctor') || currentRoleIs('nurse') || ownsPatientData(request.resource.data);
+      allow create: if isAdmin() ||
+        ((currentRoleIs('doctor') || currentRoleIs('nurse') || ownsPatientData(request.resource.data)) &&
+         hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
       allow update, delete: if isAdmin() || doctorCanRead(resource.data) || ownsPatientData(resource.data);
     }
 
@@ -360,6 +422,73 @@ service cloud.firestore {
     match /mc_affiliations/{docId} {
       allow read: if isAdmin() || (signedIn() && resource.data.requesterUid == request.auth.uid);
       allow write: if isAdmin();
+    }
+
+    /* ══════════════════════════════════════════════════
+       CONTRAT D'ÉCHANGE MOBILE ↔ DESKTOP
+       Chaque document porte hospitalId + createdByUid. L'écriture
+       exige : membre signé, et abonnement actif/grace_period —
+       vérifié côté serveur (hospitalCanWrite), pas seulement en JS.
+       L'admin garde un accès de secours pour la maintenance.
+    ══════════════════════════════════════════════════ */
+    match /subscriptions/{hospitalId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    match /consultations/{docId} {
+      allow read: if isAdmin() || canReadMedicalData(resource.data);
+      allow create: if isAdmin() ||
+        (signedIn() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
+      allow update: if isAdmin() ||
+        (signedIn() && hospitalCanWriteFromDevice(resolveHospitalId(resource.data), request.resource.data.sourceDevice));
+      allow delete: if isAdmin();
+    }
+
+    match /labRequests/{docId} {
+      allow read: if isAdmin() || canReadMedicalData(resource.data);
+      allow create: if isAdmin() ||
+        (signedIn() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
+      allow update: if isAdmin() ||
+        (signedIn() && hospitalCanWriteFromDevice(resolveHospitalId(resource.data), request.resource.data.sourceDevice));
+      allow delete: if isAdmin();
+    }
+
+    match /labResults/{docId} {
+      allow read: if isAdmin() || canReadMedicalData(resource.data);
+      allow create: if isAdmin() ||
+        (signedIn() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
+      allow update: if isAdmin() ||
+        (signedIn() && hospitalCanWriteFromDevice(resolveHospitalId(resource.data), request.resource.data.sourceDevice));
+      allow delete: if isAdmin();
+    }
+
+    match /messages/{docId} {
+      allow read: if isAdmin() ||
+        (signedIn() && (resource.data.toUid == request.auth.uid || resource.data.fromUid == request.auth.uid));
+      allow create: if isAdmin() ||
+        (signedIn() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
+      allow update: if isAdmin() ||
+        (signedIn() && resource.data.toUid == request.auth.uid &&
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readStatus','readAt']));
+      allow delete: if isAdmin();
+    }
+
+    match /hospitalMembers/{docId} {
+      allow read: if isAdmin() || signedIn();
+      allow create, update: if isAdmin() ||
+        (signedIn() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
+      allow delete: if isAdmin();
+    }
+
+    match /auditLogs/{docId} {
+      // Journal d'audit : création libre pour tout utilisateur
+      // signé (traçabilité, y compris des tentatives bloquées par
+      // abonnement), jamais modifiable après coup, lecture admin
+      // uniquement.
+      allow read: if isAdmin();
+      allow create: if signedIn();
+      allow update, delete: if false;
     }
 
     match /{document=**} {

@@ -3,16 +3,9 @@
    ===================================================== */
 const I18n = (() => {
   const LANGUAGES = {
-    fr: { name:'Français',   flag:'🇫🇷', dir:'ltr' },
-    en: { name:'English',    flag:'🇬🇧', dir:'ltr' },
-    es: { name:'Español',    flag:'🇪🇸', dir:'ltr' },
-    ar: { name:'العربية',    flag:'🇸🇦', dir:'rtl' },
-    pt: { name:'Português',  flag:'🇧🇷', dir:'ltr' },
-    sw: { name:'Kiswahili',  flag:'🇰🇪', dir:'ltr' },
-    zh: { name:'中文',        flag:'🇨🇳', dir:'ltr' },
-    de: { name:'Deutsch',    flag:'🇩🇪', dir:'ltr' },
-    ru: { name:'Русский',    flag:'🇷🇺', dir:'ltr' },
-    hi: { name:'हिन्दी',      flag:'🇮🇳', dir:'ltr' },
+    fr: { name:'Français', flag:'🇫🇷', dir:'ltr' },
+    en: { name:'English',  flag:'🇬🇧', dir:'ltr' },
+    zh: { name:'中文',      flag:'🇨🇳', dir:'ltr' },
   };
 
   const T = {
@@ -30,6 +23,17 @@ const I18n = (() => {
     nav_consultations:{ fr:'Consultations', en:'Consultations', es:'Consultas', ar:'الاستشارات', pt:'Consultas', sw:'Mashauriano', zh:'会诊', de:'Konsultationen', ru:'Консультации', hi:'परामर्श' },
     nav_pos:          { fr:'Point de Vente', en:'Point of Sale', es:'Punto de Venta', ar:'نقطة البيع', pt:'Ponto de Venda', sw:'Mahali pa Mauzo', zh:'销售点', de:'Verkaufspunkt', ru:'Точка продажи', hi:'बिक्री बिंदु' },
     nav_inventory:    { fr:'Inventaire', en:'Inventory', es:'Inventario', ar:'المخزون', pt:'Estoque', sw:'Hesabu', zh:'库存', de:'Inventar', ru:'Инвентарь', hi:'इन्वेंट्री' },
+    nav_timeline:      { fr:'Timeline',           en:'Timeline',              zh:'时间线' },
+    nav_lab:           { fr:'Analyses',           en:'Lab Tests',             zh:'化验' },
+    nav_vaccinations:  { fr:'Vaccinations',       en:'Vaccinations',          zh:'疫苗接种' },
+    nav_appointments:  { fr:'Rendez-vous',        en:'Appointments',          zh:'预约' },
+    nav_inbox:         { fr:'Messagerie',         en:'Messages',              zh:'消息' },
+    nav_pharmacy_map:  { fr:'Carte pharmacies',   en:'Pharmacy Map',          zh:'药房地图' },
+    nav_settings:      { fr:'Paramètres',         en:'Settings',              zh:'设置' },
+    nav_hospitals:     { fr:'Établissements',     en:'Establishments',        zh:'机构' },
+    nav_sales:         { fr:'Ventes',             en:'Sales',                 zh:'销售' },
+    nav_pharmacy_rx:   { fr:'Ordonnances reçues', en:'Received Prescriptions',zh:'已收处方' },
+    nav_admin_dashboard:{ fr:'Administration',    en:'Administration',       zh:'管理' },
     nav_sales_history:{ fr:'Ventes', en:'Sales', es:'Ventas', ar:'المبيعات', pt:'Vendas', sw:'Mauzo', zh:'销售', de:'Verkäufe', ru:'Продажи', hi:'बिक्री' },
     form_firstname:   { fr:'Prénom', en:'First Name', es:'Nombre', ar:'الاسم الأول', pt:'Nome', sw:'Jina la Kwanza', zh:'名字', de:'Vorname', ru:'Имя', hi:'पहला नाम' },
     form_lastname:    { fr:'Nom', en:'Last Name', es:'Apellido', ar:'اسم العائلة', pt:'Sobrenome', sw:'Jina la Ukoo', zh:'姓氏', de:'Nachname', ru:'Фамилия', hi:'अंतिम नाम' },
