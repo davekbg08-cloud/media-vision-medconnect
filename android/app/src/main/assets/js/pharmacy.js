@@ -10,12 +10,13 @@ const PharmacyPortal = (() => {
   function render(section) {
     const main = document.getElementById('main-content');
     switch (section) {
-      case 'dashboard': renderDashboard(main); break;
-      case 'pos':       renderPOS(main);       break;
-      case 'inventory': renderInventory(main); break;
-      case 'sales':     renderSales(main);     break;
-      case 'map':       MapModule.render(main); break;
-      default:          renderDashboard(main);
+      case 'dashboard':     renderDashboard(main);     break;
+      case 'pos':           renderPOS(main);           break;
+      case 'inventory':     renderInventory(main);     break;
+      case 'sales':         renderSales(main);         break;
+      case 'prescriptions': renderPrescriptions(main); break;
+      case 'map':           MapModule.render(main);    break;
+      default:              renderDashboard(main);
     }
   }
 
@@ -320,9 +321,65 @@ const PharmacyPortal = (() => {
       </div>`;
   }
 
+  /* ── PARTIE B — Ordonnances reçues (ciblées) ────────── */
+  const STATUS_LABELS = {
+    sent:'📤 Envoyée', received:'📥 Reçue', preparing:'⏳ En préparation',
+    ready:'✅ Prête', delivered:'🤝 Remise', cancelled:'❌ Annulée',
+  };
+  const NEXT_STATUS = { sent:'received', received:'preparing', preparing:'ready', ready:'delivered' };
+  const NEXT_LABEL  = { sent:'Marquer reçue', received:'Marquer en préparation', preparing:'Marquer prête', ready:'Marquer remise' };
+
+  function renderPrescriptions(main) {
+    const user = Auth.getUser();
+    const mine = DB.getPrescriptions()
+      .filter(rx => rx.pharmacyUid === user?.uid)
+      .sort((a,b) => (b.date||'').localeCompare(a.date||''));
+
+    main.innerHTML = `
+      <div class="page-header"><h2>💊 Ordonnances reçues</h2></div>
+      ${!mine.length ? `<div class="card empty-state"><p>Aucune ordonnance envoyée à votre pharmacie pour le moment.</p></div>` : ''}
+      <div class="records-list">
+        ${mine.map(rx => {
+          const pt = DB.getPatientById(rx.patient_id || rx.patientId);
+          return `
+            <div class="record-card">
+              <div class="record-header">
+                <span>${STATUS_LABELS[rx.status]||rx.status}</span>
+                <strong>${esc(pt?.firstname||'')} ${esc(pt?.lastname||'')}</strong>
+                ${pt?`<span class="id-tag">${pt.id}</span>`:''}
+                <span class="record-date">📅 ${rx.date}</span>
+              </div>
+              <p style="font-size:.84rem;color:var(--text-muted)">Dr. ${esc(rx.doctor||'—')}${rx.doctorOrderNumber?' · N° '+esc(rx.doctorOrderNumber):''}</p>
+              <p><strong>Diagnostic :</strong> ${esc(rx.diagnosis||'—')}</p>
+              <ul style="padding-left:1.2rem;margin-top:.3rem">
+                ${(rx.medicines||[]).map(m=>`<li>💊 ${esc(m.name)} — ${esc(m.dosage)}</li>`).join('')}
+              </ul>
+              <div style="display:flex;gap:.4rem;margin-top:.6rem;flex-wrap:wrap">
+                ${NEXT_STATUS[rx.status] ? `
+                  <button class="btn btn-ghost btn-sm" style="color:var(--secondary)"
+                    onclick="Network.setPrescriptionStatus('${rx.pid}','${NEXT_STATUS[rx.status]}');PharmacyPortal.render('prescriptions')">
+                    ${NEXT_LABEL[rx.status]}
+                  </button>` : ''}
+                ${!['delivered','cancelled'].includes(rx.status) ? `
+                  <button class="btn btn-ghost btn-sm" style="color:var(--danger)"
+                    onclick="PharmacyPortal.cancelPrescription('${rx.pid}')">❌ Signaler indisponible</button>` : ''}
+              </div>
+            </div>`;
+        }).join('')}
+      </div>`;
+  }
+
+  function cancelPrescription(pid) {
+    const reason = prompt('Motif (médicament manquant, etc.) :');
+    if (reason === null) return;
+    Network.setPrescriptionStatus(pid, 'cancelled', reason || 'Non précisé');
+    render('prescriptions');
+  }
+
   return {
     render, filterMeds, addToCart, removeFromCart, updateQty, checkout, lookupPatient,
     openAddMed, saveMed, openEditMed, saveEditMed, deleteMed,
+    renderPrescriptions, cancelPrescription,
   };
 })();
 

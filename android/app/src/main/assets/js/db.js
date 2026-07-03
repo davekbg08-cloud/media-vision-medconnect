@@ -14,6 +14,20 @@ const DB = (() => {
   const store = (k, v)    => localStorage.setItem(k, JSON.stringify(v));
   const today = ()        => new Date().toISOString().slice(0, 10);
 
+  /* ── IDs UNIQUES ──────────────────────────────────────
+     Remplace les anciens `${PREFIX}${Date.now()}` qui pouvaient
+     entrer en collision si deux écritures arrivaient dans la
+     même milliseconde (lot rapide, double appui, Promise.all).
+     N'affecte QUE les nouveaux IDs générés — les anciens IDs déjà
+     stockés (format Date.now() seul) restent valides et inchangés.
+  ──────────────────────────────────────────────────────── */
+  function makeId(prefix) {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+      return `${prefix}${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
+    }
+    return `${prefix}${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  }
+
   /* ── NUMÉRO DE SÉRIE PATIENT ─────────────────────── */
   function generatePatientId(countryCode) {
     const yr    = new Date().getFullYear();
@@ -27,19 +41,49 @@ const DB = (() => {
   /* ── SYNC FIREBASE ───────────────────────────────────
      Écrit dans localStorage ET dans Firestore si dispo.
      Lit toujours depuis localStorage (cache local).
+
+     _push()         : compatible avec tout le code existant
+                       (aucun appelant actuel ne vérifie son retour),
+                       mais retourne désormais true/false et logue
+                       clairement tout échec au lieu de l'avaler.
+     _pushCritical() : à utiliser pour les écritures où l'utilisateur
+                       doit savoir si le cloud a réellement confirmé
+                       (inscription, approbation admin...).
   ──────────────────────────────────────────────────── */
   async function _push(collection, docId, data) {
-    if (!firebaseReady || !firebaseDB) return;
+    if (!firebaseReady || !firebaseDB) {
+      console.warn(`[MedConnect] Firestore indisponible — écriture locale seulement (${collection}/${docId})`);
+      return false;
+    }
     try {
       await firebaseDB.collection(collection).doc(String(docId)).set(data);
-    } catch (e) {}
+      return true;
+    } catch (e) {
+      console.warn(`[MedConnect] Échec écriture Firestore ${collection}/${docId} :`, e?.message || e);
+      return false;
+    }
+  }
+
+  /** Écriture critique : retourne explicitement le résultat, ne masque jamais l'échec. */
+  async function _pushCritical(collection, docId, data) {
+    return _push(collection, docId, data);
+  }
+
+  /** Pousse plusieurs (collection, docId, data) et résout true seulement si TOUT a réussi. */
+  async function pushAndReport(entries) {
+    const results = await Promise.all(entries.map(([col, id, data]) => _pushCritical(col, id, data)));
+    return results.every(Boolean);
   }
 
   async function _delete(collection, docId) {
-    if (!firebaseReady || !firebaseDB) return;
+    if (!firebaseReady || !firebaseDB) return false;
     try {
       await firebaseDB.collection(collection).doc(String(docId)).delete();
-    } catch (e) {}
+      return true;
+    } catch (e) {
+      console.warn(`[MedConnect] Échec suppression Firestore ${collection}/${docId} :`, e?.message || e);
+      return false;
+    }
   }
 
   function storeSnapshot(key, snap) {
@@ -100,16 +144,35 @@ const DB = (() => {
       'mc_hospitals','mc_affiliations',
       'establishments','affiliation_requests',
       'mc_verified_doctors','mc_verified_pharms','mc_verified_nurses',
+      'establishment_documents',
     ];
-    for (const col of collections) {
-      try {
-        const snap = await firebaseDB.collection(col).get();
-        if (!snap.empty) {
-          const data = snap.docs.map(d => d.data());
-          store(col, data);
-        }
-      } catch (e) {}
+    // Chaque collection en parallèle avec un timeout individuel : un
+    // réseau lent ou une requête bloquée ne doit jamais figer toute
+    // l'app (observé : admin resté sur un sablier vide en LTE faible).
+    const PER_COLLECTION_TIMEOUT_MS = 6000;
+    function withTimeout(promise, ms) {
+      return Promise.race([
+        promise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
+      ]);
     }
+    await Promise.all(collections.map(async col => {
+      try {
+        const snap = await withTimeout(firebaseDB.collection(col).get(), PER_COLLECTION_TIMEOUT_MS);
+        if (!snap.empty) store(col, snap.docs.map(d => d.data()));
+      } catch (e) {
+        console.warn(`[MedConnect] Sync ${col} ignorée (lente/indisponible) :`, e?.message || e);
+      }
+    }));
+  }
+
+  /** Version non bloquante : lance la sync en arrière-plan sans jamais
+      faire attendre l'appelant. À utiliser partout où l'affichage ne
+      doit pas dépendre du réseau (ex: dashboard admin). */
+  function syncFromFirebaseInBackground(onDone) {
+    syncFromFirebase()
+      .then(() => onDone?.(true))
+      .catch(e => { console.warn('[MedConnect] Sync arrière-plan :', e); onDone?.(false); });
   }
 
   /* ── LISTENERS TEMPS RÉEL ────────────────────────── */
@@ -149,6 +212,26 @@ const DB = (() => {
     listen(firebaseDB.collection('registration_requests'), snap => {
       if (!snap.empty) storeSnapshot('registration_requests', snap);
     });
+    // Ordonnances — pour rafraîchir l'inbox pharmacie/médecin en quasi temps réel
+    listen(firebaseDB.collection('mc_prescriptions'), snap => {
+      if (!snap.empty) storeSnapshot('mc_prescriptions', snap);
+    });
+    // Consultations
+    listen(firebaseDB.collection('mc_consultations'), snap => {
+      if (!snap.empty) storeSnapshot('mc_consultations', snap);
+    });
+    // Inventaire pharmacie (stock partagé entre appareils du même pharmacien)
+    listen(firebaseDB.collection('mc_medicines'), snap => {
+      if (!snap.empty) storeSnapshot('mc_medicines', snap);
+    });
+    // Ventes
+    listen(firebaseDB.collection('mc_sales'), snap => {
+      if (!snap.empty) storeSnapshot('mc_sales', snap);
+    });
+    // Trace documents établissement (audit)
+    listen(firebaseDB.collection('establishment_documents'), snap => {
+      if (!snap.empty) storeSnapshot('establishment_documents', snap);
+    });
   }
 
   /* ── INIT ────────────────────────────────────────── */
@@ -161,6 +244,7 @@ const DB = (() => {
      PATIENTS
   ══════════════════════════════════════════════════ */
   function getPatients()   { return load('mc_patients'); }
+  function savePatients(list) { store('mc_patients', list); }
 
   function addPatient(data) {
     const list = getPatients();
@@ -259,7 +343,7 @@ const DB = (() => {
 
   function createRegistrationRequest(account) {
     const list = getRegistrationRequests();
-    const requestId = `REG${Date.now()}`;
+    const requestId = makeId('REG');
     const req = {
       requestId,
       requesterUid: account.uid,
@@ -295,7 +379,7 @@ const DB = (() => {
 
   function addConsultation(data) {
     const list = getConsultations();
-    const c = { ...data, cid: `C${Date.now()}`, date: data.date || today() };
+    const c = { ...data, cid: makeId('C'), date: data.date || today() };
     list.push(c); store('mc_consultations', list);
     _push('mc_consultations', c.cid, c);
     _push('medical_records', c.cid, {
@@ -325,11 +409,22 @@ const DB = (() => {
 
   function addPrescription(data) {
     const list = getPrescriptions();
-    const p = { ...data, pid: `P${Date.now()}`, date: data.date || today() };
+    const p = { ...data, pid: makeId('P'), date: data.date || today(), status: data.status || 'sent' };
     list.push(p); store('mc_prescriptions', list);
     _push('mc_prescriptions', p.pid, p);
     _push('prescriptions', p.pid, p);
     return p;
+  }
+
+  function updatePrescription(pid, data) {
+    const list = getPrescriptions();
+    const idx  = list.findIndex(p => p.pid === pid);
+    if (idx === -1) return null;
+    list[idx] = { ...list[idx], ...data, pid, updatedAt: new Date().toISOString() };
+    store('mc_prescriptions', list);
+    _push('mc_prescriptions', pid, list[idx]);
+    _push('prescriptions', pid, list[idx]);
+    return list[idx];
   }
 
   function getPatientPrescriptions(pid) {
@@ -339,11 +434,29 @@ const DB = (() => {
   /* ══════════════════════════════════════════════════
      RENDEZ-VOUS
   ══════════════════════════════════════════════════ */
+  /* ══════════════════════════════════════════════════
+     PARTIE G — TRACE DOCUMENTS ÉTABLISSEMENT (audit)
+  ══════════════════════════════════════════════════ */
+  function getEstablishmentDocuments() { return load('establishment_documents'); }
+
+  function addEstablishmentDocument(doc) {
+    const list = getEstablishmentDocuments();
+    const d = {
+      documentId: makeId('DOC'),
+      createdAt:  new Date().toISOString(),
+      auditRequired: true,
+      ...doc,
+    };
+    list.push(d); store('establishment_documents', list);
+    _push('establishment_documents', d.documentId, d);
+    return d;
+  }
+
   function getAppointments() { return load('mc_appointments'); }
 
   function addAppointment(data) {
     const list = getAppointments();
-    const a = { ...data, aid: `A${Date.now()}`, created_at: new Date().toISOString() };
+    const a = { ...data, aid: makeId('A'), created_at: new Date().toISOString() };
     list.push(a); store('mc_appointments', list);
     _push('mc_appointments', a.aid, a);
     _push('appointments', a.aid, a);
@@ -374,7 +487,7 @@ const DB = (() => {
 
   function addVaccination(data) {
     const list = getVaccinations();
-    const v = { ...data, vid: `V${Date.now()}`, date: data.date || today() };
+    const v = { ...data, vid: makeId('V'), date: data.date || today() };
     list.push(v); store('mc_vaccinations', list);
     _push('mc_vaccinations', v.vid, v);
     return v;
@@ -396,7 +509,7 @@ const DB = (() => {
 
   function addLabResult(data) {
     const list = getAllLabResults();
-    const l = { ...data, lid: `L${Date.now()}`, date: data.date || today() };
+    const l = { ...data, lid: makeId('L'), date: data.date || today() };
     list.push(l); store('mc_lab_results', list);
     _push('mc_lab_results', l.lid, l);
     _push('medical_records', l.lid, {
@@ -427,7 +540,7 @@ const DB = (() => {
 
   function addMedicine(data) {
     const list = getMedicines();
-    const m = { ...data, mid: `M${Date.now()}`, created_at: new Date().toISOString() };
+    const m = { ...data, mid: makeId('M'), created_at: new Date().toISOString() };
     list.push(m); store('mc_medicines', list);
     _push('mc_medicines', m.mid, m);
     return m;
@@ -456,7 +569,7 @@ const DB = (() => {
   function addSale(items, total, patientId) {
     const list = getSales();
     const s = {
-      sid: `S${Date.now()}`, items,
+      sid: makeId('S'), items,
       total: parseFloat(total).toFixed(2),
       patient_id: patientId || null,
       date: today(), time: new Date().toLocaleTimeString(),
@@ -523,12 +636,13 @@ const DB = (() => {
   }
 
   return {
-    init, syncFromFirebase, generatePatientId,
+    init, syncFromFirebase, syncFromFirebaseInBackground, generatePatientId, makeId, pushAndReport,
     getAccounts, saveAccounts, getUsers, saveUsers, upsertUserProfile,
     getRegistrationRequests, saveRegistrationRequests, createRegistrationRequest,
-    getPatients, addPatient, updatePatient, deletePatient, getPatientById, searchPatients,
+    getPatients, savePatients, addPatient, updatePatient, deletePatient, getPatientById, searchPatients,
     getConsultations, addConsultation, getPatientConsultations, deleteConsultation,
-    getPrescriptions, addPrescription, getPatientPrescriptions,
+    getPrescriptions, addPrescription, updatePrescription, getPatientPrescriptions,
+    getEstablishmentDocuments, addEstablishmentDocument,
     getAppointments, addAppointment, updateAppointment, deleteAppointment,
     getVaccinations, addVaccination, getPatientVaccinations, deleteVaccination,
     getAllLabResults, addLabResult, getPatientLabResults, deleteLabResult,

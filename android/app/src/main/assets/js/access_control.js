@@ -108,11 +108,11 @@ const ACL = (() => {
   function requestConsent(patientId, doctorId, doctorName) {
     const list = getConsents();
     if (list.find(c => c.patient_id===patientId && c.doctor_id===doctorId && c.status==='approved')) return;
-    const c = { cid:`CON${Date.now()}`, patient_id:patientId, doctor_id:doctorId,
+    const c = { cid:DB.makeId('CON'), patient_id:patientId, doctor_id:doctorId,
                 doctor_name:doctorName, status:'pending', requested_at:new Date().toISOString() };
     list.push(c); saveConsents(list);
     const msgs = DB.getMessages();
-    msgs.push({ mid:`N${Date.now()}`, to_role:'patient', to_id:patientId, type:'consent_request',
+    msgs.push({ mid:DB.makeId('N'), to_role:'patient', to_id:patientId, type:'consent_request',
       subject:`🔐 Demande d'accès — ${doctorName}`,
       body:`${doctorName} souhaite accéder à votre dossier médical complet.\nAcceptez ou refusez dans Paramètres → Confidentialité.`,
       from:doctorName, date:new Date().toISOString().slice(0,10), read:false, consent_id:c.cid });
@@ -146,13 +146,37 @@ const ACL = (() => {
   function getPatientConsents(pid) { return getConsents().filter(c => c.patient_id === pid); }
 
   /* ── CONTRÔLE D'ACCÈS ─────────────────────────────── */
+  /* PARTIE K — le médecin auteur d'un acte garde toujours accès,
+     même s'il n'a pas créé la fiche patient lui-même. */
+  function isAuthorDoctor(user, patientId) {
+    if (!user?.uid) return false;
+    const p = DB.getPatientById(patientId);
+    if (p && p.created_by === user.uid) return true;
+    const authored = c => (c.patient_id === patientId) && (c.doctor_uid === user.uid || c.created_by === user.uid);
+    return DB.getConsultations().some(authored) || DB.getPrescriptions().some(authored);
+  }
+
+  /** Liste les médecins ayant un accès automatique (auteur) à ce patient */
+  function getAuthorDoctors(patientId) {
+    const names = new Map();
+    const p = DB.getPatientById(patientId);
+    if (p?.created_by) names.set(p.created_by, p.created_by_name || 'Médecin');
+    DB.getConsultations().filter(c => c.patient_id === patientId).forEach(c => {
+      if (c.doctor_uid) names.set(c.doctor_uid, c.doctor || names.get(c.doctor_uid) || 'Médecin');
+    });
+    DB.getPrescriptions().filter(rx => rx.patient_id === patientId).forEach(rx => {
+      if (rx.doctor_uid) names.set(rx.doctor_uid, rx.doctor || names.get(rx.doctor_uid) || 'Médecin');
+    });
+    return [...names.entries()].map(([uid, name]) => ({ uid, name }));
+  }
+
   function canAccessPatient(user, patientId) {
     if (!user) return false;
     if (user.role === 'patient')    return localStorage.getItem('mc_my_patient_id') === patientId;
     if (user.role === 'pharmacist') return false;
     if (user.role === 'admin')      return true;
-    const p = DB.getPatientById(patientId);
-    return p && (p.created_by === user.uid || hasConsent(patientId, user.uid));
+    if (isAuthorDoctor(user, patientId)) return true;
+    return hasConsent(patientId, user.uid);
   }
 
   /* ── JOURNAL D'ACCÈS ──────────────────────────────── */
@@ -175,7 +199,7 @@ const ACL = (() => {
     initRegistry,
     getConsents, requestConsent, respondConsent, revokeConsent,
     hasConsent, getPatientConsents,
-    canAccessPatient, logAccess, getAccessLog,
+    canAccessPatient, isAuthorDoctor, getAuthorDoctors, logAccess, getAccessLog,
   };
 })();
 

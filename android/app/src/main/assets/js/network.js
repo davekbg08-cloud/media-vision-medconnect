@@ -11,15 +11,28 @@ const Network = (() => {
     return `${patient.firstname || patient.prenom || ''} ${patient.lastname || patient.nom || ''}`.trim() || '—';
   }
 
-  /* ── NOTIFICATIONS ─────────────────────────────── */
-  function notify({ to_role, to_id, type, subject, body }) {
+  /* ── NOTIFICATIONS ─────────────────────────────────
+     Champs nouveaux ajoutés SANS retirer les anciens :
+     to_role/to_id/read (existants) restent fonctionnels.
+     toUid/fromUid/fromRole/readStatus/priority/createdAt
+     sont les champs propres pour les nouveaux usages.
+  ──────────────────────────────────────────────────── */
+  function notify({ to_role, to_id, type, subject, body, priority }) {
+    const from = window.Auth?.getUser?.();
     const msgs = DB.getMessages();
     msgs.push({
-      mid:     `N${Date.now()}`,
+      mid:        DB.makeId('N'),
       to_role, to_id, type, subject, body,
-      from:    window.Auth?.getUser?.()?.name || 'MedConnect',
-      date:    new Date().toISOString().slice(0,10),
-      read:    false,
+      toUid:      to_id || null,
+      fromUid:    from?.uid || null,
+      fromRole:   from?.role || 'system',
+      from:       from?.name || 'MedConnect',
+      priority:   priority === 'urgent' ? 'urgent' : 'normal',
+      date:       new Date().toISOString().slice(0,10),
+      createdAt:  new Date().toISOString(),
+      read:       false,
+      readStatus: 'unread',
+      readAt:     null,
     });
     DB.saveMessages(msgs);
   }
@@ -38,25 +51,44 @@ const Network = (() => {
   function getUnread(role, id) {
     const user = window.Auth?.getUser?.();
     if (!id && user?.role === role) {
-      return DB.getMessages().filter(m => messageMatchesUser(m, user) && !m.read).length;
+      return DB.getMessages().filter(m => messageMatchesUser(m, user) && m.readStatus !== 'read' && !m.read).length;
     }
     return DB.getMessages().filter(m =>
-      m.to_role === role && (!id || m.to_id === id) && !m.read
+      m.to_role === role && (!id || m.to_id === id) && m.readStatus !== 'read' && !m.read
     ).length;
   }
 
   function markRead(mid) {
     const msgs = DB.getMessages();
     const m    = msgs.find(x => x.mid === mid);
-    if (m) { m.read = true; DB.saveMessages(msgs); }
+    if (m) {
+      m.read = true;
+      m.readStatus = 'read';
+      m.readAt = new Date().toISOString();
+      DB.saveMessages(msgs);
+    }
   }
 
-  /* ── INBOX UI ──────────────────────────────────── */
+  function markUnread(mid) {
+    const msgs = DB.getMessages();
+    const m    = msgs.find(x => x.mid === mid);
+    if (m) { m.read = false; m.readStatus = 'unread'; m.readAt = null; DB.saveMessages(msgs); }
+  }
+
+  /* ── INBOX UI — non lus en premier, urgents en tête ─── */
   function renderInbox(main) {
     const user = Auth.getUser();
     const msgs = DB.getMessages()
       .filter(m => messageMatchesUser(m, user))
-      .sort((a,b) => b.date.localeCompare(a.date));
+      .sort((a,b) => {
+        const unreadA = a.readStatus !== 'read' && !a.read ? 1 : 0;
+        const unreadB = b.readStatus !== 'read' && !b.read ? 1 : 0;
+        if (unreadA !== unreadB) return unreadB - unreadA;
+        const urgentA = a.priority === 'urgent' ? 1 : 0;
+        const urgentB = b.priority === 'urgent' ? 1 : 0;
+        if (urgentA !== urgentB) return urgentB - urgentA;
+        return (b.createdAt || b.date || '').localeCompare(a.createdAt || a.date || '');
+      });
 
     main.innerHTML = `
       <div class="page-header">
@@ -65,17 +97,21 @@ const Network = (() => {
       </div>
       ${!msgs.length ? `<div class="card empty-state"><p>Aucun message</p></div>` : ''}
       <div class="records-list">
-        ${msgs.map(m => `
-          <div class="record-card ${m.read?'':'unread-msg'}" onclick="Network.openMsg('${m.mid}')">
+        ${msgs.map(m => {
+          const isUnread = m.readStatus !== 'read' && !m.read;
+          return `
+          <div class="record-card ${isUnread?'unread-msg':''}" onclick="Network.openMsg('${m.mid}')">
             <div class="record-header">
               <span>${typeIcon(m.type)}</span>
+              ${m.priority === 'urgent' ? `<span class="chip" style="color:var(--danger);border-color:var(--danger)">🔴 Urgent</span>` : ''}
               <strong>${esc(m.subject)}</strong>
               <span class="record-date">📅 ${m.date}</span>
-              ${!m.read ? `<span class="unread-dot"></span>` : ''}
+              ${isUnread ? `<span class="unread-dot"></span>` : ''}
             </div>
             <p style="font-size:.84rem;color:var(--text-muted)">De : ${esc(m.from)}</p>
             <p style="font-size:.83rem">${esc(m.body).slice(0,100)}${m.body.length>100?'…':''}</p>
-          </div>`).join('')}
+          </div>`;
+        }).join('')}
       </div>`;
   }
 
@@ -90,7 +126,10 @@ const Network = (() => {
     App.openModal(`${typeIcon(m.type)} ${m.subject}`, `
       <p style="font-size:.84rem;color:var(--text-muted)">De : <strong>${esc(m.from)}</strong> · 📅 ${m.date}</p>
       <hr style="border-color:var(--border);margin:1rem 0">
-      <p style="font-size:.9rem;line-height:1.7">${esc(m.body).replace(/\n/g,'<br>')}</p>`);
+      <p style="font-size:.9rem;line-height:1.7">${esc(m.body).replace(/\n/g,'<br>')}</p>
+      <div class="form-actions" style="margin-top:1rem">
+        <button class="btn btn-ghost btn-sm" onclick="Network.markUnread('${m.mid}');App.closeModal();App.navigateTo('inbox')">Marquer non lu</button>
+      </div>`);
   }
 
   function openCompose() {
@@ -102,6 +141,12 @@ const Network = (() => {
             <option value="doctor">👨‍⚕️ Médecin</option>
             <option value="pharmacist">💊 Pharmacien</option>
             <option value="nurse">🩹 Infirmier</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Priorité</label>
+          <select id="msg-priority">
+            <option value="normal">Normale</option>
+            <option value="urgent">🔴 Urgente</option>
           </select>
         </div>
         <div class="form-group"><label>Sujet *</label><input type="text" id="msg-subject" required></div>
@@ -116,16 +161,17 @@ const Network = (() => {
   function sendMessage(e) {
     e.preventDefault();
     notify({
-      to_role: document.getElementById('msg-role').value,
-      type:    'info',
-      subject: document.getElementById('msg-subject').value,
-      body:    document.getElementById('msg-body').value,
+      to_role:  document.getElementById('msg-role').value,
+      type:     'info',
+      priority: document.getElementById('msg-priority').value,
+      subject:  document.getElementById('msg-subject').value,
+      body:     document.getElementById('msg-body').value,
     });
     App.closeModal();
     App.toast('✅ Message envoyé');
   }
 
-  /* ── DOCTOR → PHARMACY ─────────────────────────── */
+  /* ── DOCTOR → PHARMACY (ciblée, plus de diffusion globale) ── */
   function canSendPrescription(rx) {
     const user = Auth.getUser();
     if (!user || !rx) return false;
@@ -134,14 +180,42 @@ const Network = (() => {
     return ACL.canAccessPatient(user, rx.patient_id || rx.patientId);
   }
 
-  function sendPrescriptionToPharmacy(prescriptionId, pharmacyName) {
-    const rx = DB.getPrescriptions().find(p => p.pid === prescriptionId || p.code === prescriptionId); if (!rx) return;
-    if (!canSendPrescription(rx)) {
-      App.toast('Accès ordonnance non autorisé.', 'error');
+  /** Liste les pharmaciens actifs pouvant recevoir une ordonnance */
+  function getAvailablePharmacies() {
+    return DB.getAccounts().filter(a => a.role === 'pharmacist' && a.status === 'approved');
+  }
+
+  /** PARTIE E/F — envoi ciblé : 'patient' | uid pharmacien précis */
+  function sendPrescriptionToPharmacy(prescriptionId, target) {
+    const rx = DB.getPrescriptions().find(p => p.pid === prescriptionId || p.code === prescriptionId);
+    if (!rx) { App.toast('Ordonnance introuvable.', 'error'); return; }
+    if (!canSendPrescription(rx)) { App.toast('Accès ordonnance non autorisé.', 'error'); return; }
+
+    const pt = DB.getPatientById(rx.patient_id || rx.patientId);
+    const patientId = rx.patient_id || rx.patientId || '—';
+
+    // "patient" seul : aucune pharmacie ne doit voir l'ordonnance
+    if (!target || target === 'patient') {
+      DB.updatePrescription(rx.pid, { pharmacyUid: null, pharmacyName: null, status: 'sent' });
+      notify({
+        to_role: 'patient', to_id: patientId, type: 'prescription',
+        subject: '💊 Ordonnance disponible',
+        body: `Votre ordonnance du ${rx.date} est disponible dans votre espace. Présentez-la à la pharmacie de votre choix.`,
+      });
+      App.toast('✅ Ordonnance enregistrée — patient uniquement');
       return;
     }
-    const pt = DB.getPatientById(rx.patient_id || rx.patientId);
-    const patientId = rx.patient_id || rx.patientId || rx.patientNom || '—';
+
+    // Pharmacie précise (uid réel d'un compte pharmacien)
+    const pharmacist = getAvailablePharmacies().find(p => p.uid === target);
+    if (!pharmacist) { App.toast('Pharmacie introuvable ou non validée.', 'error'); return; }
+
+    DB.updatePrescription(rx.pid, {
+      pharmacyUid:  pharmacist.uid,
+      pharmacyName: pharmacist.pharmacy || pharmacist.name,
+      status:       'sent',
+    });
+
     const body = [
       `Patient : ${patientName(pt)} [${patientId}]`,
       `Diagnostic : ${rx.diagnosis || rx.diagnostic || '—'}`,
@@ -152,21 +226,45 @@ const Network = (() => {
     ].join('\n');
 
     notify({
-      to_role: 'pharmacist',
-      type:    'prescription',
+      to_role: 'pharmacist', to_id: pharmacist.uid, type: 'prescription',
       subject: `💊 Ordonnance patient ${patientId}`,
       body,
     });
-    // Notify patient
     notify({
-      to_role: 'patient',
-      to_id:   patientId,
-      type:    'prescription',
-      subject: `✅ Ordonnance envoyée à ${pharmacyName||'la pharmacie'}`,
-      body:    `Votre ordonnance du ${rx.date} a été transmise. Vous pouvez aller récupérer vos médicaments.`,
+      to_role: 'patient', to_id: patientId, type: 'prescription',
+      subject: `✅ Ordonnance envoyée à ${pharmacist.pharmacy || pharmacist.name}`,
+      body: `Votre ordonnance du ${rx.date} a été transmise. Vous pouvez aller récupérer vos médicaments.`,
     });
-    App.toast('📤 Ordonnance envoyée à la pharmacie');
+    App.toast(`📤 Ordonnance envoyée à ${pharmacist.pharmacy || pharmacist.name}`);
   }
+
+  /* ── PARTIE B — statuts ordonnance côté pharmacie ───────── */
+  const RX_STATUSES = ['sent','received','preparing','ready','delivered','cancelled'];
+
+  function setPrescriptionStatus(pid, status, reason) {
+    const user = Auth.getUser();
+    if (!RX_STATUSES.includes(status)) return;
+    const rx = DB.getPrescriptions().find(p => p.pid === pid);
+    if (!rx) return;
+    DB.updatePrescription(pid, {
+      status, updatedByUid: user?.uid || '', updatedByRole: user?.role || '',
+      ...(reason ? { cancelReason: reason } : {}),
+    });
+    const labels = { received:'reçue', preparing:'en préparation', ready:'prête', delivered:'remise au patient', cancelled:'annulée' };
+    notify({
+      to_role: 'doctor', to_id: rx.doctor_uid || rx.created_by, type: 'prescription',
+      subject: `Ordonnance ${labels[status] || status}`,
+      body: `L'ordonnance du patient ${rx.patient_id || rx.patientId} est désormais : ${labels[status] || status}.`,
+    });
+    notify({
+      to_role: 'patient', to_id: rx.patient_id || rx.patientId, type: 'prescription',
+      subject: `Votre ordonnance est ${labels[status] || status}`,
+      body: `Mise à jour de votre ordonnance du ${rx.date} : ${labels[status] || status}.`,
+    });
+    App.toast(`✅ Statut mis à jour : ${labels[status] || status}`);
+  }
+
+
 
   /* ── SMART PRESCRIPTION CHECK ──────────────────── */
   function smartCheck(patientId, medicines) {
@@ -235,9 +333,9 @@ const Network = (() => {
   }
 
   return {
-    notify, getUnread, markRead,
+    notify, getUnread, markRead, markUnread,
     renderInbox, openMsg, openCompose, sendMessage,
-    sendPrescriptionToPharmacy,
+    sendPrescriptionToPharmacy, getAvailablePharmacies, setPrescriptionStatus, RX_STATUSES,
     smartCheck, renderSmartCheckResult,
     checkStockForMeds,
   };

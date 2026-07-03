@@ -152,7 +152,10 @@ const HospitalPortal = (() => {
     main.innerHTML = `
       <div class="page-header">
         <h2>👥 ${t('nav_patients')}</h2>
-        <button class="btn btn-primary btn-sm" onclick="HospitalPortal.openNewPatient()">+ ${t('btn_new_patient')}</button>
+        <div class="header-actions">
+          <button class="btn btn-ghost btn-sm" onclick="HospitalPortal.openExternalSearch()">🔍 Patient d'un autre établissement</button>
+          <button class="btn btn-primary btn-sm" onclick="HospitalPortal.openNewPatient()">+ ${t('btn_new_patient')}</button>
+        </div>
       </div>
       <div class="search-bar">
         <input type="search" id="h-srch" placeholder="${t('search_placeholder')}"
@@ -162,6 +165,53 @@ const HospitalPortal = (() => {
         ${patientsForContext().slice().reverse().map(p=>patRow(p)).join('')
           || `<div class="card empty-state"><p>${t('no_data')}</p></div>`}
       </div>`;
+  }
+
+  /* ── PARTIE K — accès à un patient hors de mon périmètre ── */
+  function openExternalSearch() {
+    App.openModal('🔍 Rechercher un patient — numéro unique', `
+      <p style="font-size:.83rem;color:var(--text-muted);margin-bottom:.75rem">
+        Pour un patient déjà suivi ailleurs, entrez son numéro unique exact (MC-...).
+        Une demande d'accès lui sera envoyée — il devra l'autoriser.
+      </p>
+      <div class="form-group">
+        <label>Numéro unique patient</label>
+        <input type="text" id="ext-pid" placeholder="MC-2026-CD-XXXXXXXX"
+          style="text-transform:uppercase;font-family:monospace" oninput="this.value=this.value.toUpperCase()">
+      </div>
+      <div id="ext-result"></div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-ghost" onclick="App.closeModal()">Fermer</button>
+        <button type="button" class="btn btn-primary" onclick="HospitalPortal.searchExternalPatient()">Rechercher</button>
+      </div>`);
+  }
+
+  function searchExternalPatient() {
+    const id = (document.getElementById('ext-pid')?.value || '').trim().toUpperCase();
+    const box = document.getElementById('ext-result');
+    const p = DB.getPatientById(id);
+    if (!p) { box.innerHTML = `<p style="color:var(--danger);font-size:.83rem;margin-top:.5rem">${t('msg_no_record')}</p>`; return; }
+    if (canUsePatient(id)) {
+      box.innerHTML = `<p style="color:var(--secondary);font-size:.83rem;margin-top:.5rem">✅ Vous avez déjà accès à ce patient.</p>`;
+      return;
+    }
+    const user = Auth.getUser();
+    const already = ACL.getPatientConsents(id).find(c => c.doctor_id === user.uid && c.status === 'pending');
+    box.innerHTML = `
+      <div class="record-card" style="margin-top:.6rem">
+        <strong>${esc(p.firstname)} ${esc(p.lastname)}</strong> <span class="id-tag">${p.id}</span>
+        <p style="font-size:.82rem;color:var(--text-muted);margin-top:.3rem">Vous n'avez pas accès à ce dossier. Le patient doit autoriser votre demande.</p>
+        ${already
+          ? `<p style="font-size:.8rem;color:var(--accent);margin-top:.4rem">⏳ Demande déjà envoyée — en attente de réponse.</p>`
+          : `<button class="btn btn-primary btn-sm" style="margin-top:.5rem" onclick="HospitalPortal.requestPatientAccess('${id}')">🔐 Demander l'accès</button>`}
+      </div>`;
+  }
+
+  function requestPatientAccess(patientId) {
+    const user = Auth.getUser();
+    ACL.requestConsent(patientId, user.uid, user.name);
+    App.toast('📤 Demande envoyée au patient');
+    App.closeModal();
   }
 
   function filter(q) {
@@ -333,26 +383,117 @@ const HospitalPortal = (() => {
 
   function saveConsult(e, patientId) {
     e.preventDefault();
+    const user = Auth.getUser() || {};
+    const hosp = window.HospitalsRegistry?.getCurrentHospital?.();
+
+    /* ── PARTIE A/E — garde obligatoire avant toute création ── */
+    if (user.role === 'doctor' && !user.order_num) {
+      App.toast("Impossible de créer l'ordonnance : numéro d'ordre manquant.", 'error'); return;
+    }
+    if (user.role === 'doctor' && !hosp) {
+      App.toast("Impossible de créer l'ordonnance : aucun établissement actif. Sélectionnez un établissement.", 'error'); return;
+    }
+
     const diag = document.getElementById('c-diag').value;
     const meds = [...document.querySelectorAll('.rx-item')]
       .map(el => ({ name: el.querySelector('.rx-name').value, dosage: el.querySelector('.rx-dosage').value }))
       .filter(m => m.name?.trim());
-    DB.addConsultation({
+
+    const est = currentEstablishmentFields();
+    const consult = DB.addConsultation({
       patient_id: patientId,
       date:       document.getElementById('c-date').value,
       doctor:     document.getElementById('c-doc').value,
+      doctorOrderNumber: user.order_num || '',
+      doctorSpecialty:   user.specialty || '',
       reason:     document.getElementById('c-reason').value,
       diagnosis:  diag,
       treatment:  document.getElementById('c-treat').value,
       notes:      document.getElementById('c-notes').value,
-      ...currentEstablishmentFields(),
+      ...est,
     });
+
+    DB.addEstablishmentDocument({
+      relatedId:        consult.cid,
+      documentType:     'consultation',
+      documentTitle:     `Consultation — ${document.getElementById('c-reason').value || diag}`,
+      establishmentId:   est.establishmentId || '',
+      establishmentName: est.establishmentName || '',
+      doctorUid:          user.uid || '',
+      doctorName:         document.getElementById('c-doc').value,
+      doctorOrderNumber:  user.order_num || '',
+      patientUid:         patientId,
+      patientCode:        patientId,
+      status:             'active',
+      createdByUid:       user.uid || '',
+      createdByRole:      user.role || '',
+      accessLevel:        'establishment',
+    });
+
+    App.closeModal();
+
     if (meds.length) {
-      const rx = DB.addPrescription({ patient_id:patientId, date:document.getElementById('c-date').value, doctor:document.getElementById('c-doc').value, diagnosis:diag, medicines:meds, ...currentEstablishmentFields() });
-      // Send to pharmacy
-      Network.sendPrescriptionToPharmacy(rx.pid, 'Pharmacie Centrale');
+      const rx = DB.addPrescription({
+        patient_id: patientId,
+        date:       document.getElementById('c-date').value,
+        doctor:     document.getElementById('c-doc').value,
+        doctor_uid: user.uid || '',
+        doctorOrderNumber: user.order_num || '',
+        doctorSpecialty:   user.specialty || '',
+        diagnosis:  diag,
+        medicines:  meds,
+        ...est,
+      });
+
+      DB.addEstablishmentDocument({
+        relatedId:        rx.pid,
+        documentType:      'prescription',
+        documentTitle:      `Ordonnance — ${meds.length} médicament(s)`,
+        establishmentId:    est.establishmentId || '',
+        establishmentName:  est.establishmentName || '',
+        doctorUid:           user.uid || '',
+        doctorName:          document.getElementById('c-doc').value,
+        doctorOrderNumber:   user.order_num || '',
+        patientUid:          patientId,
+        patientCode:         patientId,
+        status:              'active',
+        createdByUid:        user.uid || '',
+        createdByRole:       user.role || '',
+        accessLevel:         'establishment',
+      });
+
+      openPrescriptionTarget(rx.pid);
+      return;
     }
-    App.closeModal(); App.toast(t('msg_saved')); App.navigateTo('consultations');
+
+    App.toast(t('msg_saved')); App.navigateTo('consultations');
+  }
+
+  /* ── PARTIE E/F — choix de la destination de l'ordonnance ── */
+  function openPrescriptionTarget(pid) {
+    const pharmacies = Network.getAvailablePharmacies();
+    App.openModal('💊 Envoyer l\'ordonnance', `
+      <p style="font-size:.84rem;color:var(--text-muted);margin-bottom:1rem">
+        Choisissez la destination. Par défaut, aucune pharmacie n'a accès à l'ordonnance.
+      </p>
+      <div class="form-group">
+        <label>Destination</label>
+        <select id="rx-target">
+          <option value="patient">Patient seulement (aucune pharmacie)</option>
+          ${pharmacies.map(ph => `<option value="${ph.uid}">${esc(ph.pharmacy || ph.name)}${ph.country?' — '+ph.country:''}</option>`).join('')}
+        </select>
+        ${!pharmacies.length ? `<small style="color:var(--accent)">Aucune pharmacie validée disponible pour le moment.</small>` : ''}
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-primary" onclick="HospitalPortal.confirmPrescriptionTarget('${pid}')">📤 Confirmer l'envoi</button>
+      </div>`);
+  }
+
+  function confirmPrescriptionTarget(pid) {
+    const target = document.getElementById('rx-target')?.value || 'patient';
+    Network.sendPrescriptionToPharmacy(pid, target);
+    App.closeModal();
+    App.navigateTo('consultations');
   }
 
   function delConsult(cid, patientId) {
@@ -411,7 +552,9 @@ const HospitalPortal = (() => {
 
   return {
     render, filter, openDetail, openNewPatient, saveNewPatient, deletePatient,
+    openExternalSearch, searchExternalPatient, requestPatientAccess,
     openConsult, addRxItem, runSmartCheck, saveConsult, delConsult,
+    openPrescriptionTarget, confirmPrescriptionTarget,
     renderConsultations, renderPrescriptions,
   };
 })();

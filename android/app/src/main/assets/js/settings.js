@@ -188,11 +188,21 @@ const Settings = (() => {
     const consents = ACL.getPatientConsents(pid);
     const approved = consents.filter(c => c.status === 'approved');
     const pending  = consents.filter(c => c.status === 'pending');
+    const authors  = ACL.getAuthorDoctors(pid);
 
     return `
       <div class="settings-section">
         <h3>🔐 Confidentialité & Consentements</h3>
         <p class="settings-desc">Contrôlez qui a accès à votre dossier médical.</p>
+
+        ${authors.length ? `
+          <p style="font-size:.8rem;font-weight:600;color:var(--text-muted);margin-bottom:.5rem">🩺 Médecin(s) auteur(s) — accès médical actif</p>
+          ${authors.map(a => `
+            <div class="consent-card" style="opacity:.9">
+              <strong>${esc(a.name)}</strong>
+              <small style="color:var(--text-muted);display:block">A créé un acte médical dans votre dossier — accès non révocable, comme la loi l'exige pour la continuité des soins.</small>
+            </div>`).join('')}
+          <div style="margin-bottom:.85rem"></div>` : ''}
 
         ${pending.length ? `
           <div style="margin-bottom:.85rem">

@@ -6,7 +6,6 @@ const Auth = (() => {
   const ICONS  = { patient:'🩺', doctor:'👨‍⚕️', pharmacist:'💊', nurse:'🩹', admin:'⚙️' };
   const LABELS = { patient:'Patient', doctor:'Médecin', pharmacist:'Pharmacien', nurse:'Infirmier(e)', admin:'Administrateur' };
   const ADMIN  = { uid:'admin_root', role:'admin', name:'Administrateur' };
-  const ADMIN_CONFIG_KEY = 'mc_admin_config';
   const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
   /* ── SESSION ──────────────────────────────────────── */
@@ -658,121 +657,67 @@ const Auth = (() => {
 
   /* ── ADMIN MODAL (5 clics logo) ───────────────────── */
   function _adminModal() {
-    const cfg = _getAdminConfig();
-    if (!cfg?.username || !cfg?.passwordHash) {
-      App.openModal('⚙️ Configuration Administrateur', `
-        <form onsubmit="Auth._setupAdmin(event)">
-          <div class="auth-register-info">Aucun compte administrateur n'est configuré sur cet appareil. Créez le premier accès local sans mot de passe codé dans l'application.</div>
-          <div class="form-group"><label class="inp-lbl">Nom affiché</label><input type="text" id="adm-setup-name" class="inp" value="Administrateur"></div>
-          <div class="form-group"><label class="inp-lbl">Identifiant administrateur *</label><input type="text" id="adm-setup-u" class="inp" autocomplete="off" required></div>
-          <div class="form-group"><label class="inp-lbl">Mot de passe * (min. 8 caractères)</label><input type="password" id="adm-setup-p" class="inp" minlength="8" required></div>
-          <div class="form-group"><label class="inp-lbl">Confirmer le mot de passe *</label><input type="password" id="adm-setup-p2" class="inp" minlength="8" required></div>
-          <div id="adm-setup-err" class="auth-error" style="display:none"></div>
-          <div class="form-actions"><button type="button" class="btn btn-ghost" onclick="App.closeModal()">Annuler</button><button type="submit" class="btn btn-primary">Créer l'accès</button></div>
-        </form>`);
-      return;
-    }
-
     App.openModal('⚙️ Accès Administrateur', `
+      <div class="auth-register-info">Connexion réservée aux comptes administrateur enregistrés dans Firestore.</div>
       <form onsubmit="Auth._doAdmin(event)">
-        <div class="form-group"><label class="inp-lbl">Identifiant</label><input type="text" id="adm-u" class="inp" autocomplete="off"></div>
-        <div class="form-group"><label class="inp-lbl">Mot de passe</label><input type="password" id="adm-p" class="inp"></div>
+        <div class="form-group"><label class="inp-lbl">Email administrateur</label><input type="email" id="adm-u" class="inp" autocomplete="email" required></div>
+        <div class="form-group"><label class="inp-lbl">Mot de passe</label><input type="password" id="adm-p" class="inp" autocomplete="current-password" required></div>
         <div id="adm-err" class="auth-error" style="display:none"></div>
-        <div class="form-actions"><button type="button" class="btn btn-ghost" onclick="App.closeModal()">Annuler</button><button type="submit" class="btn btn-primary">Connexion</button></div>
+        <div class="form-actions"><button type="button" class="btn btn-ghost" onclick="App.closeModal()">Annuler</button><button type="submit" class="btn btn-primary">Se connecter</button></div>
       </form>`);
   }
 
-  function _getAdminConfig() { try { return JSON.parse(localStorage.getItem(ADMIN_CONFIG_KEY) || 'null'); } catch { return null; } }
-  async function _sha256(value) {
-    if (!crypto?.subtle) throw new Error('crypto_subtle_unavailable');
-    const bytes = new TextEncoder().encode(value);
-    const hash = await crypto.subtle.digest('SHA-256', bytes);
-    return [...new Uint8Array(hash)].map(b => b.toString(16).padStart(2, '0')).join('');
-  }
-
+  /* ── ADMIN : accès cloud uniquement ──────────────────
+     Décision explicite (sécurité) : plus de filet de secours
+     local ni de configuration locale d'admin. L'accès admin
+     exige un email Firebase Auth valide ET un document
+     users/{uid}.role == "admin" dans Firestore, vérifié à chaque
+     connexion via _verifyAdminCloudRole(). Le document users/{uid}
+     doit être créé manuellement dans Firebase Console (aucune
+     auto-promotion possible en self-service).
+  ──────────────────────────────────────────────────────── */
   async function _setupAdmin(e) {
-    e.preventDefault();
-    const name = (document.getElementById('adm-setup-name')?.value || ADMIN.name).trim() || ADMIN.name;
-    const u = (document.getElementById('adm-setup-u')?.value || '').trim();
-    const p = (document.getElementById('adm-setup-p')?.value || '').trim();
-    const p2 = (document.getElementById('adm-setup-p2')?.value || '').trim();
-    const el = document.getElementById('adm-setup-err');
-    const showSetupError = msg => { if (!el) return; el.textContent = msg; el.style.display = 'block'; };
-    if (!u || !p || !p2) { showSetupError('Veuillez remplir tous les champs obligatoires.'); return; }
-    if (p.length < 8) { showSetupError('Le mot de passe doit contenir au moins 8 caractères.'); return; }
-    if (p !== p2) { showSetupError('Les mots de passe ne correspondent pas.'); return; }
-    let passwordHash;
-    try { passwordHash = await _sha256(p); } catch { showSetupError('Impossible de sécuriser le mot de passe dans ce navigateur.'); return; }
-    localStorage.setItem(ADMIN_CONFIG_KEY, JSON.stringify({ username:u, name, passwordHash, created_at:new Date().toISOString() }));
-    const adminSession = { ...ADMIN, username:u, name, cloudSynced:false };
-    if (u.includes('@') && _hasFirebaseAuth()) {
-      try {
-        const credential = await firebaseAuth.signInWithEmailAndPassword(u, p);
-        if (credential?.user?.uid) {
-          adminSession.uid = credential.user.uid;
-          adminSession.cloudSynced = await _verifyAdminCloudRole(credential.user.uid);
-        }
-      } catch (e) { console.warn('[MedConnect] Connexion admin Firebase ignorée :', e); }
-    }
-    App.closeModal(); _save(adminSession);
-    document.getElementById('auth-screen').style.display = 'none';
-    App.afterLogin(getUser());
-    if (!adminSession.cloudSynced) {
-      App.toast('⚠️ Accès admin créé en local uniquement. Pour synchroniser avec Firestore, utilisez un email déjà lié à un compte Firebase Auth, ET demandez l\'ajout manuel de role:"admin" dans Firestore (users/{uid}).', 'error');
-    } else {
-      App.toast('✅ Accès administrateur configuré — synchronisé avec Firestore.');
-    }
+    e.preventDefault?.();
+    App.closeModal?.();
+    _adminModal();
   }
 
   async function _doAdmin(e) {
     e.preventDefault();
-    const u = (document.getElementById('adm-u')?.value || '').trim();
-    const p = (document.getElementById('adm-p')?.value || '').trim();
-    const cfg = _getAdminConfig();
-    const el = document.getElementById('adm-err');
+    const email = (document.getElementById('adm-u')?.value || '').trim();
+    const pass  = (document.getElementById('adm-p')?.value || '').trim();
+    const el    = document.getElementById('adm-err');
+    const showAdminError = msg => { if (el) { el.textContent = msg; el.style.display = 'block'; } };
 
-    /* ── Filet de secours — accès toujours disponible ──────────
-       Garantit un accès admin même si la config locale est vide
-       ou inaccessible (réinstallation, nouvel appareil, sync KO).
-       ⚠️ Ce mode N'AUTHENTIFIE PAS via Firebase Auth : les actions
-       admin (approbations, registres) ne se synchroniseront PAS
-       vers Firestore tant qu'un vrai compte admin cloud n'est pas
-       configuré (voir _verifyAdminCloudRole ci-dessus).
-    ──────────────────────────────────────────────────────────── */
-    const FALLBACK_USER = 'admin';
-    const FALLBACK_PASS = 'MedConnect@2026!';
-    if (u === FALLBACK_USER && p === FALLBACK_PASS) {
-      App.closeModal();
-      _save({ ...ADMIN, username: FALLBACK_USER, cloudSynced: false });
+    if (!email || !pass) { showAdminError('Veuillez remplir l\'email et le mot de passe administrateur.'); return; }
+    if (!_hasFirebaseAuth() || !_hasFirebaseDB()) { showAdminError('❌ Firebase indisponible. Vérifiez la connexion internet puis réessayez.'); return; }
+
+    try {
+      const credential = await firebaseAuth.signInWithEmailAndPassword(email, pass);
+      const uid = credential?.user?.uid;
+      if (!uid) throw new Error('admin_uid_missing');
+
+      const doc = await firebaseDB.collection('users').doc(uid).get();
+      if (!doc.exists) { showAdminError('❌ Profil administrateur introuvable dans Firestore.'); return; }
+
+      const profile = doc.data() || {};
+      const status  = String(profile.status || '').toLowerCase();
+      if (profile.role !== 'admin') { showAdminError('❌ Ce compte n\'a pas le rôle administrateur.'); return; }
+      if (!['active','approved'].includes(status)) { showAdminError('🚫 Compte administrateur non actif.'); return; }
+
+      const session = {
+        ...profile, uid, authUid: uid, email, role: 'admin',
+        name: profile.name || profile.displayName || 'Administrateur',
+        cloudSynced: true,
+      };
+      App.closeModal(); _save(session);
       document.getElementById('auth-screen').style.display = 'none';
       App.afterLogin(getUser());
-      App.toast('⚠️ Accès admin local — vos actions ne seront pas synchronisées tant qu\'un compte admin cloud n\'est pas configuré.', 'error');
-      return;
+      App.toast('✅ Administrateur connecté — synchronisé avec Firestore.');
+    } catch (error) {
+      console.warn('[MedConnect] Connexion administrateur cloud impossible :', error);
+      showAdminError('❌ Connexion administrateur impossible. Vérifiez email, mot de passe et droits Firestore.');
     }
-
-    if (!cfg?.username || !cfg?.passwordHash) { if (el) { el.textContent = 'Compte administrateur non configuré pour cette installation.'; el.style.display = 'block'; } return; }
-    let passwordHash;
-    try { passwordHash = await _sha256(p); } catch { if (el) { el.textContent = 'Impossible de vérifier le mot de passe dans ce navigateur.'; el.style.display = 'block'; } return; }
-    if (u === cfg.username && passwordHash === cfg.passwordHash) {
-      const adminSession = { ...ADMIN, username:cfg.username, name:cfg.name || ADMIN.name, cloudSynced:false };
-      if (cfg.username.includes('@') && _hasFirebaseAuth()) {
-        try {
-          const credential = await firebaseAuth.signInWithEmailAndPassword(cfg.username, p);
-          if (credential?.user?.uid) {
-            adminSession.uid = credential.user.uid;
-            adminSession.cloudSynced = await _verifyAdminCloudRole(credential.user.uid);
-          }
-        } catch (e) { console.warn('[MedConnect] Connexion admin Firebase ignorée :', e); }
-      }
-      App.closeModal(); _save(adminSession);
-      document.getElementById('auth-screen').style.display = 'none';
-      App.afterLogin(getUser());
-      if (!adminSession.cloudSynced) {
-        App.toast('⚠️ Compte admin non reconnu côté Firestore (users/{uid}.role doit être "admin"). Actions non synchronisées.', 'error');
-      } else {
-        App.toast('✅ Admin connecté — synchronisé avec Firestore.');
-      }
-    } else if (el) { el.textContent = '❌ Identifiants incorrects.'; el.style.display = 'block'; }
   }
 
   function _launch(acc) {

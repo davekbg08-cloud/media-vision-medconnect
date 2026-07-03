@@ -1,4 +1,54 @@
 /* =====================================================
+   MedConnect — Sauvegarde de session locale
+   -----------------------------------------------------
+   La restauration cloud après réinstallation est gérée
+   directement par auth.js::_restoreProfessional() (recherche
+   par numéro professionnel seul, sans champ email — PARTIE M).
+   Cette couche ne fait plus que sauvegarder/relire une copie
+   de la session courante dans localStorage, pour limiter une
+   perte de session due à un sessionStorage vidé par le système
+   (PWA réinstallée mais Firestore déjà synchronisé).
+   ===================================================== */
+(function () {
+  const BACKUP_KEY = 'mc_user_backup';
+
+  function hasAuth() { return typeof Auth !== 'undefined' && !!Auth; }
+  function safeJson(value) { try { return JSON.parse(value || 'null'); } catch { return null; } }
+  function readBackup() { return safeJson(localStorage.getItem(BACKUP_KEY)); }
+  function saveBackup(user) { if (!user) return; try { localStorage.setItem(BACKUP_KEY, JSON.stringify(user)); } catch (_) {} }
+  function clearBackup() { try { localStorage.removeItem(BACKUP_KEY); } catch (_) {} }
+
+  function patchAuth() {
+    if (!hasAuth() || Auth.__restorePatchApplied) return;
+    Auth.__restorePatchApplied = true;
+    const originalGetUser = Auth.getUser?.bind(Auth);
+    const originalLogout  = Auth.logout?.bind(Auth);
+    const originalDoPatient    = Auth._doPatient?.bind(Auth);
+    const originalDoDoctor     = Auth._doDoctor?.bind(Auth);
+    const originalDoPharmacist = Auth._doPharmacist?.bind(Auth);
+    const originalDoNurse      = Auth._doNurse?.bind(Auth);
+
+    Auth.getUser = function () { return originalGetUser?.() || readBackup(); };
+    Auth.logout  = function () { clearBackup(); return originalLogout?.(); };
+    Auth._doPatient = async function () {
+      const result = await originalDoPatient?.();
+      saveBackup(Auth.getUser?.());
+      return result;
+    };
+    async function wrapProfessional(originalFn) {
+      const result = await originalFn?.();
+      saveBackup(Auth.getUser?.());
+      return result;
+    }
+    Auth._doDoctor     = function () { return wrapProfessional(originalDoDoctor); };
+    Auth._doPharmacist = function () { return wrapProfessional(originalDoPharmacist); };
+    Auth._doNurse      = function () { return wrapProfessional(originalDoNurse); };
+  }
+
+  patchAuth();
+})();
+
+/* =====================================================
    MedConnect 2.0 — App Controller (Final)
    ===================================================== */
 const App = (() => {
@@ -42,6 +92,7 @@ const App = (() => {
     ],
     pharmacist: () => [
       { label:'Tableau de Bord',   icon:'📊', s:'dashboard'     },
+      { label:'Ordonnances reçues',icon:'💊', s:'pharmacy_rx'   },
       { label:'Point de Vente',    icon:'🛒', s:'pos'           },
       { label:'Inventaire',        icon:'📦', s:'inventory'     },
       { label:'Ventes',            icon:'📈', s:'sales'         },
@@ -98,6 +149,7 @@ const App = (() => {
       case 'pos':           PharmacyPortal.render('pos');           break;
       case 'inventory':     PharmacyPortal.render('inventory');     break;
       case 'sales':         PharmacyPortal.render('sales');         break;
+      case 'pharmacy_rx':   PharmacyPortal.render('prescriptions'); break;
 
       default:
         main.innerHTML = `<div class="card empty-state"><p>Section : ${section}</p></div>`;
@@ -132,7 +184,6 @@ const App = (() => {
         ${item.s==='inbox' && unread>0 ? `<span class="badge-dot">${unread}</span>` : ''}
       </li>`).join('');
 
-    // Sélecteur établissement pour médecins et infirmiers
     const hsc = document.getElementById('hospital-switcher-container');
     if (hsc && (role === 'doctor' || role === 'nurse')) {
       hsc.innerHTML = HospitalsRegistry.renderHospitalSwitcher(user.uid);
@@ -140,32 +191,69 @@ const App = (() => {
       hsc.innerHTML = '';
     }
 
-    // Info utilisateur
     const su = document.getElementById('sidebar-user');
     if (su) su.innerHTML = `
       <span>${Auth.getRoleIcon(role)}</span>
       <strong>${user.name}</strong>
-      <br><small style="color:var(--text-muted)">${Auth.getRoleLabel(role)}</small>`;
+      <br><small style="color:var(--text-muted)">${Auth.getRoleLabel(role)}</small>
+      ${role === 'admin' ? `
+        <br><small style="color:${user.cloudSynced ? 'var(--secondary)' : 'var(--danger)'}">
+          ${user.cloudSynced ? '☁️ Synchronisé Firestore' : '⚠️ Local uniquement — non synchronisé'}
+        </small>` : ''}`;
 
-    // Langue
     const slc = document.getElementById('sidebar-lang-container');
     if (slc) slc.innerHTML = I18n.renderSelector();
   }
 
-  /* ── NAVIGATION ──────────────────────────────────── */
+  let currentSection = null;
+
   function navigateTo(section) {
+    currentSection = section;
     document.querySelectorAll('.nav-item').forEach(el =>
       el.classList.toggle('active', el.dataset.section === section));
-    document.getElementById('main-content').innerHTML =
-      '<div class="loading">⏳</div>';
+    document.getElementById('main-content').innerHTML = '<div class="loading">⏳</div>';
     closeMobileSidebar();
     setTimeout(() => routeSection(section), 40);
   }
 
-  /* ── HOME / DÉCONNEXION ──────────────────────────── */
+  /* ── Rafraîchissement auto (1s) ──────────────────────
+     Les listeners Firestore mettent localStorage à jour en
+     quasi temps réel ; ceci ne fait que ré-afficher l'écran
+     courant pour le rendre visible immédiatement.
+     Ne touche jamais un écran où l'utilisateur tape/sélectionne.
+  ──────────────────────────────────────────────────────── */
+  function _isUserTyping() {
+    const el = document.activeElement;
+    if (!el) return false;
+    const tag = el.tagName;
+    const main = document.getElementById('main-content');
+    return (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT')
+      && main && main.contains(el);
+  }
+
+  /* Sections sûres à ré-afficher automatiquement : aucune n'a d'état
+     local sensible (panier, carte Leaflet, formulaire multi-étapes).
+     'pos' (panier), 'map'/'pharmacy_map' (recréation Leaflet),
+     'settings' et 'hospitals' sont volontairement exclues. */
+  const AUTO_REFRESH_SAFE = new Set([
+    'my_record','timeline','history','vaccinations','appointments',
+    'inbox','prescriptions','lab','dashboard','patients',
+    'consultations','inventory','sales','pharmacy_rx',
+  ]);
+
+  function _startAutoRefresh() {
+    setInterval(() => {
+      if (!currentSection || !AUTO_REFRESH_SAFE.has(currentSection)) return;
+      const modal = document.getElementById('global-modal');
+      if (modal && modal.classList.contains('active')) return; // ne pas casser un formulaire ouvert
+      if (_isUserTyping()) return;                              // ne pas casser une saisie en cours
+      if (!Auth.isLogged()) return;
+      try { routeSection(currentSection); } catch (_) {}
+    }, 1000);
+  }
+
   function goHome() { Auth.logout(); }
 
-  /* ── REFRESH ─────────────────────────────────────── */
   function refresh() {
     const lc = document.getElementById('lang-selector-container');
     if (lc) lc.innerHTML = I18n.renderSelector();
@@ -177,13 +265,11 @@ const App = (() => {
     }
   }
 
-  /* ── THEME ───────────────────────────────────────── */
   function toggleTheme() {
     document.body.classList.toggle('light-theme');
     localStorage.setItem('mc_theme', document.body.classList.contains('light-theme') ? 'light' : 'dark');
   }
 
-  /* ── MODAL ───────────────────────────────────────── */
   function openModal(title, html) {
     document.getElementById('modal-title').textContent = title;
     document.getElementById('modal-body').innerHTML    = html;
@@ -194,7 +280,6 @@ const App = (() => {
     document.getElementById('modal-body').innerHTML = '';
   }
 
-  /* ── TOAST ───────────────────────────────────────── */
   function toast(msg, type = 'success') {
     const c  = document.getElementById('toast-container');
     const el = document.createElement('div');
@@ -205,19 +290,15 @@ const App = (() => {
     setTimeout(() => { el.classList.remove('show'); setTimeout(() => el.remove(), 320); }, 3500);
   }
 
-  /* ── MOBILE ──────────────────────────────────────── */
   function closeMobileSidebar() { document.getElementById('sidebar')?.classList.remove('open'); }
 
-  /* ── INIT ────────────────────────────────────────── */
   async function init() {
     I18n.init();
     if (localStorage.getItem('mc_theme') === 'light') document.body.classList.add('light-theme');
 
-    // Injecter sélecteur langue landing
     const lc = document.getElementById('lang-selector-container');
     if (lc) lc.innerHTML = I18n.renderSelector();
 
-    // Mobile menu
     document.getElementById('mobile-menu-btn')?.addEventListener('click', () =>
       document.getElementById('sidebar')?.classList.toggle('open'));
     document.getElementById('main-content')?.addEventListener('click', closeMobileSidebar);
@@ -226,15 +307,15 @@ const App = (() => {
     });
 
     ACL.initRegistry();
+    _startAutoRefresh();
 
-    // Sync Firebase
-    await DB.init();
+    setTimeout(() => {
+      DB.init().catch(error => console.warn('[MedConnect] Sync Firebase non bloquante :', error));
+    }, 0);
 
-    // Auto-login si session active
     const user = Auth.getUser();
     if (user) { afterLogin(user); return; }
 
-    // Afficher écran connexion
     Auth.showLogin();
   }
 
