@@ -75,7 +75,7 @@ const ExchangeBridge = (() => {
     'create_patient', 'create_consultation', 'create_prescription',
     'send_prescription_pharmacy', 'request_lab', 'add_lab_result',
     'create_appointment', 'add_member', 'send_message_professional',
-    'use_medical_ai',
+    'use_medical_ai', 'emergency_transfer', 'medical_record_share',
   ]);
   // Mobile/PWA : liste volontairement réduite. Le soin courant
   // (consultation, ordonnance) continue même hôpital expiré ; seule

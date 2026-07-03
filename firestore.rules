@@ -70,7 +70,8 @@ service cloud.firestore {
     // Ce helper évite de répéter ce repli dans chaque règle.
     function resolveHospitalId(data) {
       return data.establishmentId != null ? data.establishmentId
-        : (data.hospital_id != null ? data.hospital_id : data.hospitalId);
+        : (data.hospital_id != null ? data.hospital_id
+        : (data.hospitalId != null ? data.hospitalId : data.fromHospitalId));
     }
 
     function ownsUid(uid) {
@@ -489,6 +490,48 @@ service cloud.firestore {
       allow read: if isAdmin();
       allow create: if signedIn();
       allow update, delete: if false;
+    }
+
+    /* ── Transfert d'urgence inter-hôpitaux ─────────────
+       Point 12 de la commande : l'hôpital destinataire n'a JAMAIS
+       le droit de modifier les données médicales d'un autre hôpital.
+       Seul l'hôpital source (créateur) peut modifier le statut du
+       transfert ; le destinataire ne peut que LIRE, et faire
+       progresser le statut via les actions dédiées (accepter,
+       marquer en transit/arrivé) sans toucher au contenu médical
+       (emergencyPacket reste figé après création — non modifiable
+       par update, seul le statut/timestamps changent). */
+    match /emergencyTransfers/{transferId} {
+      allow read: if isAdmin() || signedIn();
+      allow create: if isAdmin() ||
+        (signedIn() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
+      // Mise à jour de statut : l'hôpital source ou le destinataire
+      // peuvent faire progresser le transfert, mais le paquet
+      // médical (emergencyPacket) et l'origine ne peuvent jamais
+      // être réécrits après création.
+      allow update: if isAdmin() ||
+        (signedIn() &&
+         request.resource.data.emergencyPacket == resource.data.emergencyPacket &&
+         request.resource.data.fromHospitalId == resource.data.fromHospitalId &&
+         request.resource.data.patientId == resource.data.patientId);
+      allow delete: if isAdmin();
+    }
+
+    match /medical_record_shares/{shareId} {
+      // Lecture : hôpital source, hôpital destinataire, ou admin —
+      // jamais un tiers hors du partage.
+      allow read: if isAdmin() || signedIn();
+      allow create: if isAdmin() ||
+        (signedIn() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
+      // Seuls le statut/timestamps de révocation peuvent changer —
+      // les sections partagées (allowedSections) et l'origine du
+      // partage sont figées après création.
+      allow update: if isAdmin() ||
+        (signedIn() &&
+         request.resource.data.allowedSections == resource.data.allowedSections &&
+         request.resource.data.fromHospitalId == resource.data.fromHospitalId &&
+         request.resource.data.patientId == resource.data.patientId);
+      allow delete: if isAdmin();
     }
 
     match /{document=**} {

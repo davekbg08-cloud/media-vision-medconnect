@@ -271,6 +271,7 @@ const HospitalPortal = (() => {
         <button class="btn btn-ghost btn-sm" onclick="App.closeModal();LabModule.openNew('${id}')">🧪 Analyse</button>
         <button class="btn btn-ghost btn-sm" onclick="App.closeModal();AppointmentsModule.openNew('${id}')">📅 RDV</button>
         <button class="btn btn-ghost btn-sm" onclick="PatientPortal.printRecord('${id}')">🖨️ ${t('btn_print')}</button>
+        <button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="App.closeModal();HospitalPortal.openEmergencyTransfer('${id}')">🚑 Transférer le patient</button>
       </div>`);
   }
 
@@ -550,12 +551,129 @@ const HospitalPortal = (() => {
       </div>`;
   }
 
+  /* ── TRANSFERT D'URGENCE INTER-HÔPITAUX ─────────────
+     Intégration du module EmergencyTransferModule (voir
+     js/emergency-transfer.js). Adapté par rapport au snippet fourni :
+     sélection de l'hôpital destinataire dans la liste des
+     établissements MedConnect enregistrés (HospitalsRegistry),
+     au lieu d'un champ ID libre — évite les fautes de frappe et les
+     transferts vers un hôpital inexistant. */
+  function openEmergencyTransfer(patientId) {
+    const p = DB.getPatientById(patientId);
+    if (!p) { App.toast('Patient introuvable.', 'error'); return; }
+
+    const currentH = window.HospitalsRegistry?.getCurrentHospital?.();
+    const options  = (window.HospitalsRegistry?.getHospitals?.() || [])
+      .filter(h => h.establishmentId !== currentH?.establishmentId);
+
+    App.openModal(`🚑 Transfert d'urgence — ${esc(p.firstname)} ${esc(p.lastname)}`, `
+      <div class="id-badge-large">${p.id}</div>
+
+      <div class="form-group">
+        <label>Hôpital de destination *</label>
+        <select id="et-to-hospital">
+          <option value="">— Choisir un établissement —</option>
+          ${options.map(h => `<option value="${h.establishmentId}" data-name="${esc(h.name)}">${esc(h.name)}${h.city?' — '+esc(h.city):''}</option>`).join('')}
+        </select>
+        ${!options.length ? `<small style="color:var(--accent)">Aucun autre établissement enregistré dans MedConnect pour le moment.</small>` : ''}
+      </div>
+
+      <div class="form-group">
+        <label>Niveau d'urgence</label>
+        <select id="et-priority">
+          <option value="critical">Critique</option>
+          <option value="very_urgent">Très urgent</option>
+          <option value="urgent" selected>Urgent</option>
+          <option value="normal">Normal</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Service destinataire</label>
+        <input type="text" id="et-service" placeholder="Urgences, chirurgie, réanimation…">
+      </div>
+
+      <div class="form-group">
+        <label>Transport</label>
+        <select id="et-transport">
+          <option value="ambulance">Ambulance</option>
+          <option value="medical_ambulance">Ambulance médicalisée</option>
+          <option value="helicopter">Hélicoptère</option>
+          <option value="other">Autre</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Heure estimée d'arrivée</label>
+        <input type="datetime-local" id="et-arrival">
+      </div>
+
+      <div class="form-group full-width">
+        <label>Motif du transfert *</label>
+        <textarea id="et-reason" rows="3" placeholder="Ex : urgence neurologique, traumatisme grave…"></textarea>
+      </div>
+
+      <div class="alert-box">
+        ⚠️ Un paquet médical d'urgence sera partagé temporairement avec l'hôpital destinataire.
+      </div>
+
+      <div id="et-err" class="auth-error" style="display:none"></div>
+
+      <div class="form-actions">
+        <button type="button" class="btn btn-ghost" onclick="App.closeModal()">Annuler</button>
+        <button type="button" class="btn btn-ghost btn-sm" style="color:var(--danger)"
+          onclick="HospitalPortal.confirmEmergencyTransfer('${patientId}', true)">
+          🚨 Urgence vitale — ignorer l'abonnement
+        </button>
+        <button type="button" class="btn btn-primary" onclick="HospitalPortal.confirmEmergencyTransfer('${patientId}', false)">
+          🚑 Lancer le transfert
+        </button>
+      </div>`);
+  }
+
+  async function confirmEmergencyTransfer(patientId, emergencyOverride = false) {
+    const select = document.getElementById('et-to-hospital');
+    const toHospitalId   = select?.value || '';
+    const toHospitalName = select?.selectedOptions?.[0]?.dataset?.name || '';
+    const errEl = document.getElementById('et-err');
+    const showErr = msg => { if (errEl) { errEl.textContent = msg; errEl.style.display = 'block'; } };
+
+    if (!toHospitalId) { showErr("Hôpital de destination obligatoire."); return null; }
+    const reason = document.getElementById('et-reason')?.value?.trim() || '';
+    if (!reason) { showErr("Motif du transfert obligatoire."); return null; }
+
+    try {
+      const transfer = await EmergencyTransferModule.createEmergencyTransfer({
+        patientId,
+        toHospitalId,
+        toHospitalName,
+        receivingService: document.getElementById('et-service')?.value?.trim() || '',
+        priority: document.getElementById('et-priority')?.value || 'urgent',
+        transportType: document.getElementById('et-transport')?.value || 'ambulance',
+        estimatedArrival: document.getElementById('et-arrival')?.value || '',
+        reason,
+        emergencyOverride,
+      });
+
+      App.closeModal();
+      App.toast(emergencyOverride
+        ? '🚨 Transfert d\'urgence créé (abonnement ignoré — journalisé).'
+        : '🚑 Transfert d\'urgence créé.');
+      App.navigateTo('dashboard');
+      return transfer;
+    } catch (e) {
+      showErr(e?.message || 'Impossible de créer le transfert.');
+      return null;
+    }
+  }
+
   return {
     render, filter, openDetail, openNewPatient, saveNewPatient, deletePatient,
     openExternalSearch, searchExternalPatient, requestPatientAccess,
     openConsult, addRxItem, runSmartCheck, saveConsult, delConsult,
     openPrescriptionTarget, confirmPrescriptionTarget,
     renderConsultations, renderPrescriptions,
+    openEmergencyTransfer, confirmEmergencyTransfer,
   };
 })();
 
