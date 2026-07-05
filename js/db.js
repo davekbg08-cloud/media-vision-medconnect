@@ -14,6 +14,51 @@ const DB = (() => {
   const store = (k, v)    => localStorage.setItem(k, JSON.stringify(v));
   const today = ()        => new Date().toISOString().slice(0, 10);
 
+  /* ── FILE D'ÉCRITURE CLOUD PERSISTANTE ─────────────────
+     Firestore est la source de vérité. Mais une écriture peut
+     échouer ponctuellement (hors-ligne, latence, règle en cours
+     de déploiement). Sans file, cette donnée ne vivrait qu'en
+     localStorage et disparaîtrait à la réinstallation — cause
+     racine des pertes de données signalées.
+
+     Chaque écriture cloud échouée est mémorisée ici (dans
+     localStorage, donc elle survit à une fermeture d'app) et
+     rejouée automatiquement dès que Firestore répond. La donnée
+     n'est réputée « à l'abri » que lorsqu'elle a atteint le cloud. */
+  const OUTBOX_KEY = 'mc_cloud_outbox';
+
+  function _outboxAdd(collection, docId, data) {
+    const q = load(OUTBOX_KEY);
+    // Dédoublonnage : une réécriture plus récente du même document
+    // remplace l'ancienne en file (dernière valeur = la bonne).
+    const filtered = q.filter(e => !(e.collection === collection && e.docId === String(docId)));
+    filtered.push({ collection, docId: String(docId), data, queuedAt: new Date().toISOString() });
+    store(OUTBOX_KEY, filtered);
+  }
+
+  function _outboxCount() { return load(OUTBOX_KEY).length; }
+  const outboxCount = _outboxCount;
+
+  let _flushing = false;
+  async function flushOutbox() {
+    if (_flushing || !firebaseReady || !firebaseDB) return;
+    const q = load(OUTBOX_KEY);
+    if (!q.length) return;
+    _flushing = true;
+    const remaining = [];
+    for (const e of q) {
+      try {
+        await firebaseDB.collection(e.collection).doc(e.docId).set(e.data, { merge: true });
+      } catch (err) {
+        console.warn(`[MedConnect] Outbox : réécriture ${e.collection}/${e.docId} encore en échec :`, err?.message || err);
+        remaining.push(e); // on garde pour le prochain essai
+      }
+    }
+    store(OUTBOX_KEY, remaining);
+    _flushing = false;
+    if (remaining.length) console.warn(`[MedConnect] Outbox : ${remaining.length} écriture(s) toujours en attente.`);
+  }
+
   /* ── IDs UNIQUES ──────────────────────────────────────
      Remplace les anciens `${PREFIX}${Date.now()}` qui pouvaient
      entrer en collision si deux écritures arrivaient dans la
@@ -52,14 +97,17 @@ const DB = (() => {
   ──────────────────────────────────────────────────── */
   async function _push(collection, docId, data) {
     if (!firebaseReady || !firebaseDB) {
-      console.warn(`[MedConnect] Firestore indisponible — écriture locale seulement (${collection}/${docId})`);
+      // Firestore pas prêt : on ne perd PAS l'écriture, on la met en
+      // file pour rejeu automatique dès que le cloud répond.
+      _outboxAdd(collection, docId, data);
       return false;
     }
     try {
       await firebaseDB.collection(collection).doc(String(docId)).set(data);
       return true;
     } catch (e) {
-      console.warn(`[MedConnect] Échec écriture Firestore ${collection}/${docId} :`, e?.message || e);
+      console.warn(`[MedConnect] Échec écriture Firestore ${collection}/${docId} — mise en file :`, e?.message || e);
+      _outboxAdd(collection, docId, data);
       return false;
     }
   }
@@ -320,6 +368,14 @@ const DB = (() => {
   async function init() {
     await syncFromFirebase();
     setupRealtimeListeners();
+    // Rejoue immédiatement les écritures d'une session précédente qui
+    // n'avaient pas atteint le cloud (fermeture d'app hors-ligne, etc.),
+    // puis réessaie régulièrement tant qu'il en reste.
+    flushOutbox();
+    setInterval(flushOutbox, 20000);
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', flushOutbox);
+    }
   }
 
   /* ══════════════════════════════════════════════════
@@ -719,7 +775,7 @@ const DB = (() => {
   }
 
   return {
-    init, syncFromFirebase, syncFromFirebaseInBackground, setupUserScopedListeners, generatePatientId, makeId, pushAndReport,
+    init, syncFromFirebase, syncFromFirebaseInBackground, setupUserScopedListeners, generatePatientId, makeId, pushAndReport, flushOutbox, outboxCount,
     getAccounts, saveAccounts, getUsers, saveUsers, upsertUserProfile,
     getRegistrationRequests, saveRegistrationRequests, createRegistrationRequest,
     getPatients, savePatients, addPatient, updatePatient, deletePatient, getPatientById, searchPatients,
