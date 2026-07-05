@@ -33,7 +33,12 @@ const HospitalPortal = (() => {
     return patientIds.has(item.patient_id) ||
       item.created_by === user.uid ||
       item.doctor_uid === user.uid ||
-      (h && (item.establishmentId === h.establishmentId || item.hospital_id === h.establishmentId));
+      (h && (item.establishmentId === h.establishmentId || item.hospital_id === h.establishmentId)) ||
+      // Consentement patient (mc_consents) : une infirmière ou un
+      // médecin validé par le patient voit ses documents même hors
+      // de son établissement courant — c'était vérifié à l'ouverture
+      // (printRx, canUsePatient) mais jamais dans les LISTES.
+      (item.patient_id && window.ACL?.canAccessPatient?.(user, item.patient_id));
   }
 
   function consultationsForContext() {
@@ -539,10 +544,11 @@ const HospitalPortal = (() => {
               <span class="record-date">📅 ${rx.date}</span>
               ${p?`<span class="id-tag">${p.id}</span><strong>${esc(p.firstname)} ${esc(p.lastname)}</strong>`:''}
               <span class="record-doctor">👨‍⚕️ ${esc(rx.doctor)||'—'}</span>
-              <button class="btn btn-ghost btn-xs" onclick="Network.sendPrescriptionToPharmacy('${rx.pid}','Pharmacie')">📤 Pharmacie</button>
+              <button class="btn btn-ghost btn-xs" onclick="HospitalPortal.openPrescriptionTarget('${rx.pid}')">📤 Pharmacie</button>
               <button class="btn btn-ghost btn-xs" onclick="PatientPortal.printRx('${rx.pid}')">🖨️</button>
             </div>
             <p><strong>Diagnostic :</strong> ${esc(rx.diagnosis)}</p>
+            ${rx.establishmentName ? `<p>🏥 ${esc(rx.establishmentName)} · Matricule ${esc(rx.establishmentId || rx.hospital_id || '—')}</p>` : ''}
             <ul style="padding-left:1.2rem;margin-top:.4rem">
               ${(rx.medicines||[]).map(m=>`<li>💊 ${esc(m.name)} — ${esc(m.dosage)}</li>`).join('')}
             </ul>

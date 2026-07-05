@@ -357,6 +357,7 @@ const PatientPortal = (() => {
       <style>body{font-family:Arial,sans-serif;max-width:600px;margin:auto;padding:20px}h1{color:#0EA5E9}
       .id{font-family:monospace;background:#e0f2fe;padding:3px 8px;border-radius:4px}li{margin:.3rem 0}</style></head><body>
       <h1>💊 Ordonnance — MedConnect</h1>
+      ${rx.establishmentName ? `<p><strong>🏥 ${rx.establishmentName}</strong> · Matricule ${rx.establishmentId || rx.hospital_id || '—'}</p>` : ''}
       ${p?`<p><strong>Patient :</strong> ${p.firstname} ${p.lastname} <span class="id">${p.id}</span></p>`:''}
       <p><strong>Date :</strong> ${rx.date} · <strong>Dr :</strong> ${rx.doctor||'—'}</p>
       <p><strong>Diagnostic :</strong> ${rx.diagnosis}</p>

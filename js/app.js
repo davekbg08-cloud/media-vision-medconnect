@@ -82,6 +82,7 @@ const App = (() => {
     ],
     nurse: () => [
       { label:I18n.t('nav_patients'),      icon:'👥', s:'patients'      },
+      { label:I18n.t('nav_prescriptions'), icon:'💊', s:'prescriptions' },
       { label:I18n.t('nav_vaccinations'),  icon:'💉', s:'vaccinations'  },
       { label:I18n.t('nav_appointments'),  icon:'📅', s:'appointments'  },
       { label:I18n.t('nav_inbox'),         icon:'📨', s:'inbox'         },
@@ -129,7 +130,10 @@ const App = (() => {
       case 'hospitals':     HospitalsRegistry.renderManagePage(main);                       break;
 
       case 'prescriptions':
-        if (role === 'doctor' || role === 'admin') HospitalPortal.renderPrescriptions(main);
+        // L'infirmière passait dans la vue PATIENT (qui filtre sur un
+        // patient_id qu'elle n'a pas → toujours vide). Elle partage la
+        // vue établissement, filtrée par consentement dans itemInContext.
+        if (role === 'doctor' || role === 'admin' || role === 'nurse') HospitalPortal.renderPrescriptions(main);
         else PatientPortal.renderPrescriptions(main);
         break;
 
@@ -178,7 +182,12 @@ const App = (() => {
      toujours autorisée par le contrat à deux vitesses. */
   const _exchangeSeen = new Set();
   function startExchangeSync(user) {
-    if (!window.ExchangeBridge?.startRoleListeners || !user) return;
+    if (!user) return;
+    // Listeners Firestore dépendants de l'utilisateur (messagerie
+    // filtrée par destinataire, ordonnances du pharmacien) : c'est
+    // ici qu'ils se montent, pas au boot où personne n'est connecté.
+    window.DB?.setupUserScopedListeners?.();
+    if (!window.ExchangeBridge?.startRoleListeners) return;
     _exchangeSeen.clear();
     const LIVE_LABELS = {
       labResults:            '🧪 Nouveau résultat d\'analyse disponible',
@@ -209,7 +218,12 @@ const App = (() => {
   function buildNav(user) {
     const role  = user?.role || 'patient';
     const items = (MENUS[role] || MENUS.patient)();
-    const unread = DB.getMessages().filter(m => m.to_role === role && !m.read).length;
+    // Comptage par destinataire réel (uid/matricule/n° patient) via
+    // Network.getUnread — l'ancien filtre to_role comptait les
+    // messages de TOUS les utilisateurs du même rôle et ignorait
+    // readStatus (lecture faite sur un autre appareil).
+    const unread = window.Network?.getUnread ? Network.getUnread(role)
+      : DB.getMessages().filter(m => m.to_role === role && !m.read).length;
 
     document.getElementById('sidebar-brand').innerHTML =
       `<span>${Auth.getRoleIcon(role)}</span> MedConnect`;

@@ -361,7 +361,10 @@ service cloud.firestore {
     }
 
     match /mc_consultations/{docId} {
-      allow read: if canReadMedicalData(resource.data);
+      // Lecture alignée sur l'écriture (déjà role-wide ci-dessous) :
+      // sans ça le listener global mc_consultations était rejeté en bloc.
+      allow read: if currentRoleIs('doctor') || currentRoleIs('nurse') ||
+        canReadMedicalData(resource.data);
       allow write: if isAdmin() || currentRoleIs('doctor') || currentRoleIs('nurse');
     }
 
@@ -391,12 +394,22 @@ service cloud.firestore {
     }
 
     match /mc_patients/{docId} {
-      allow read: if canReadMedicalData(resource.data);
+      // Personnel clinique vérifié : nécessaire au listener global
+      // mc_patients (fiches patient inaccessibles en bloc sinon).
+      allow read: if currentRoleIs('doctor') || currentRoleIs('nurse') ||
+        canReadMedicalData(resource.data);
       allow write: if isAdmin();
     }
 
     match /mc_prescriptions/{docId} {
-      allow read: if isAdmin() || ownsPatientData(resource.data) || doctorCanRead(resource.data) || pharmacyCanReadPrescription(resource.data);
+      // Lecture élargie au personnel clinique vérifié : les listeners
+      // globaux (et la vue établissement du médecin, et la vue
+      // consentement de l'infirmière) sont des requêtes collection
+      // entière, impossibles à satisfaire avec les seuls champs
+      // par-document. Même précédent currentRoleIs que /labRequests ;
+      // le consentement patient reste appliqué côté app (ACL).
+      allow read: if isAdmin() || currentRoleIs('doctor') || currentRoleIs('nurse') ||
+        ownsPatientData(resource.data) || pharmacyCanReadPrescription(resource.data);
       allow create: if isAdmin() || currentRoleIs('doctor');
       allow update: if isAdmin()
         || doctorCanRead(resource.data)

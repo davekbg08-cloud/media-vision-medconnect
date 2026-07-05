@@ -90,10 +90,27 @@ const DB = (() => {
     store(key, snap.docs.map(d => d.data()));
   }
 
+  /** Fusionne des documents dans une liste locale par identifiant,
+      sans écraser les entrées locales absentes du snapshot (un
+      listener FILTRÉ ne voit qu'une tranche de la collection : le
+      remplacement intégral effacerait le reste). */
+  function mergeStore(key, idField, docs) {
+    const list = load(key);
+    const byId = new Map(list.map(x => [x[idField], x]));
+    docs.forEach(d => { if (d && d[idField] != null) byId.set(d[idField], d); });
+    store(key, Array.from(byId.values()));
+  }
+
   function listen(query, onData) {
     try {
-      query.onSnapshot(onData, () => {});
-    } catch (e) {}
+      // Ne JAMAIS avaler l'erreur : c'est ce silence qui a masqué
+      // pendant des semaines le rejet en bloc des requêtes
+      // collection-entière par les règles Firestore.
+      query.onSnapshot(onData, err =>
+        console.warn('[MedConnect] Listener Firestore rejeté :', err?.message || err));
+    } catch (e) {
+      console.warn('[MedConnect] Listener impossible :', e?.message || e);
+    }
   }
 
   function roleCollection(role) {
@@ -185,10 +202,10 @@ const DB = (() => {
     listen(firebaseDB.collection('mc_patients'), snap => {
       if (!snap.empty) storeSnapshot('mc_patients', snap);
     });
-    // Messages
-    listen(firebaseDB.collection('mc_messages'), snap => {
-      if (!snap.empty) storeSnapshot('mc_messages', snap);
-    });
+    // Messages : PAS de listener global ici — la règle Firestore exige
+    // to_id == uid par document, une écoute collection-entière est
+    // rejetée en bloc pour tout le monde (c'était le cas depuis
+    // toujours, silencieusement). Voir setupUserScopedListeners().
     // Rendez-vous
     listen(firebaseDB.collection('mc_appointments'), snap => {
       if (!snap.empty) storeSnapshot('mc_appointments', snap);
@@ -235,6 +252,44 @@ const DB = (() => {
     listen(firebaseDB.collection('establishment_documents'), snap => {
       if (!snap.empty) storeSnapshot('establishment_documents', snap);
     });
+  }
+
+  /** Listeners dépendants de l'utilisateur connecté — montés APRÈS
+      login (App.startExchangeSync), pas au boot. Requêtes filtrées :
+      seule forme que les règles par-document acceptent. Fusion par
+      identifiant : un snapshot filtré ne doit jamais écraser le
+      reste de la liste locale. */
+  let _userListenersUnsubs = [];
+  function setupUserScopedListeners() {
+    if (!firebaseReady || !firebaseDB) return;
+    const user = window.Auth?.getUser?.();
+    if (!user?.uid) return;
+
+    _userListenersUnsubs.forEach(u => { try { u(); } catch (_) {} });
+    _userListenersUnsubs = [];
+
+    const scoped = (query, key, idField) => {
+      try {
+        const unsub = query.onSnapshot(
+          snap => { if (!snap.empty) mergeStore(key, idField, snap.docs.map(d => d.data())); },
+          err => console.warn(`[MedConnect] Listener ${key} (scoped) rejeté :`, err?.message || err)
+        );
+        _userListenersUnsubs.push(unsub);
+      } catch (e) {
+        console.warn(`[MedConnect] Listener ${key} impossible :`, e?.message || e);
+      }
+    };
+
+    // Messagerie : la règle exige to_id == uid — c'est la seule
+    // écoute des messages qui fonctionne réellement.
+    scoped(firebaseDB.collection('mc_messages').where('to_id', '==', user.uid),
+      'mc_messages', 'mid');
+
+    // Pharmacien : ses ordonnances reçues (pharmacyCanReadPrescription).
+    if (user.role === 'pharmacist') {
+      scoped(firebaseDB.collection('mc_prescriptions').where('pharmacyUid', '==', user.uid),
+        'mc_prescriptions', 'pid');
+    }
   }
 
   /* ── INIT ────────────────────────────────────────── */
@@ -639,7 +694,7 @@ const DB = (() => {
   }
 
   return {
-    init, syncFromFirebase, syncFromFirebaseInBackground, generatePatientId, makeId, pushAndReport,
+    init, syncFromFirebase, syncFromFirebaseInBackground, setupUserScopedListeners, generatePatientId, makeId, pushAndReport,
     getAccounts, saveAccounts, getUsers, saveUsers, upsertUserProfile,
     getRegistrationRequests, saveRegistrationRequests, createRegistrationRequest,
     getPatients, savePatients, addPatient, updatePatient, deletePatient, getPatientById, searchPatients,
