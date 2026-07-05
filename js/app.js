@@ -170,9 +170,13 @@ const App = (() => {
     document.getElementById('auth-screen').style.display  = 'none';
     document.getElementById('landing').style.display      = 'none';
     document.getElementById('app-layout').style.display   = 'flex';
-    buildNav(user);
-    const first = (MENUS[user.role] || MENUS.patient)()[0];
-    navigateTo(first.s);
+    try { buildNav(user); } catch (e) { console.warn('[App] buildNav :', e); }
+    try {
+      const first = (MENUS[user.role] || MENUS.patient)()[0];
+      navigateTo(first.s);
+    } catch (e) {
+      console.warn('[App] navigation initiale :', e);
+    }
     startExchangeSync(user);
   }
 
@@ -188,10 +192,15 @@ const App = (() => {
   const _exchangeSeen = new Set();
   function startExchangeSync(user) {
     if (!user) return;
-    // Listeners Firestore dépendants de l'utilisateur (messagerie
-    // filtrée par destinataire, ordonnances du pharmacien) : c'est
-    // ici qu'ils se montent, pas au boot où personne n'est connecté.
-    window.DB?.setupUserScopedListeners?.();
+    // Tout ce bloc est secondaire à l'affichage de l'écran : s'il
+    // échoue (listener rejeté, module absent…), il ne doit JAMAIS
+    // empêcher l'ouverture de la session — sinon un simple souci de
+    // pont d'échange fait « planter » un compte (ex. admin) au login.
+    try {
+      window.DB?.setupUserScopedListeners?.();
+    } catch (e) {
+      console.warn('[App] setupUserScopedListeners a échoué (ignoré) :', e);
+    }
     if (!window.ExchangeBridge?.startRoleListeners) return;
     _exchangeSeen.clear();
     const LIVE_LABELS = {
@@ -202,21 +211,25 @@ const App = (() => {
       notifications:         '📨 Nouvelle notification',
       registration_requests: '🆕 Nouvelle demande d\'inscription',
     };
-    ExchangeBridge.startRoleListeners((col, docs) => {
-      if (!_exchangeSeen.has(col)) {
-        _exchangeSeen.add(col);
-        if (col === 'notifications' && docs.length) {
-          toast(`📨 ${docs.length} notification(s) non lue(s)`);
+    try {
+      ExchangeBridge.startRoleListeners((col, docs) => {
+        if (!_exchangeSeen.has(col)) {
+          _exchangeSeen.add(col);
+          if (col === 'notifications' && docs.length) {
+            toast(`📨 ${docs.length} notification(s) non lue(s)`);
+          }
+          return;
         }
-        return;
-      }
-      if (LIVE_LABELS[col] && docs.length) toast(LIVE_LABELS[col]);
-      // Rafraîchit la section affichée si elle correspond à la donnée reçue.
-      const related = { labResults:'lab', labRequests:'lab', prescriptions:'prescriptions', consultations:'consultations' };
-      if (related[col] && related[col] === currentSection) {
-        try { routeSection(currentSection); } catch (_) {}
-      }
-    });
+        if (LIVE_LABELS[col] && docs.length) toast(LIVE_LABELS[col]);
+        // Rafraîchit la section affichée si elle correspond à la donnée reçue.
+        const related = { labResults:'lab', labRequests:'lab', prescriptions:'prescriptions', consultations:'consultations' };
+        if (related[col] && related[col] === currentSection) {
+          try { routeSection(currentSection); } catch (_) {}
+        }
+      });
+    } catch (e) {
+      console.warn('[App] startRoleListeners a échoué (ignoré) :', e);
+    }
   }
 
   /* ── BUILD NAV ───────────────────────────────────── */

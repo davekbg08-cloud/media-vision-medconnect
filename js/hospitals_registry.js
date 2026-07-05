@@ -556,10 +556,17 @@ const HospitalsRegistry = (() => {
     });
 
     if (['doctor','nurse'].includes(user.role)) {
-      const a = requestAffiliation(user.uid, user.name, h.establishmentId, { silent: true });
-      if (a) respondAffiliation(a.requestId, true);
+      // DEMANDE pending uniquement — JAMAIS d'auto-approbation. Le
+      // professionnel ne devient membre qu'après validation par
+      // l'admin. (L'ancien code appelait respondAffiliation(...,true)
+      // ici, ce qui transformait la demande en enregistrement validé
+      // et court-circuitait l'administrateur.)
+      const a = requestAffiliation(user.uid, user.name, h.establishmentId);
       App.closeModal();
-      setCurrentHospital(h.establishmentId);
+      App.toast(a
+        ? '📤 Établissement créé. Demande d’affiliation envoyée à l’administrateur.'
+        : '⚠️ Établissement créé, mais une demande existe déjà ou le rôle n’est pas autorisé.',
+        a ? 'success' : 'error');
     } else {
       App.closeModal();
       App.toast(`✅ Établissement enregistré — ${h.name}`);
