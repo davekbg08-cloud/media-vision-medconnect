@@ -87,6 +87,13 @@ const DB = (() => {
   }
 
   function storeSnapshot(key, snap) {
+    // Un snapshot VIDE confirmé par le serveur est une information :
+    // la collection n'existe plus, le cache local doit se vider (les
+    // « demandes fantômes » du dashboard admin venaient des gardes
+    // !snap.empty qui ignoraient ce cas — le local ne se vidait
+    // jamais). On n'ignore que les vides issus du cache hors-ligne
+    // (démarrage sans réseau), pour ne pas effacer des données valides.
+    if (snap.empty && snap.metadata?.fromCache) return;
     store(key, snap.docs.map(d => d.data()));
   }
 
@@ -179,7 +186,10 @@ const DB = (() => {
     await Promise.all(collections.map(async col => {
       try {
         const snap = await withTimeout(firebaseDB.collection(col).get(), PER_COLLECTION_TIMEOUT_MS);
-        if (!snap.empty) store(col, snap.docs.map(d => d.data()));
+        // Vide confirmé serveur = la collection a été vidée : le cache
+        // local doit suivre (mêmes fantômes possibles qu'avec les
+        // listeners). Seul le vide issu du cache hors-ligne est ignoré.
+        if (!(snap.empty && snap.metadata?.fromCache)) store(col, snap.docs.map(d => d.data()));
       } catch (e) {
         console.warn(`[MedConnect] Sync ${col} ignorée (lente/indisponible) :`, e?.message || e);
       }
@@ -200,7 +210,7 @@ const DB = (() => {
     if (!firebaseReady || !firebaseDB) return;
     // Patients
     listen(firebaseDB.collection('mc_patients'), snap => {
-      if (!snap.empty) storeSnapshot('mc_patients', snap);
+      storeSnapshot('mc_patients', snap);
     });
     // Messages : PAS de listener global ici — la règle Firestore exige
     // to_id == uid par document, une écoute collection-entière est
@@ -208,49 +218,51 @@ const DB = (() => {
     // toujours, silencieusement). Voir setupUserScopedListeners().
     // Rendez-vous
     listen(firebaseDB.collection('mc_appointments'), snap => {
-      if (!snap.empty) storeSnapshot('mc_appointments', snap);
+      storeSnapshot('mc_appointments', snap);
     });
     // Comptes
     listen(firebaseDB.collection('mc_accounts'), snap => {
-      if (!snap.empty) storeSnapshot('mc_accounts', snap);
+      storeSnapshot('mc_accounts', snap);
     });
-    // Profils pharmacies visibles publiquement
+    // Profils pharmacies visibles publiquement — listener FILTRÉ :
+    // fusion obligatoire, un remplacement intégral écraserait les
+    // autres profils chargés par la sync initiale.
     listen(firebaseDB.collection('users')
       .where('role', '==', 'pharmacist')
       .where('status', 'in', ['active', 'approved'])
       .where('isLocationVisible', '==', true), snap => {
-        storeSnapshot('users', snap);
+        if (!snap.empty) mergeStore('users', 'uid', snap.docs.map(d => d.data()));
     });
     // Établissements
     listen(firebaseDB.collection('establishments'), snap => {
-      if (!snap.empty) storeSnapshot('establishments', snap);
+      storeSnapshot('establishments', snap);
     });
     // Demandes d'affiliation
     listen(firebaseDB.collection('affiliation_requests'), snap => {
-      if (!snap.empty) storeSnapshot('affiliation_requests', snap);
+      storeSnapshot('affiliation_requests', snap);
     });
     listen(firebaseDB.collection('registration_requests'), snap => {
-      if (!snap.empty) storeSnapshot('registration_requests', snap);
+      storeSnapshot('registration_requests', snap);
     });
     // Ordonnances — pour rafraîchir l'inbox pharmacie/médecin en quasi temps réel
     listen(firebaseDB.collection('mc_prescriptions'), snap => {
-      if (!snap.empty) storeSnapshot('mc_prescriptions', snap);
+      storeSnapshot('mc_prescriptions', snap);
     });
     // Consultations
     listen(firebaseDB.collection('mc_consultations'), snap => {
-      if (!snap.empty) storeSnapshot('mc_consultations', snap);
+      storeSnapshot('mc_consultations', snap);
     });
     // Inventaire pharmacie (stock partagé entre appareils du même pharmacien)
     listen(firebaseDB.collection('mc_medicines'), snap => {
-      if (!snap.empty) storeSnapshot('mc_medicines', snap);
+      storeSnapshot('mc_medicines', snap);
     });
     // Ventes
     listen(firebaseDB.collection('mc_sales'), snap => {
-      if (!snap.empty) storeSnapshot('mc_sales', snap);
+      storeSnapshot('mc_sales', snap);
     });
     // Trace documents établissement (audit)
     listen(firebaseDB.collection('establishment_documents'), snap => {
-      if (!snap.empty) storeSnapshot('establishment_documents', snap);
+      storeSnapshot('establishment_documents', snap);
     });
   }
 
