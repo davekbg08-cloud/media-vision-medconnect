@@ -1,0 +1,192 @@
+/* =====================================================
+   MedConnect 2.0 — Espace hôpital desktop (plein écran)
+   Overlay séparé du shell principal (décision validée) :
+   propre sidebar + topbar, aucune imbrication dans
+   #main-content. S'appuie sur les variables du thème
+   existant avec fallbacks sûrs.
+   ===================================================== */
+
+#hospital-desktop-root {
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+  display: flex;
+  background: var(--bg, #0f1420);
+  color: var(--text, #e8ecf4);
+}
+
+body.hospital-desktop-open {
+  overflow: hidden;
+}
+
+/* ── Sidebar propre au shell hôpital ── */
+.hospital-sidebar {
+  width: 250px;
+  min-width: 250px;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface, #161d2e);
+  border-right: 1px solid var(--border, rgba(255,255,255,.08));
+}
+
+.hospital-sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  padding: 1rem;
+  border-bottom: 1px solid var(--border, rgba(255,255,255,.08));
+}
+.hospital-sidebar-brand span { font-size: 1.6rem; }
+.hospital-sidebar-brand strong { display: block; font-size: .95rem; line-height: 1.2; }
+.hospital-sidebar-brand small { opacity: .6; font-size: .72rem; }
+
+.hospital-sidebar-nav {
+  flex: 1;
+  overflow-y: auto;
+  padding: .5rem;
+  display: flex;
+  flex-direction: column;
+  gap: .15rem;
+}
+
+.hospital-nav-item {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  width: 100%;
+  padding: .6rem .8rem;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.hospital-nav-item:hover { background: rgba(255,255,255,.06); }
+.hospital-nav-item.active {
+  background: var(--primary, #2f6df6);
+  color: #fff;
+}
+
+.hospital-sidebar-exit {
+  margin: .5rem;
+  padding: .6rem;
+  border: 1px solid var(--border, rgba(255,255,255,.15));
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.hospital-sidebar-exit:hover { background: rgba(255,255,255,.06); }
+
+/* ── Zone principale ── */
+.hospital-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.hospital-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: .8rem 1.2rem;
+  background: var(--surface, #161d2e);
+  border-bottom: 1px solid var(--border, rgba(255,255,255,.08));
+  font-weight: 600;
+}
+.hospital-topbar-user { font-weight: 400; font-size: .85rem; opacity: .8; }
+
+.hospital-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.2rem;
+}
+
+/* ── Composants des pages hôpital ── */
+.hospital-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+.hospital-page-header h1 { margin: 0 0 .2rem; font-size: 1.35rem; }
+.hospital-page-header p  { margin: 0; opacity: .65; font-size: .88rem; }
+
+.hospital-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: .8rem;
+  margin-bottom: 1rem;
+}
+
+.hospital-stat-card {
+  background: var(--surface, #161d2e);
+  border: 1px solid var(--border, rgba(255,255,255,.08));
+  border-radius: 12px;
+  padding: 1rem;
+}
+.hospital-stat-card h3 { margin: 0 0 .3rem; font-size: 1.3rem; }
+.hospital-stat-card p  { margin: 0; opacity: .7; font-size: .85rem; }
+.hospital-stat-card ul { margin: .5rem 0; padding-left: 1.1rem; font-size: .85rem; opacity: .85; }
+
+/* ── Lits ── */
+.beds-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: .6rem;
+  margin-top: .6rem;
+}
+.bed-card {
+  border: 1px solid var(--border, rgba(255,255,255,.1));
+  border-radius: 10px;
+  padding: .7rem;
+  font-size: .85rem;
+}
+.bed-card p { margin: .15rem 0; }
+.bed-free        { border-left: 4px solid #2ecc71; }
+.bed-occupied    { border-left: 4px solid #e74c3c; }
+.bed-maintenance { border-left: 4px solid #f1c40f; }
+
+/* ── Alerte IA / divers ── */
+#hospital-desktop-root .alert-box {
+  background: rgba(241,196,15,.12);
+  border: 1px solid rgba(241,196,15,.4);
+  border-radius: 10px;
+  padding: .7rem .9rem;
+  margin-bottom: 1rem;
+  font-size: .88rem;
+}
+
+/* ── Lanceur dans la sidebar principale ── */
+.hospital-desktop-launcher {
+  display: block;
+  width: calc(100% - 1.2rem);
+  margin: .6rem;
+  padding: .65rem;
+  border: 1px dashed var(--primary, #2f6df6);
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: center;
+}
+.hospital-desktop-launcher small { display: block; opacity: .6; font-size: .7rem; }
+.hospital-desktop-launcher:hover { background: rgba(47,109,246,.12); }
+
+/* Le shell hôpital est un produit desktop : sur petit écran,
+   on garde l'overlay utilisable en dégradant la sidebar. */
+@media (max-width: 760px) {
+  .hospital-sidebar { width: 64px; min-width: 64px; }
+  .hospital-sidebar-brand div,
+  .hospital-nav-item { font-size: 0; }
+  .hospital-nav-item span { font-size: 1.1rem; }
+  .hospital-sidebar-exit { font-size: .7rem; }
+}

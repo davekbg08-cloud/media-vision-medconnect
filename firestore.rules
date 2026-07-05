@@ -482,6 +482,45 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    /* ── Bundle desktop hôpital (adapté) — beds/admissions/labOrders/aiQueries ── */
+    match /beds/{docId} {
+      allow read: if isAdmin() || signedIn();
+      allow create, update: if isAdmin() ||
+        (signedIn() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
+      allow delete: if isAdmin();
+    }
+
+    match /admissions/{docId} {
+      // Lecture : personnel clinique vérifié (précédent du projet
+      // pour les données partagées au niveau établissement) +
+      // patient concerné via canReadMedicalData si uid présent.
+      allow read: if isAdmin() || currentRoleIs('doctor') || currentRoleIs('nurse') ||
+        canReadMedicalData(resource.data);
+      allow create, update: if isAdmin() ||
+        (signedIn() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
+      allow delete: if isAdmin();
+    }
+
+    match /labOrders/{docId} {
+      // Demandes/résultats d'analyses au niveau établissement :
+      // lecture par le personnel clinique vérifié (même précédent
+      // que admissions) + patient concerné si uid présent.
+      allow read: if isAdmin() || currentRoleIs('doctor') || currentRoleIs('nurse') ||
+        canReadMedicalData(resource.data);
+      allow create, update: if isAdmin() ||
+        (signedIn() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
+      allow delete: if isAdmin();
+    }
+
+    match /aiQueries/{docId} {
+      // Historique des requêtes IA médicale : lecture réservée à
+      // l'auteur et à l'admin (peut contenir du contexte clinique).
+      allow read: if isAdmin() || (signedIn() && resource.data.userId == request.auth.uid);
+      allow create: if isAdmin() ||
+        (signedIn() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
+      allow update, delete: if isAdmin();
+    }
+
     match /auditLogs/{docId} {
       // Journal d'audit : création libre pour tout utilisateur
       // signé (traçabilité, y compris des tentatives bloquées par
