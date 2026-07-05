@@ -56,6 +56,8 @@ const DB = (() => {
     }
     store(OUTBOX_KEY, remaining);
     _flushing = false;
+    // Rafraîchit le badge de synchronisation pour refléter l'état réel.
+    try { window.SyncBadge?.render?.(); } catch (_) {}
     if (remaining.length) console.warn(`[MedConnect] Outbox : ${remaining.length} écriture(s) toujours en attente.`);
   }
 

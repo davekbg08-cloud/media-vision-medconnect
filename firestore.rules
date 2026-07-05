@@ -62,6 +62,16 @@ service cloud.firestore {
     // dans le rapport final : un client malveillant pourrait usurper
     // ce champ — accepté comme limite connue, pas de nouveau système
     // d'auth introduit pour ce chantier).
+    // ⚠️ LIMITE DE SÉCURITÉ CONNUE — sourceDevice est DÉCLARÉ par le
+    // client : un client desktop peut envoyer sourceDevice:'mobile'
+    // pour contourner le blocage d'abonnement. Fermer réellement cette
+    // faille exige un custom claim posé côté serveur (Cloud Function),
+    // que les règles liraient via request.auth.token.deviceType au lieu
+    // du champ du document. Tant que ce backend n'existe pas, le gating
+    // desktop reste dissuasif mais non infalsifiable. NE PAS présenter
+    // ce contrôle comme une sécurité forte.
+    // Migration future : remplacer `deviceValue` par
+    // `request.auth.token.deviceType` ici, sans toucher aux appelants.
     function hospitalCanWriteFromDevice(hospitalId, deviceValue) {
       return hospitalSubscriptionOk(hospitalId) || deviceValue != 'desktop';
     }

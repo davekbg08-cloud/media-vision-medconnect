@@ -104,6 +104,19 @@ const I18n = (() => {
     return T[key][currentLang] || T[key]['fr'] || key;
   }
 
+  /** Enregistre des clés de traduction supplémentaires depuis un
+      module (ex. bundle desktop hôpital). Chaque entrée doit avoir la
+      même forme que le dictionnaire central : { fr:'…', en:'…', … }.
+      Permet d'internationaliser un module sans gonfler i18n.js ni
+      créer de dépendance circulaire. Les clés déjà présentes ne sont
+      pas écrasées (le central reste prioritaire). */
+  function extend(entries) {
+    if (!entries || typeof entries !== 'object') return;
+    Object.entries(entries).forEach(([key, translations]) => {
+      if (!T[key]) T[key] = translations;
+    });
+  }
+
   function setLang(lang) {
     if (!LANGUAGES[lang]) return;
     currentLang = lang;
@@ -146,7 +159,7 @@ const I18n = (() => {
       </div>`;
   }
 
-  return { t, setLang, getLang, getLanguages, getCurrent, init, renderSelector };
+  return { t, extend, setLang, getLang, getLanguages, getCurrent, init, renderSelector };
 })();
 
 window.I18n = I18n;

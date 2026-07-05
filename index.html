@@ -68,6 +68,7 @@
       </div>
       <ul class="sidebar-nav" id="sidebar-nav"></ul>
       <div class="sidebar-footer">
+        <div id="sync-badge-container"></div>
         <div id="sidebar-lang-container"></div>
         <div class="sidebar-user" id="sidebar-user"></div>
         <p style="font-size:.67rem;color:var(--text-dim);margin-top:.3rem">MedConnect v2.0 © 2026</p>
@@ -103,11 +104,13 @@
   <script defer src="js/exchange-bridge.js"></script>
   <script defer src="js/medical-record-sharing.js"></script>
   <script defer src="js/emergency-transfer.js"></script>
+  <script defer src="js/sync-badge.js"></script>
 
   <!-- Bundle desktop hôpital (adapté) : couche cloud, permissions,
        modules métier, puis shell plein écran séparé -->
   <script defer src="js/cloud-db.js"></script>
   <script defer src="js/hospital-permissions.js"></script>
+  <script defer src="js/hospital-i18n.js"></script>
   <script defer src="js/hospital-subscription.js"></script>
   <script defer src="js/medical-ai.js"></script>
   <script defer src="js/hospital-beds.js"></script>

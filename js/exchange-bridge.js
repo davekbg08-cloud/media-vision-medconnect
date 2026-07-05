@@ -33,10 +33,17 @@ const ExchangeBridge = (() => {
   function hasFirebaseDB() { return typeof firebaseDB !== 'undefined' && !!firebaseDB; }
 
   /* ── DÉTECTION DE LA PLATEFORME COURANTE ──────────── */
+  let _cachedDevice = null;
   function currentSourceDevice() {
-    if (window.Capacitor || document.URL.startsWith('file://') || /android/i.test(navigator.userAgent)) return 'mobile';
-    if (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) return 'pwa';
-    return 'desktop';
+    // Figé au premier appel : la plateforme ne change pas en cours de
+    // session, et cela évite qu'un basculement (ex. passage en mode
+    // standalone) modifie le gating à la volée. Durcissement client
+    // modeste — la vraie protection reste un custom claim serveur.
+    if (_cachedDevice) return _cachedDevice;
+    if (window.Capacitor || document.URL.startsWith('file://') || /android/i.test(navigator.userAgent)) _cachedDevice = 'mobile';
+    else if (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) _cachedDevice = 'pwa';
+    else _cachedDevice = 'desktop';
+    return _cachedDevice;
   }
 
   /* ── ENVELOPPE COMMUNE À TOUT DOCUMENT ÉCHANGÉ ────── */

@@ -97,7 +97,7 @@ const HospitalDesktopUI = (() => {
             </button>`).join('')}
         </nav>
         <button class="hospital-sidebar-exit" onclick="HospitalDesktopUI.close()">
-          ← Retour à l'application
+          ← ${esc(window.I18n?.t ? I18n.t('hd_back_to_app') : "Retour à l'application")}
         </button>
       </aside>
       <div class="hospital-main">

@@ -46,17 +46,18 @@ const HospitalPermissions = (() => {
   }
 
   function visibleMenuFor(role) {
+    const L = k => (window.I18n?.t ? I18n.t(k) : null);
     const menu = [];
-    if (canAccess(role, 'dashboard'))     menu.push({ key:'dashboard',     label:'Tableau de bord',        icon:'📊' });
-    if (canAccess(role, 'patients'))      menu.push({ key:'patients',      label:'Patients',                icon:'👥' });
-    if (canAccess(role, 'consultations')) menu.push({ key:'consultations', label:'Consultations',           icon:'🩺' });
-    if (canAccess(role, 'beds'))          menu.push({ key:'beds',          label:'Hospitalisation / Lits',  icon:'🛏️' });
-    if (canAccess(role, 'doctors'))       menu.push({ key:'doctors',       label:'Médecins affiliés',       icon:'👨‍⚕️' });
-    if (canAccess(role, 'lab'))           menu.push({ key:'lab',           label:'Laboratoire',             icon:'🧪' });
-    if (canAccess(role, 'pharmacy'))      menu.push({ key:'pharmacy',      label:'Pharmacie',                icon:'💊' });
-    if (canAccess(role, 'ai'))            menu.push({ key:'ai',            label:'IA médicale',             icon:'🤖' });
-    if (canAccess(role, 'subscription'))  menu.push({ key:'subscription',  label:'Abonnement',              icon:'💳' });
-    if (canAccess(role, 'settings'))      menu.push({ key:'settings',      label:'Paramètres',              icon:'⚙️' });
+    if (canAccess(role, 'dashboard'))     menu.push({ key:'dashboard',     label:L('hd_dashboard')     || 'Tableau de bord',        icon:'📊' });
+    if (canAccess(role, 'patients'))      menu.push({ key:'patients',      label:L('hd_patients')      || 'Patients',                icon:'👥' });
+    if (canAccess(role, 'consultations')) menu.push({ key:'consultations', label:L('hd_consultations') || 'Consultations',           icon:'🩺' });
+    if (canAccess(role, 'beds'))          menu.push({ key:'beds',          label:L('hd_beds')          || 'Hospitalisation / Lits',  icon:'🛏️' });
+    if (canAccess(role, 'doctors'))       menu.push({ key:'doctors',       label:L('hd_doctors')       || 'Médecins affiliés',       icon:'👨‍⚕️' });
+    if (canAccess(role, 'lab'))           menu.push({ key:'lab',           label:L('hd_lab')           || 'Laboratoire',             icon:'🧪' });
+    if (canAccess(role, 'pharmacy'))      menu.push({ key:'pharmacy',      label:L('hd_pharmacy')      || 'Pharmacie',                icon:'💊' });
+    if (canAccess(role, 'ai'))            menu.push({ key:'ai',            label:L('hd_ai')            || 'IA médicale',             icon:'🤖' });
+    if (canAccess(role, 'subscription'))  menu.push({ key:'subscription',  label:L('hd_subscription')  || 'Abonnement',              icon:'💳' });
+    if (canAccess(role, 'settings'))      menu.push({ key:'settings',      label:L('hd_settings')      || 'Paramètres',              icon:'⚙️' });
     return menu;
   }
 
