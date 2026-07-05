@@ -133,18 +133,21 @@ const DB = (() => {
   /* ── SYNC AU DÉMARRAGE ───────────────────────────── */
   async function syncFromFirebase() {
     if (!firebaseReady || !firebaseDB) return;
+    // Collections SANS listener temps réel : seul le .get() initial
+    // les charge. Les 12 collections couvertes par un listener dans
+    // setupRealtimeListeners() sont volontairement EXCLUES d'ici :
+    // la première émission d'un onSnapshot livre déjà l'intégralité
+    // de la collection — le .get() préalable doublait chaque lecture
+    // Firestore au démarrage (coût facturé + bande passante, bug
+    // documenté de la version publiée). 'users' reste ici car son
+    // listener est un sous-ensemble filtré (pharmacies publiques).
     const collections = [
-      'mc_patients','mc_accounts','mc_consultations','mc_prescriptions',
-      'mc_appointments','mc_vaccinations','mc_lab_results',
-      'mc_medicines','mc_sales','mc_messages','mc_consents',
+      'mc_vaccinations','mc_lab_results','mc_consents',
       'users',
       'patients','doctors','nurses','pharmacies','hospitals',
       'medical_records','prescriptions','appointments','notifications',
-      'registration_requests',
       'mc_hospitals','mc_affiliations',
-      'establishments','affiliation_requests',
       'mc_verified_doctors','mc_verified_pharms','mc_verified_nurses',
-      'establishment_documents',
     ];
     // Chaque collection en parallèle avec un timeout individuel : un
     // réseau lent ou une requête bloquée ne doit jamais figer toute

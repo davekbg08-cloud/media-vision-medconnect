@@ -2,17 +2,21 @@
    MedConnect 2.0 — HospitalLabModule (bundle desktop, recréé)
    Laboratoire côté hôpital : demandes d'analyses + résultats.
 
-   Recréé selon la logique du projet (l'original du bundle
-   n'a pas pu être récupéré) :
-   - Collection cloud : labOrders (establishmentId + alias
-     hospitalId, sourceDevice injecté par CloudDB) — distincte
-     du LabModule mobile (js/lab.js, stockage DB local) pour
-     ne pas toucher au module publié ;
-   - Types d'analyses et plages normales alignés sur js/lab.js ;
-   - Gating ExchangeBridge : 'request_lab' (nouvelle demande)
-     et 'add_lab_result' (saisie résultat) — déjà présents dans
-     DESKTOP_BLOCKED_ACTIONS ;
-   - Patients identifiés par numéro MC.
+   CONTRAT D'ÉCHANGE mobile ↔ desktop :
+   - Collections du contrat existant : labRequests (demande,
+     statuts requested → in_progress → completed) et labResults
+     (résultat émis vers le médecin demandeur) — PAS de
+     collection parallèle (labOrders supprimée, dérive de
+     schéma évitée) ;
+   - Les statuts sont ceux écoutés par le listener infirmier
+     mobile d'ExchangeBridge ('requested','sample_pending',
+     'in_progress') ;
+   - À la saisie du résultat : le résumé est stocké sur la
+     demande (affichage desktop en une lecture) ET un document
+     labResults est émis avec doctorUid = demandeur → le
+     listener médecin mobile le reçoit en quasi temps réel ;
+   - Écritures gatées par l'abonnement desktop (request_lab /
+     add_lab_result) côté client ET côté règles.
    ===================================================== */
 const HospitalLabModule = (() => {
   const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -42,12 +46,13 @@ const HospitalLabModule = (() => {
   };
 
   const STATUS = {
-    ordered:     { label: 'Demandée',   icon: '📨' },
-    in_progress: { label: 'En cours',   icon: '⏳' },
-    completed:   { label: 'Résultat disponible', icon: '✅' },
+    requested:      { label: 'Demandée',             icon: '📨' },
+    sample_pending: { label: 'Prélèvement en cours', icon: '🩸' },
+    in_progress:    { label: 'En cours d\'analyse',  icon: '⏳' },
+    completed:      { label: 'Résultat disponible',  icon: '✅' },
   };
 
-  let _orders = [];
+  let _requests = [];
 
   async function render(container) {
     HospitalPermissions.requireRoute('lab');
@@ -56,15 +61,15 @@ const HospitalLabModule = (() => {
     container.innerHTML = `<div class="card empty-state"><p>Chargement du laboratoire…</p></div>`;
 
     try {
-      _orders = await CloudDB.listByHospital('labOrders', hospitalId);
+      _requests = await CloudDB.listByHospital('labRequests', hospitalId);
     } catch (e) {
       console.error('[HospitalLab] Chargement :', e);
       container.innerHTML = `<div class="card empty-state"><p>Erreur de chargement : ${esc(e.message)}</p></div>`;
       return;
     }
 
-    const pending = _orders.filter(o => o.status !== 'completed').length;
-    const done = _orders.filter(o => o.status === 'completed').length;
+    const pending = _requests.filter(o => o.status !== 'completed').length;
+    const done = _requests.filter(o => o.status === 'completed').length;
 
     container.innerHTML = `
       <div class="hospital-page-header">
@@ -73,21 +78,21 @@ const HospitalLabModule = (() => {
       </div>
 
       <div class="hospital-stats-grid">
-        <div class="hospital-stat-card"><h3>${_orders.length}</h3><p>Analyses au total</p></div>
+        <div class="hospital-stat-card"><h3>${_requests.length}</h3><p>Analyses au total</p></div>
         <div class="hospital-stat-card"><h3>${pending}</h3><p>⏳ En attente</p></div>
         <div class="hospital-stat-card"><h3>${done}</h3><p>✅ Terminées</p></div>
       </div>
 
-      ${!_orders.length ? `<div class="card empty-state"><p>Aucune analyse enregistrée.</p></div>` : `
+      ${!_requests.length ? `<div class="card empty-state"><p>Aucune analyse enregistrée.</p></div>` : `
       <div class="records-list">
-        ${_orders.sort((a,b) => String(b.createdAt||'').localeCompare(String(a.createdAt||'')))
-          .map(o => orderCard(o)).join('')}
+        ${_requests.sort((a,b) => String(b.createdAt||'').localeCompare(String(a.createdAt||'')))
+          .map(o => requestCard(o)).join('')}
       </div>`}
     `;
   }
 
-  function orderCard(o) {
-    const st = STATUS[o.status] || STATUS.ordered;
+  function requestCard(o) {
+    const st = STATUS[o.status] || STATUS.requested;
     let flag = '';
     const norm = NORMAL_RANGES[o.type];
     const val = parseFloat(o.value);
@@ -101,9 +106,9 @@ const HospitalLabModule = (() => {
         ${o.status === 'completed'
           ? `<p>Résultat : <strong>${esc(o.value || '—')} ${esc(o.unit || norm?.unit || '')}</strong>${flag}</p>
              ${o.comment ? `<p class="muted">${esc(o.comment)}</p>` : ''}`
-          : `<p class="muted">Demandée le ${esc(String(o.createdAt || '').slice(0,10))}${o.requestedBy ? ' · par ' + esc(o.requestedBy) : ''}</p>`}
+          : `<p class="muted">Demandée le ${esc(String(o.createdAt || '').slice(0,10))}${o.requestedByName ? ' · par ' + esc(o.requestedByName) : ''}</p>`}
         <div style="display:flex;gap:.4rem;margin-top:.4rem;flex-wrap:wrap">
-          ${o.status === 'ordered' ? `
+          ${o.status === 'requested' ? `
             <button class="btn btn-ghost btn-sm"
               onclick="HospitalLabModule.setStatus('${esc(o.id)}','in_progress')">▶️ Prise en charge</button>` : ''}
           ${o.status !== 'completed' ? `
@@ -145,20 +150,24 @@ const HospitalLabModule = (() => {
 
       const hospitalId = await CloudDB.getActiveHospitalId();
       const user = await CloudDB.getCurrentUserProfile();
-      const orderId = DB.makeId('LAB');
+      const requestId = DB.makeId('LAB');
 
-      await CloudDB.createDoc('labOrders', {
+      await CloudDB.createDoc('labRequests', {
         establishmentId: hospitalId,
-        hospitalId,
+        hospitalId, // alias — les listeners mobile filtrent sur ce nom
         patientMc: mc,
         patientName: name,
         type,
-        status: 'ordered',
-        requestedBy: user.name || user.uid,
+        status: 'requested', // statut du contrat, écouté côté mobile
+        requestedByUid: user.uid,
+        requestedByName: user.name || user.uid,
+        // Si le demandeur est médecin : le résultat lui sera notifié
+        // via labResults (listener médecin mobile filtre doctorUid).
+        doctorUid: user.role === 'doctor' ? user.uid : '',
         value: '', unit: '', comment: '',
-      }, orderId);
+      }, requestId);
 
-      await CloudDB.createAuditLog('lab_requested', 'labOrders', orderId, { patientMc: mc, type });
+      await CloudDB.createAuditLog('lab_requested', 'labRequests', requestId, { patientMc: mc, type });
       App.closeModal();
       App.toast('Demande d\'analyse envoyée.');
       HospitalDesktopUI.navigate('lab');
@@ -170,9 +179,9 @@ const HospitalLabModule = (() => {
 
   /* ── Statut & résultat ──────────────────────────── */
 
-  async function setStatus(orderId, status) {
+  async function setStatus(requestId, status) {
     try {
-      await CloudDB.updateDoc('labOrders', orderId, { status });
+      await CloudDB.updateDoc('labRequests', requestId, { status });
       HospitalDesktopUI.navigate('lab');
     } catch (e) {
       console.error('[HospitalLab] setStatus :', e);
@@ -180,8 +189,8 @@ const HospitalLabModule = (() => {
     }
   }
 
-  function openResult(orderId) {
-    const o = _orders.find(x => x.id === orderId);
+  function openResult(requestId) {
+    const o = _requests.find(x => x.id === requestId);
     if (!o) return;
     const norm = NORMAL_RANGES[o.type];
     App.openModal('🧪 Saisir le résultat', `
@@ -192,26 +201,43 @@ const HospitalLabModule = (() => {
         <input id="lab-unit" value="${esc(norm?.unit || '')}"></div>
       <div class="form-group"><label>Commentaire</label>
         <textarea id="lab-comment" rows="3"></textarea></div>
-      <button class="btn btn-primary btn-full" onclick="HospitalLabModule.saveResult('${esc(orderId)}')">Enregistrer le résultat</button>
+      <button class="btn btn-primary btn-full" onclick="HospitalLabModule.saveResult('${esc(requestId)}')">Enregistrer le résultat</button>
     `);
   }
 
-  async function saveResult(orderId) {
+  async function saveResult(requestId) {
     try {
       await CloudDB.requireWritableSubscription('add_lab_result');
 
+      const req = _requests.find(x => x.id === requestId);
+      if (!req) return;
       const value = document.getElementById('lab-value').value.trim();
       if (!value) { App.toast('Valeur requise.', 'error'); return; }
       const unit = document.getElementById('lab-unit').value.trim();
       const comment = document.getElementById('lab-comment').value.trim();
+      const hospitalId = await CloudDB.getActiveHospitalId();
 
-      await CloudDB.updateDoc('labOrders', orderId, {
+      // 1) Résumé sur la demande — l'écran desktop reste en une lecture.
+      await CloudDB.updateDoc('labRequests', requestId, {
         value, unit, comment,
         status: 'completed',
         completedAt: new Date().toISOString(),
       });
 
-      await CloudDB.createAuditLog('lab_result_added', 'labOrders', orderId, {});
+      // 2) Document labResults du contrat — reçu en quasi temps réel
+      //    par le médecin demandeur sur mobile (listener doctorUid).
+      await CloudDB.createDoc('labResults', {
+        establishmentId: hospitalId,
+        hospitalId,
+        labRequestId: requestId,
+        patientMc: req.patientMc || '',
+        patientName: req.patientName || '',
+        type: req.type || '',
+        value, unit, comment,
+        doctorUid: req.doctorUid || req.requestedByUid || '',
+      }, DB.makeId('LABR'));
+
+      await CloudDB.createAuditLog('lab_result_added', 'labRequests', requestId, {});
       App.closeModal();
       App.toast('Résultat enregistré.');
       HospitalDesktopUI.navigate('lab');

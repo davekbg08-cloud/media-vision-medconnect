@@ -447,7 +447,13 @@ service cloud.firestore {
     }
 
     match /labRequests/{docId} {
-      allow read: if isAdmin() || canReadMedicalData(resource.data);
+      // Lecture : personnel clinique vérifié — indispensable pour la
+      // liste établissement du desktop et pour le listener infirmier
+      // mobile d'ExchangeBridge (requête hôpital-entier, impossible à
+      // satisfaire avec canReadMedicalData seul). Même précédent
+      // currentRoleIs que /admissions.
+      allow read: if isAdmin() || currentRoleIs('doctor') || currentRoleIs('nurse') ||
+        canReadMedicalData(resource.data);
       allow create: if isAdmin() ||
         (signedIn() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
       allow update: if isAdmin() ||
@@ -482,7 +488,7 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    /* ── Bundle desktop hôpital (adapté) — beds/admissions/labOrders/aiQueries ── */
+    /* ── Bundle desktop hôpital (adapté) — beds/admissions/aiQueries ── */
     match /beds/{docId} {
       allow read: if isAdmin() || signedIn();
       allow create, update: if isAdmin() ||
@@ -494,17 +500,6 @@ service cloud.firestore {
       // Lecture : personnel clinique vérifié (précédent du projet
       // pour les données partagées au niveau établissement) +
       // patient concerné via canReadMedicalData si uid présent.
-      allow read: if isAdmin() || currentRoleIs('doctor') || currentRoleIs('nurse') ||
-        canReadMedicalData(resource.data);
-      allow create, update: if isAdmin() ||
-        (signedIn() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
-      allow delete: if isAdmin();
-    }
-
-    match /labOrders/{docId} {
-      // Demandes/résultats d'analyses au niveau établissement :
-      // lecture par le personnel clinique vérifié (même précédent
-      // que admissions) + patient concerné si uid présent.
       allow read: if isAdmin() || currentRoleIs('doctor') || currentRoleIs('nurse') ||
         canReadMedicalData(resource.data);
       allow create, update: if isAdmin() ||

@@ -386,6 +386,9 @@ const HospitalsRegistry = (() => {
     App.toast(`🏥 Établissement : ${h?.name || '—'}`);
     if (window.App?.buildNav) App.buildNav(Auth.getUser());
     if (window.App?.navigateTo) App.navigateTo('dashboard');
+    // Les listeners du contrat d'échange filtrent sur l'hôpital actif :
+    // ils doivent être relancés quand il change.
+    if (window.App?.startExchangeSync) App.startExchangeSync(Auth.getUser());
   }
 
   function clearCurrentHospital() {

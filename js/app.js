@@ -164,6 +164,45 @@ const App = (() => {
     buildNav(user);
     const first = (MENUS[user.role] || MENUS.patient)()[0];
     navigateTo(first.s);
+    startExchangeSync(user);
+  }
+
+  /* ── ÉCOUTE DU CONTRAT D'ÉCHANGE mobile ↔ desktop ──
+     ExchangeBridge.startRoleListeners existait mais n'était
+     branché nulle part : le desktop écrivait, le mobile ne
+     recevait jamais. Première émission de chaque collection =
+     état initial (silencieux, sauf compteur de notifications
+     non lues) ; les suivantes = vraie nouveauté, notifiée.
+     Les écritures restent gatées par l'abonnement desktop
+     (ExchangeBridge + règles) ; l'écoute est de la lecture,
+     toujours autorisée par le contrat à deux vitesses. */
+  const _exchangeSeen = new Set();
+  function startExchangeSync(user) {
+    if (!window.ExchangeBridge?.startRoleListeners || !user) return;
+    _exchangeSeen.clear();
+    const LIVE_LABELS = {
+      labResults:            '🧪 Nouveau résultat d\'analyse disponible',
+      labRequests:           '🧪 Nouvelle demande d\'analyse au laboratoire',
+      prescriptions:         '💊 Ordonnance mise à jour',
+      consultations:         '🩺 Consultation mise à jour',
+      notifications:         '📨 Nouvelle notification',
+      registration_requests: '🆕 Nouvelle demande d\'inscription',
+    };
+    ExchangeBridge.startRoleListeners((col, docs) => {
+      if (!_exchangeSeen.has(col)) {
+        _exchangeSeen.add(col);
+        if (col === 'notifications' && docs.length) {
+          toast(`📨 ${docs.length} notification(s) non lue(s)`);
+        }
+        return;
+      }
+      if (LIVE_LABELS[col] && docs.length) toast(LIVE_LABELS[col]);
+      // Rafraîchit la section affichée si elle correspond à la donnée reçue.
+      const related = { labResults:'lab', labRequests:'lab', prescriptions:'prescriptions', consultations:'consultations' };
+      if (related[col] && related[col] === currentSection) {
+        try { routeSection(currentSection); } catch (_) {}
+      }
+    });
   }
 
   /* ── BUILD NAV ───────────────────────────────────── */
@@ -320,7 +359,7 @@ const App = (() => {
   }
 
   return {
-    afterLogin, buildNav, navigateTo, goHome, refresh,
+    afterLogin, buildNav, navigateTo, goHome, refresh, startExchangeSync,
     toggleTheme, openModal, closeModal, toast, init,
     closeMobileSidebar,
   };

@@ -154,13 +154,13 @@ const HospitalDesktopUI = (() => {
 
     container.innerHTML = `<div class="card empty-state"><p>Chargement…</p></div>`;
 
-    let beds = [], admissions = [], labOrders = [];
+    let beds = [], admissions = [], labRequests = [];
     let sub = { status: 'active' };
     try {
-      [beds, admissions, labOrders, sub] = await Promise.all([
+      [beds, admissions, labRequests, sub] = await Promise.all([
         CloudDB.listByHospital('beds', hospitalId),
         CloudDB.listByHospital('admissions', hospitalId),
-        CloudDB.listByHospital('labOrders', hospitalId),
+        CloudDB.listByHospital('labRequests', hospitalId),
         ExchangeBridge.getSubscriptionStatus(hospitalId).catch(() => ({ status: 'active' })),
       ]);
     } catch (e) {
@@ -169,7 +169,7 @@ const HospitalDesktopUI = (() => {
 
     const occupied = beds.filter(b => b.status === 'occupied').length;
     const admitted = admissions.filter(a => a.status === 'admitted').length;
-    const labPending = labOrders.filter(o => o.status !== 'completed').length;
+    const labPending = labRequests.filter(o => o.status !== 'completed').length;
     const subLabels = { active:'✅ Actif', grace_period:'⏳ Grâce', expired:'❌ Expiré', suspended:'⛔ Suspendu' };
 
     container.innerHTML = `
