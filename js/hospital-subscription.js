@@ -62,7 +62,13 @@ const HospitalSubscriptionModule = (() => {
         <h3>Statut actuel</h3>
         <p><strong>${STATUS_LABELS[sub.status] || esc(sub.status || 'non défini')}</strong></p>
         ${sub.graceUntil ? `<p>Grâce jusqu'au : ${esc(String(sub.graceUntil).slice(0,10))}</p>` : ''}
-        ${!isAdmin ? `<p class="muted">L'activation d'un plan est effectuée par l'administration MedConnect après votre demande.</p>` : ''}
+        <div class="alert-box" style="margin-top:.8rem">
+          💳 <strong>Paiement de l'abonnement</strong><br>
+          Réglez par mobile money au <strong>0856373707</strong>, puis contactez
+          l'administration MedConnect. L'activation est effectuée manuellement
+          après réception du paiement.
+        </div>
+        ${!isAdmin ? `<p class="muted">L'activation d'un plan est effectuée par l'administration MedConnect après votre paiement.</p>` : ''}
       </div>
 
       <div class="hospital-stats-grid">

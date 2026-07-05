@@ -317,6 +317,16 @@ const AdminModule = (() => {
           </div>` : `<div class="card empty-state"><p>Aucun utilisateur actif</p></div>`}
 
         <div class="page-header" style="margin-top:1.5rem">
+          <h3>💳 Abonnements hôpitaux</h3>
+        </div>
+        <div class="auth-register-info" style="margin-bottom:.8rem">
+          Paiement par mobile money au <strong>0856373707</strong>. Activez l'abonnement d'un établissement après réception du paiement.
+        </div>
+        <div id="admin-subscriptions-list">
+          <div class="card empty-state"><p>Chargement des abonnements…</p></div>
+        </div>
+
+        <div class="page-header" style="margin-top:1.5rem">
           <h3>📋 Registres officiels</h3>
           <button class="btn btn-ghost btn-sm" onclick="AdminModule.openRegistryManager()">⚙️ Gérer</button>
         </div>
@@ -325,6 +335,10 @@ const AdminModule = (() => {
           <div class="stat-card" style="flex:1;min-width:140px;border-top:3px solid var(--purple)"><div class="stat-icon">💊</div><div class="stat-value">${pharms.length}</div><div class="stat-label">Pharmaciens vérifiés</div></div>
           <div class="stat-card" style="flex:1;min-width:140px;border-top:3px solid #06B6D4"><div class="stat-icon">🩹</div><div class="stat-value">${nurses.length}</div><div class="stat-label">Infirmiers vérifiés</div></div>
         </div>`;
+
+      // Remplissage asynchrone de la section abonnements (statuts lus
+      // depuis subscriptions/{hospitalId} via ExchangeBridge).
+      renderSubscriptionsSection();
     } catch (e) {
       console.error('[MedConnect] Admin dashboard failed:', e);
       if (main) main.innerHTML = `
@@ -546,10 +560,163 @@ const AdminModule = (() => {
     App.navigateTo('dashboard');
   }
 
+  /* Remplit la section abonnements (statuts asynchrones). */
+  async function renderSubscriptionsSection() {
+    const box = document.getElementById('admin-subscriptions-list');
+    if (!box) return;
+    const hospitals = window.HospitalsRegistry?.getHospitals?.() || [];
+    if (!hospitals.length) {
+      box.innerHTML = `<div class="card empty-state"><p>Aucun établissement enregistré.</p></div>`;
+      return;
+    }
+
+    const STATUS_LABEL = {
+      active:       { t:'✅ Actif',            c:'var(--secondary)' },
+      grace_period: { t:'⏳ Période de grâce', c:'var(--accent)' },
+      expired:      { t:'🔒 Expiré',           c:'var(--danger)' },
+      suspended:    { t:'🚫 Suspendu',         c:'var(--danger)' },
+    };
+
+    const rows = await Promise.all(hospitals.map(async h => {
+      const hid = h.establishmentId || h.hid;
+      let sub = { status: 'active', endDate: null };
+      try { sub = await window.ExchangeBridge?.getSubscriptionStatus?.(hid) || sub; } catch (_) {}
+      const st = STATUS_LABEL[sub.status] || STATUS_LABEL.active;
+      const isActive = sub.status === 'active' || sub.status === 'grace_period';
+      return `
+        <div class="record-card">
+          <div class="record-header">
+            <div style="flex:1;min-width:0">
+              <strong>${esc(h.name || hid)}</strong>
+              ${h.officialId ? `<br><small style="color:var(--text-muted);font-family:monospace">Matricule : ${esc(h.officialId)}</small>` : ''}
+              <br><small style="color:${st.c};font-weight:600">${st.t}</small>
+              ${sub.endDate ? `<small style="color:var(--text-dim)"> · jusqu'au ${esc(String(sub.endDate).slice(0,10))}</small>` : ''}
+            </div>
+          </div>
+          <div style="display:flex;gap:.5rem;margin-top:.5rem;flex-wrap:wrap">
+            <button class="btn btn-primary btn-sm" onclick="AdminModule.openSubscriptionActivator('${esc(hid)}')">
+              💳 ${isActive ? 'Renouveler / changer' : 'Activer'}
+            </button>
+            ${isActive ? `<button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="AdminModule.deactivateSubscription('${esc(hid)}')">Désactiver</button>` : ''}
+          </div>
+        </div>`;
+    }));
+
+    box.innerHTML = rows.join('');
+  }
+
+  /* ══ ABONNEMENTS HÔPITAUX (activation manuelle après paiement) ══
+     Paiement manuel par mobile money au 0856373707, puis l'admin
+     active ici. Source de vérité : subscriptions/{hospitalId}
+     (admin-only côté règles), lue par ExchangeBridge. */
+  const SUBSCRIPTION_PAY_NUMBER = '0856373707';
+  const SUB_PLANS = { essentiel:'Essentiel', pro:'Pro', institution:'Institution' };
+
+  async function activateSubscription(hospitalId, plan = 'pro', months = 1) {
+    if (typeof firebaseDB === 'undefined' || !firebaseDB) {
+      App.toast('❌ Connexion requise pour activer un abonnement.', 'error'); return;
+    }
+    const h = window.HospitalsRegistry?.getHospitalById?.(hospitalId);
+    const start = new Date();
+    const end = new Date(); end.setMonth(end.getMonth() + Number(months || 1));
+
+    if (!confirm(`Activer l'abonnement « ${SUB_PLANS[plan] || plan} » pour ${h?.name || hospitalId} pendant ${months} mois ?\n\nÀ ne faire qu'après réception du paiement au ${SUBSCRIPTION_PAY_NUMBER}.`)) return;
+
+    try {
+      await firebaseDB.collection('subscriptions').doc(hospitalId).set({
+        hospitalId,
+        establishmentId: hospitalId,
+        plan,
+        status: 'active',
+        billingCycle: 'monthly',
+        startDate: start.toISOString(),
+        endDate: end.toISOString(),
+        graceUntil: '',
+        activatedBy: currentAdminUid(),
+        activatedAt: start.toISOString(),
+        paymentNote: `Paiement mobile money ${SUBSCRIPTION_PAY_NUMBER}`,
+      }, { merge: true });
+
+      window.ExchangeBridge?.invalidateSubscriptionCache?.(hospitalId);
+      try {
+        await window.CloudDB?.createAuditLog?.('subscription_activated', 'subscriptions', hospitalId, { plan, months });
+      } catch (_) {}
+
+      Network?.notify?.({
+        to_role: 'admin', to_id: hospitalId, type: 'info',
+        subject: '✅ Abonnement activé',
+        body: `L'abonnement ${SUB_PLANS[plan] || plan} de ${h?.name || hospitalId} est actif jusqu'au ${end.toISOString().slice(0,10)}.`,
+      });
+
+      App.toast(`✅ Abonnement activé pour ${h?.name || hospitalId}.`);
+      App.navigateTo('dashboard');
+    } catch (e) {
+      console.error('[Admin] activateSubscription :', e);
+      App.toast('❌ Activation impossible : ' + (e.message || e), 'error');
+    }
+  }
+
+  async function deactivateSubscription(hospitalId) {
+    if (typeof firebaseDB === 'undefined' || !firebaseDB) {
+      App.toast('❌ Connexion requise.', 'error'); return;
+    }
+    const h = window.HospitalsRegistry?.getHospitalById?.(hospitalId);
+    if (!confirm(`Désactiver l'abonnement de ${h?.name || hospitalId} ? L'hôpital repassera en lecture seule sur desktop.`)) return;
+    try {
+      await firebaseDB.collection('subscriptions').doc(hospitalId).set({
+        hospitalId, establishmentId: hospitalId,
+        status: 'expired',
+        deactivatedBy: currentAdminUid(),
+        deactivatedAt: new Date().toISOString(),
+      }, { merge: true });
+      window.ExchangeBridge?.invalidateSubscriptionCache?.(hospitalId);
+      App.toast(`Abonnement désactivé pour ${h?.name || hospitalId}.`);
+      App.navigateTo('dashboard');
+    } catch (e) {
+      console.error('[Admin] deactivateSubscription :', e);
+      App.toast('❌ ' + (e.message || e), 'error');
+    }
+  }
+
+  function openSubscriptionActivator(hospitalId) {
+    const h = window.HospitalsRegistry?.getHospitalById?.(hospitalId);
+    App.openModal(`💳 Activer un abonnement — ${esc(h?.name || hospitalId)}`, `
+      <div class="auth-register-info" style="margin-bottom:1rem">
+        À activer uniquement après réception du paiement par mobile money au
+        <strong>${SUBSCRIPTION_PAY_NUMBER}</strong>.
+      </div>
+      <div class="form-group">
+        <label>Formule</label>
+        <select id="sub-plan">
+          ${Object.entries(SUB_PLANS).map(([k,v]) => `<option value="${k}"${k==='pro'?' selected':''}>${v}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Durée (mois)</label>
+        <select id="sub-months">
+          <option value="1">1 mois</option>
+          <option value="3">3 mois</option>
+          <option value="6">6 mois</option>
+          <option value="12">12 mois</option>
+        </select>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-primary" onclick="AdminModule.confirmActivate('${esc(hospitalId)}')">✅ Activer</button>
+      </div>`);
+  }
+
+  function confirmActivate(hospitalId) {
+    const plan = document.getElementById('sub-plan')?.value || 'pro';
+    const months = document.getElementById('sub-months')?.value || '1';
+    App.closeModal();
+    activateSubscription(hospitalId, plan, months);
+  }
+
   return {
     renderDashboard, approve, reject, suspend, openDetail, deleteRequest,
     openBroadcast, sendBroadcast,
     openRegistryManager, openAddToRegistry, saveToRegistry,
+    activateSubscription, deactivateSubscription, openSubscriptionActivator, confirmActivate,
   };
 })();
 
