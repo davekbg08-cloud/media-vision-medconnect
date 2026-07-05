@@ -86,14 +86,22 @@ const DB = (() => {
     }
   }
 
+  // Seules ces collections ADMINISTRATIVES, gérées côté cloud, se
+  // vident quand le serveur confirme un snapshot vide (les « demandes
+  // fantômes » du dashboard). Pour les données MÉDICALES créées
+  // localement (ordonnances, consultations…), un cloud vide ne doit
+  // JAMAIS effacer le travail local : d'anciennes écritures cloud ont
+  // pu échouer en silence, le local est alors la seule copie.
+  const EMPTY_WIPE_WHITELIST = new Set([
+    'registration_requests', 'affiliation_requests',
+    'establishments', 'establishment_documents',
+  ]);
+
   function storeSnapshot(key, snap) {
-    // Un snapshot VIDE confirmé par le serveur est une information :
-    // la collection n'existe plus, le cache local doit se vider (les
-    // « demandes fantômes » du dashboard admin venaient des gardes
-    // !snap.empty qui ignoraient ce cas — le local ne se vidait
-    // jamais). On n'ignore que les vides issus du cache hors-ligne
-    // (démarrage sans réseau), pour ne pas effacer des données valides.
-    if (snap.empty && snap.metadata?.fromCache) return;
+    if (snap.empty) {
+      if (!snap.metadata?.fromCache && EMPTY_WIPE_WHITELIST.has(key)) store(key, []);
+      return;
+    }
     store(key, snap.docs.map(d => d.data()));
   }
 
@@ -186,10 +194,11 @@ const DB = (() => {
     await Promise.all(collections.map(async col => {
       try {
         const snap = await withTimeout(firebaseDB.collection(col).get(), PER_COLLECTION_TIMEOUT_MS);
-        // Vide confirmé serveur = la collection a été vidée : le cache
-        // local doit suivre (mêmes fantômes possibles qu'avec les
-        // listeners). Seul le vide issu du cache hors-ligne est ignoré.
-        if (!(snap.empty && snap.metadata?.fromCache)) store(col, snap.docs.map(d => d.data()));
+        // Vide confirmé serveur : vidage UNIQUEMENT pour les collections
+        // administratives de la whitelist (fantômes du dashboard) —
+        // jamais pour les données médicales créées localement.
+        if (!snap.empty) store(col, snap.docs.map(d => d.data()));
+        else if (!snap.metadata?.fromCache && EMPTY_WIPE_WHITELIST.has(col)) store(col, []);
       } catch (e) {
         console.warn(`[MedConnect] Sync ${col} ignorée (lente/indisponible) :`, e?.message || e);
       }
@@ -208,17 +217,18 @@ const DB = (() => {
   /* ── LISTENERS TEMPS RÉEL ────────────────────────── */
   function setupRealtimeListeners() {
     if (!firebaseReady || !firebaseDB) return;
-    // Patients
+    // Patients — FUSION : un dossier créé localement dont la montée
+    // cloud a échoué ne doit pas disparaître au snapshot suivant.
     listen(firebaseDB.collection('mc_patients'), snap => {
-      storeSnapshot('mc_patients', snap);
+      if (!snap.empty) mergeStore('mc_patients', 'id', snap.docs.map(d => d.data()));
     });
     // Messages : PAS de listener global ici — la règle Firestore exige
     // to_id == uid par document, une écoute collection-entière est
     // rejetée en bloc pour tout le monde (c'était le cas depuis
     // toujours, silencieusement). Voir setupUserScopedListeners().
-    // Rendez-vous
+    // Rendez-vous — FUSION (même principe que mc_patients).
     listen(firebaseDB.collection('mc_appointments'), snap => {
-      storeSnapshot('mc_appointments', snap);
+      if (!snap.empty) mergeStore('mc_appointments', 'aid', snap.docs.map(d => d.data()));
     });
     // Comptes
     listen(firebaseDB.collection('mc_accounts'), snap => {
@@ -244,13 +254,15 @@ const DB = (() => {
     listen(firebaseDB.collection('registration_requests'), snap => {
       storeSnapshot('registration_requests', snap);
     });
-    // Ordonnances — pour rafraîchir l'inbox pharmacie/médecin en quasi temps réel
+    // Ordonnances — FUSION : c'est la protection qui garantit que
+    // l'ordonnance du médecin reste visible même si sa montée cloud
+    // a échoué (cause de l'écran « Aucune donnée »).
     listen(firebaseDB.collection('mc_prescriptions'), snap => {
-      storeSnapshot('mc_prescriptions', snap);
+      if (!snap.empty) mergeStore('mc_prescriptions', 'pid', snap.docs.map(d => d.data()));
     });
-    // Consultations
+    // Consultations — FUSION (même principe).
     listen(firebaseDB.collection('mc_consultations'), snap => {
-      storeSnapshot('mc_consultations', snap);
+      if (!snap.empty) mergeStore('mc_consultations', 'cid', snap.docs.map(d => d.data()));
     });
     // Inventaire pharmacie (stock partagé entre appareils du même pharmacien)
     listen(firebaseDB.collection('mc_medicines'), snap => {
@@ -479,7 +491,8 @@ const DB = (() => {
 
   function addPrescription(data) {
     const list = getPrescriptions();
-    const p = { ...data, pid: makeId('P'), date: data.date || today(), status: data.status || 'sent' };
+    const p = { ...data, pid: makeId('P'), date: data.date || today(), status: data.status || 'sent',
+      sourceDevice: data.sourceDevice || window.ExchangeBridge?.currentSourceDevice?.() || 'mobile' };
     list.push(p); store('mc_prescriptions', list);
     _push('mc_prescriptions', p.pid, p);
     _push('prescriptions', p.pid, p);
