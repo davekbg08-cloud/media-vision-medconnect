@@ -652,7 +652,14 @@ const AdminModule = (() => {
       App.navigateTo('dashboard');
     } catch (e) {
       console.error('[Admin] activateSubscription :', e);
-      App.toast('❌ Activation impossible : ' + (e.message || e), 'error');
+      const perm = /permission|insufficient/i.test(e.message || '');
+      if (perm) {
+        const uid = window.firebaseAuth?.currentUser?.uid || Auth.getUser?.()?.uid || '(inconnu)';
+        console.warn('[Admin] Activation refusée. Vérifiez users/' + uid + '.role == "admin" dans Firestore.');
+        App.toast('❌ Droits insuffisants. Votre compte doit avoir role:"admin" dans Firestore (users/' + uid + '). Vérifiez aussi que les règles sont déployées.', 'error');
+      } else {
+        App.toast('❌ Activation impossible : ' + (e.message || e), 'error');
+      }
     }
   }
 
