@@ -411,9 +411,14 @@ const HospitalsRegistry = (() => {
 
   function getPatientsForContext(uid) {
     const h = getCurrentHospital();
+    // Hors établissement (praticien solo) : seulement ses propres
+    // patients. DANS un établissement : TOUT le personnel partage les
+    // patients de l'hôpital — un patient créé par un collègue ne doit
+    // pas être invisible (c'était la cause des ordonnances non
+    // affichées : la liste de patients servant de base au filtre était
+    // amputée des patients créés par d'autres membres du même hôpital).
     if (!h) return DB.getPatients().filter(p => !p.created_by || p.created_by === uid);
-    return getPatientsForEstablishment(h.establishmentId)
-      .filter(p => !p.created_by || p.created_by === uid);
+    return getPatientsForEstablishment(h.establishmentId);
   }
 
   function getAppointmentsForContext(uid) {

@@ -30,9 +30,17 @@ const HospitalPortal = (() => {
     const user = Auth.getUser() || {};
     if (user.role === 'admin') return true;
     const h = window.HospitalsRegistry?.getCurrentHospital?.();
-    return patientIds.has(item.patient_id) ||
-      item.created_by === user.uid ||
-      item.doctor_uid === user.uid ||
+    const uid = user.uid;
+    // Identité du créateur : elle peut être stockée sous plusieurs
+    // noms selon le chemin de création (consultation, ordonnance
+    // directe, import). On les couvre tous — sinon une ordonnance
+    // bien créée par l'utilisateur restait invisible faute de matcher
+    // le seul champ testé auparavant (created_by).
+    const mine = uid && (
+      item.created_by === uid || item.createdByUid === uid ||
+      item.doctor_uid === uid || item.doctorUid === uid);
+    return mine ||
+      patientIds.has(item.patient_id) ||
       (h && (item.establishmentId === h.establishmentId || item.hospital_id === h.establishmentId)) ||
       // Consentement patient (mc_consents) : une infirmière ou un
       // médecin validé par le patient voit ses documents même hors
@@ -538,19 +546,21 @@ const HospitalPortal = (() => {
       ${!list.length ? `<div class="card empty-state"><p>${t('no_data')}</p></div>` : ''}
       <div class="records-list">
         ${list.map(rx => {
-          const p = DB.getPatientById(rx.patient_id);
+          const pid = rx.patient_id || rx.patientId;
+          const p = DB.getPatientById(pid);
           return `<div class="record-card presc-card">
             <div class="record-header">
-              <span class="record-date">📅 ${rx.date}</span>
-              ${p?`<span class="id-tag">${p.id}</span><strong>${esc(p.firstname)} ${esc(p.lastname)}</strong>`:''}
+              <span class="record-date">📅 ${rx.date || '—'}</span>
+              ${p ? `<span class="id-tag">${p.id}</span><strong>${esc(p.firstname)} ${esc(p.lastname)}</strong>`
+                  : `<span class="id-tag">${esc(pid || '—')}</span>`}
               <span class="record-doctor">👨‍⚕️ ${esc(rx.doctor)||'—'}</span>
               <button class="btn btn-ghost btn-xs" onclick="HospitalPortal.openPrescriptionTarget('${rx.pid}')">📤 Pharmacie</button>
               <button class="btn btn-ghost btn-xs" onclick="PatientPortal.printRx('${rx.pid}')">🖨️</button>
             </div>
-            <p><strong>Diagnostic :</strong> ${esc(rx.diagnosis)}</p>
+            <p><strong>Diagnostic :</strong> ${esc(rx.diagnosis || rx.diagnostic || '—')}</p>
             ${rx.establishmentName ? `<p>🏥 ${esc(rx.establishmentName)} · Matricule ${esc(rx.establishmentId || rx.hospital_id || '—')}</p>` : ''}
             <ul style="padding-left:1.2rem;margin-top:.4rem">
-              ${(rx.medicines||[]).map(m=>`<li>💊 ${esc(m.name)} — ${esc(m.dosage)}</li>`).join('')}
+              ${(rx.medicines||rx.items||[]).map(m=>`<li>💊 ${esc(m.name||m.nom)} — ${esc(m.dosage||m.traitement||'')}</li>`).join('')}
             </ul>
           </div>`;
         }).join('')}
