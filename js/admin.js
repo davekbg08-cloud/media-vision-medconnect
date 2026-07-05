@@ -130,6 +130,47 @@ const AdminModule = (() => {
     if (changed) DB.saveRegistrationRequests?.(next);
   }
 
+  /** Suppression DÉFINITIVE d'une demande (le « impossible à
+      supprimer » signalé). Retire la demande de registration_requests
+      ET, s'il existe, le compte mc_accounts non approuvé associé ;
+      propage la suppression au cloud. */
+  async function deleteRequest(uid) {
+    if (!confirm('Supprimer définitivement cette demande ? Cette action est irréversible.')) return;
+
+    // 1) registration_requests (match par requesterUid OU requestId)
+    const requests = getRequestsSafe();
+    const kept = requests.filter(r =>
+      r.requesterUid !== uid && r.requestId !== uid);
+    const removed = requests.filter(r =>
+      r.requesterUid === uid || r.requestId === uid);
+    DB.saveRegistrationRequests?.(kept);
+
+    // 2) compte mc_accounts associé s'il n'est pas déjà approuvé
+    const accounts = getAccountsSafe();
+    const acc = accounts.find(a => a.uid === uid);
+    if (acc && !['approved', 'active'].includes(String(acc.status || '').toLowerCase())) {
+      DB.saveAccounts?.(accounts.filter(a => a.uid !== uid));
+    }
+
+    // 3) propagation cloud (suppression des documents)
+    try {
+      if (typeof firebaseDB !== 'undefined' && firebaseDB) {
+        for (const r of removed) {
+          if (r.requestId) await firebaseDB.collection('registration_requests').doc(r.requestId).delete().catch(() => {});
+        }
+        if (acc?.uid && !['approved','active'].includes(String(acc.status||'').toLowerCase())) {
+          await firebaseDB.collection('mc_accounts').doc(acc.uid).delete().catch(() => {});
+        }
+      }
+    } catch (e) {
+      console.warn('[Admin] Suppression cloud demande :', e);
+    }
+
+    App.toast('🗑️ Demande supprimée.');
+    App.closeModal?.();
+    App.navigateTo('dashboard');
+  }
+
   /** Écrit users/mc_accounts/registration_requests via DB.pushAndReport()
       (confirme le succès, ne masque plus l'échec — Étape 2). */
   async function pushRegistrationCloud(uid, account, status) {
@@ -158,7 +199,7 @@ const AdminModule = (() => {
   }
 
   function renderPendingRow(a) {
-    const uid = a.uid || a.requesterUid || '';
+    const uid = a.uid || a.requesterUid || a.requestId || '';
     const role = safeRole(a.role || a.requesterRole);
     const numberLabel = role === 'doctor' ? 'N° Ordre' : 'Matricule';
     return `
@@ -179,6 +220,9 @@ const AdminModule = (() => {
         <div style="display:flex;gap:.5rem;margin-top:.65rem;flex-wrap:wrap">
           <button class="btn btn-primary btn-sm" onclick="AdminModule.openDetail('${esc(uid)}')">
             🔍 Vérifier la demande
+          </button>
+          <button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="AdminModule.deleteRequest('${esc(uid)}')">
+            🗑️ Supprimer
           </button>
         </div>
       </div>`;
@@ -297,7 +341,21 @@ const AdminModule = (() => {
   async function approve(uid) {
     const accounts = getAccountsSafe();
     const idx = accounts.findIndex(a => a.uid === uid);
-    if (idx === -1) { App.toast('❌ Compte introuvable pour cette demande.', 'error'); return; }
+    if (idx === -1) {
+      // Demande SANS compte mc_accounts (source 'request' pure) : le cas
+      // des fantômes. Impossible d'activer un compte inexistant — on clôt
+      // la demande pour qu'elle quitte la liste (option de purge offerte
+      // par le bouton 🗑️ Supprimer distinct).
+      const row = getRegistrationRows().find(x => x.requesterUid === uid || x.uid === uid);
+      if (!row) { App.toast('❌ Demande introuvable.', 'error'); return; }
+      if (!confirm('Cette demande n\'a aucun compte associé (probablement obsolète). La retirer de la liste ?')) return;
+      updateRegistrationRequests(row.requestId || uid, 'approved');
+      await pushRegistrationCloud(row.requestId || uid, { ...row, status: 'approved' }, 'approved');
+      App.toast('✅ Demande clôturée.');
+      App.closeModal?.();
+      App.navigateTo('dashboard');
+      return;
+    }
     if (!confirm('Approuver cette demande après vérification des informations ?')) return;
 
     accounts[idx].status      = 'approved';
@@ -489,7 +547,7 @@ const AdminModule = (() => {
   }
 
   return {
-    renderDashboard, approve, reject, suspend, openDetail,
+    renderDashboard, approve, reject, suspend, openDetail, deleteRequest,
     openBroadcast, sendBroadcast,
     openRegistryManager, openAddToRegistry, saveToRegistry,
   };
