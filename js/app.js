@@ -73,6 +73,7 @@ const App = (() => {
       { label:I18n.t('nav_patients'),      icon:'👥', s:'patients'      },
       { label:I18n.t('nav_consultations'), icon:'🩺', s:'consultations' },
       { label:I18n.t('nav_prescriptions'), icon:'💊', s:'prescriptions' },
+      { label:'Transferts',                icon:'🚑', s:'transfers'     },
       { label:I18n.t('nav_lab'),           icon:'🧪', s:'lab'           },
       { label:I18n.t('nav_appointments'),  icon:'📅', s:'appointments'  },
       { label:I18n.t('nav_inbox'),         icon:'📨', s:'inbox'         },
@@ -84,6 +85,7 @@ const App = (() => {
       { label:I18n.t('nav_patients'),      icon:'👥', s:'patients'      },
       { label:I18n.t('nav_prescriptions'), icon:'💊', s:'prescriptions' },
       { label:I18n.t('nav_vaccinations'),  icon:'💉', s:'vaccinations'  },
+      { label:'Transferts',                icon:'🚑', s:'transfers'     },
       { label:I18n.t('nav_appointments'),  icon:'📅', s:'appointments'  },
       { label:I18n.t('nav_inbox'),         icon:'📨', s:'inbox'         },
       { label:I18n.t('nav_hospitals'),     icon:'🏥', s:'hospitals'     },
@@ -135,6 +137,9 @@ const App = (() => {
         // vue établissement, filtrée par consentement dans itemInContext.
         if (role === 'doctor' || role === 'admin' || role === 'nurse') HospitalPortal.renderPrescriptions(main);
         else PatientPortal.renderPrescriptions(main);
+        break;
+      case 'transfers':
+        HospitalPortal.renderTransfers(main);
         break;
 
       case 'lab':

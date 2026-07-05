@@ -306,6 +306,9 @@ const PatientPortal = (() => {
       doctor:     document.getElementById('v-doc').value,
       next_date:  document.getElementById('v-next').value,
       notes:      document.getElementById('v-notes').value,
+      // Tampon établissement : sans lui, la vaccination ne remonte
+      // pas dans l'hôpital courant et échappe au filtre de contexte.
+      ...(window.HospitalPortal?.currentEstablishmentFields?.() || {}),
     });
     App.closeModal(); App.toast('✅ Vaccination enregistrée'); App.navigateTo('vaccinations');
   }

@@ -673,6 +673,80 @@ const HospitalPortal = (() => {
     }
   }
 
+  /* ── ÉCRAN TRANSFERTS & PARTAGES ENTRANTS ──────────
+     Les modules EmergencyTransferModule et
+     MedicalRecordSharing créaient des transferts/partages
+     mais RIEN ne les recevait côté UI : cet écran comble le trou
+     (transferts entrants actionnables + dossiers partagés actifs). */
+  function renderTransfers(main) {
+    const h = window.HospitalsRegistry?.getCurrentHospital?.();
+    if (!h) { main.innerHTML = `<div class="card empty-state"><p>Sélectionnez un établissement actif.</p></div>`; return; }
+    const hid = h.establishmentId || h.hid;
+
+    let incoming = [], shares = [];
+    try { incoming = EmergencyTransferModule.getIncomingTransfers(hid) || []; } catch (_) {}
+    try { shares   = MedicalRecordSharing.getActiveSharesForHospital(hid) || []; } catch (_) {}
+
+    const STL = { requested:'📨 Demandé', accepted:'✅ Accepté', in_transit:'🚑 En route', arrived:'🏥 Arrivé' };
+
+    main.innerHTML = `
+      <div class="page-header"><h2>🚑 Transferts & partages</h2></div>
+
+      <div class="card">
+        <h3>Transferts entrants</h3>
+        ${!incoming.length ? `<p class="muted">Aucun transfert entrant.</p>` :
+          incoming.sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||''))).map(tr => `
+          <div class="record-card">
+            <p><strong>${esc(tr.patientName || tr.patientId || '—')}</strong> · ${STL[tr.status] || esc(tr.status)}</p>
+            <p class="muted">Depuis : ${esc(tr.fromHospitalName || tr.fromHospitalId || '—')} · Priorité : ${esc(tr.priority || '—')}</p>
+            ${tr.reason ? `<p>Motif : ${esc(tr.reason)}</p>` : ''}
+            <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.4rem">
+              ${tr.status === 'requested' ? `<button class="btn btn-primary btn-sm" onclick="HospitalPortal.acceptIncomingTransfer('${esc(tr.transferId || tr.id)}')">Accepter</button>` : ''}
+              ${tr.status === 'accepted' || tr.status === 'in_transit' ? `<button class="btn btn-ghost btn-sm" onclick="HospitalPortal.acceptIncomingTransfer('${esc(tr.transferId || tr.id)}','arrived')">Marquer arrivé</button>` : ''}
+              ${tr.status === 'arrived' ? `<button class="btn btn-ghost btn-sm" style="color:var(--secondary)" onclick="HospitalPortal.acceptIncomingTransfer('${esc(tr.transferId || tr.id)}','completed')">Finaliser</button>` : ''}
+            </div>
+          </div>`).join('')}
+      </div>
+
+      <div class="card">
+        <h3>Dossiers partagés avec nous</h3>
+        ${!shares.length ? `<p class="muted">Aucun dossier partagé actif.</p>` :
+          shares.map(s => `
+          <div class="record-card">
+            <p><strong>${esc(s.patientName || s.patientId || '—')}</strong></p>
+            <p class="muted">De : ${esc(s.fromHospitalName || s.fromHospitalId || '—')} · Expire le ${esc(String(s.expiresAt||'').slice(0,10))}</p>
+            <p class="muted">Sections : ${esc((s.allowedSections||[]).join(', ') || '—')}</p>
+          </div>`).join('')}
+      </div>
+    `;
+  }
+
+  async function acceptIncomingTransfer(transferId, action = 'accept') {
+    try {
+      const user = Auth.getUser() || {};
+      if (action === 'arrived')        await EmergencyTransferModule.markArrived(transferId);
+      else if (action === 'completed') await EmergencyTransferModule.completeTransfer(transferId);
+      else                             await EmergencyTransferModule.acceptTransfer(transferId, user.uid || '');
+      App.toast('✅ Transfert mis à jour.');
+      App.navigateTo('transfers');
+    } catch (e) {
+      console.error('[Transfers] acceptIncomingTransfer :', e);
+      App.toast(e.message || 'Erreur sur le transfert.', 'error');
+    }
+  }
+
+  async function approveIncomingShare(shareId) {
+    try {
+      const user = Auth.getUser() || {};
+      await MedicalRecordSharing.approveShare(shareId, user.uid || '');
+      App.toast('✅ Partage approuvé.');
+      App.navigateTo('transfers');
+    } catch (e) {
+      console.error('[Transfers] approveIncomingShare :', e);
+      App.toast(e.message || 'Erreur sur le partage.', 'error');
+    }
+  }
+
   return {
     render, filter, openDetail, openNewPatient, saveNewPatient, deletePatient,
     openExternalSearch, searchExternalPatient, requestPatientAccess,
@@ -680,6 +754,8 @@ const HospitalPortal = (() => {
     openPrescriptionTarget, confirmPrescriptionTarget,
     renderConsultations, renderPrescriptions,
     openEmergencyTransfer, confirmEmergencyTransfer,
+    currentEstablishmentFields,
+    renderTransfers, acceptIncomingTransfer, approveIncomingShare,
   };
 })();
 
