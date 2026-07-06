@@ -151,30 +151,20 @@ const HospitalAuth = (() => {
       const est = await findByOfficialId(mat);
       if (!est) { App.toast('Établissement introuvable pour ce matricule.', 'error'); return; }
 
-      // 1) Session Firebase Auth RÉELLE (identité request.auth pour les
-      //    règles serveur). L'email est dérivé du matricule.
-      if (typeof firebaseAuth !== 'undefined' && firebaseAuth) {
-        try {
-          await firebaseAuth.signInWithEmailAndPassword(establishmentEmail(est.officialId), pw);
-        } catch (authErr) {
-          // Mot de passe refusé par Firebase = mauvais mot de passe
-          // (ou compte établissement pas encore créé côté Auth).
-          console.warn('[HospitalAuth] Auth établissement :', authErr?.code || authErr?.message);
-          App.toast('Mot de passe incorrect ou établissement non activé. Contactez l\'administration.', 'error');
-          return;
-        }
-      }
-
-      // 2) Double vérification locale par empreinte (défense en profondeur).
+      // Vérification du mot de passe hôpital (première barrière d'accès
+      // à l'établissement). NB : la vraie session Firebase sera celle de
+      // l'AGENT, pas de l'établissement — c'est ce qui permet au serveur
+      // de distinguer médecin/laborantin. On ne fait donc PAS de
+      // signInWithEmailAndPassword établissement ici.
       if (est.passwordHash) {
         const hash = await hashPassword(pw);
-        if (hash !== est.passwordHash) {
-          if (firebaseAuth?.signOut) { try { await firebaseAuth.signOut(); } catch (_) {} }
-          App.toast('Mot de passe incorrect.', 'error'); return;
-        }
+        if (hash !== est.passwordHash) { App.toast('Mot de passe incorrect.', 'error'); return; }
+      } else {
+        App.toast('Cet établissement n\'a pas encore de mot de passe défini. Contactez l\'administration.', 'error');
+        return;
       }
 
-      // Établissement authentifié → identification de l'agent.
+      // Établissement déverrouillé → connexion personnelle de l'agent.
       renderRolePicker(est);
     } catch (e) {
       console.error('[HospitalAuth] login :', e);
@@ -182,76 +172,100 @@ const HospitalAuth = (() => {
     }
   }
 
-  /* ── VÉRIFICATION DE L'AGENT PAR NUMÉRO PROFESSIONNEL ──
-     Le rôle ne se CHOISIT pas : l'agent saisit son numéro d'ordre
-     (médecin) ou matricule (infirmier, pharmacien, labo…). On le
-     retrouve dans le staff VÉRIFIÉ de l'établissement, et son rôle
-     + niveau d'accès en découlent. Un laborantin ne peut donc pas
-     se présenter comme médecin. */
+  /* ── CONNEXION PERSONNELLE DE L'AGENT ──────────────────
+     Chaque agent se connecte avec SON PROPRE compte (numéro
+     professionnel + mot de passe personnel). Cela crée une vraie
+     session Firebase Auth À SON NOM : le serveur lit alors son
+     rôle réel (users/{uid}.role) et distingue médecin, laborantin,
+     etc. — le verrouillage de capacité devient effectif côté
+     serveur, par personne. L'agent doit être affilié au staff de
+     l'établissement. */
   function renderRolePicker(est) {
     const scr = document.getElementById('auth-screen');
     scr.innerHTML = `
       <div class="hospital-auth-wrap">
         <div class="hospital-auth-card">
           <div class="hospital-auth-brand">🏥 <strong>${esc(est.name || 'Établissement')}</strong><span>Matricule ${esc(est.officialId || '')}</span></div>
-          <p style="margin:.5rem 0 1rem;opacity:.75">Identifiez-vous avec votre numéro professionnel (numéro d'ordre pour les médecins, matricule pour les autres) :</p>
+          <p style="margin:.5rem 0 1rem;opacity:.75">Connectez-vous avec votre compte professionnel personnel :</p>
+          <div class="form-group">
+            <label>Rôle</label>
+            <select id="ha-agent-role">
+              <option value="doctor">Médecin</option>
+              <option value="nurse">Infirmier(e)</option>
+              <option value="pharmacist">Pharmacie</option>
+              <option value="lab">Laboratoire</option>
+              <option value="reception">Réception</option>
+            </select>
+          </div>
           <div class="form-group">
             <label>Numéro d'ordre / matricule</label>
             <input id="ha-agent-num" placeholder="Votre numéro professionnel" autocomplete="off">
           </div>
-          <button class="btn btn-primary btn-full" onclick="HospitalAuth.verifyAgent('${esc(est.establishmentId || est.id)}')">Vérifier et entrer</button>
+          <div class="form-group">
+            <label>Mot de passe personnel</label>
+            <input id="ha-agent-pw" type="password" placeholder="••••••••">
+          </div>
+          <button class="btn btn-primary btn-full" onclick="HospitalAuth.verifyAgent('${esc(est.establishmentId || est.id)}')">Se connecter</button>
           <div id="ha-agent-msg" style="margin-top:.8rem"></div>
           <button class="btn btn-ghost btn-full" style="margin-top:1rem" onclick="HospitalAuth.renderScreen()">← Retour</button>
         </div>
       </div>`;
   }
 
-  /* Cherche l'agent dans le staff de l'établissement (source de
-     vérité du rôle au sein de l'hôpital), avec repli sur les
-     registres professionnels vérifiés. */
-  function findAgent(est, number) {
+  /* Vérifie l'affiliation de l'agent au staff de l'établissement
+     (le rôle au sein de l'hôpital). L'AUTHENTIFICATION, elle, se
+     fait par le vrai compte Firebase de l'agent dans verifyAgent. */
+  function findStaffRole(est, uid, number, role) {
     const num = String(number || '').trim().toUpperCase();
-    if (!num) return null;
-
-    // 1) staff de l'établissement (rôle affilié + validé par l'admin)
     const staff = Array.isArray(est.staff) ? est.staff : [];
-    const member = staff.find(s =>
-      String(s.professionalNumber || '').toUpperCase() === num &&
-      (s.status === 'active' || s.status === 'approved'));
-    if (member) {
-      return { role: member.role, name: member.name, professionalNumber: num, source: 'staff' };
+    // Priorité : correspondance par uid (identité authentifiée).
+    let member = staff.find(s => s.uid === uid && (s.status === 'active' || s.status === 'approved'));
+    // Repli : par numéro professionnel (agent affilié avant d'avoir un uid lié).
+    if (!member) {
+      member = staff.find(s =>
+        String(s.professionalNumber || '').toUpperCase() === num &&
+        (s.status === 'active' || s.status === 'approved'));
     }
-
-    // 2) registres professionnels vérifiés (identité nationale)
-    //    — n'accorde PAS l'accès seul : il faut être dans le staff.
-    //    Ici on distingue "numéro inconnu" de "connu mais non affilié".
-    const inRegistry =
-      window.ACL?.getVerifiedDoctors?.().some(d => String(d.order_num||'').toUpperCase() === num) ||
-      window.ACL?.getVerifiedNurses?.().some(n => String(n.matricule||'').toUpperCase() === num) ||
-      window.ACL?.getVerifiedPharmacists?.().some(p => String(p.matricule||'').toUpperCase() === num);
-    if (inRegistry) return { notAffiliated: true };
-
-    return null;
+    return member || null;
   }
 
-  function verifyAgent(establishmentId) {
+  async function verifyAgent(establishmentId) {
     const est = (window.HospitalsRegistry?.getHospitalById?.(establishmentId)) || { establishmentId };
-    const num = document.getElementById('ha-agent-num').value.trim();
-    const msg = document.getElementById('ha-agent-msg');
-    if (!num) { App.toast('Numéro professionnel requis.', 'error'); return; }
+    const role = document.getElementById('ha-agent-role').value;
+    const num  = document.getElementById('ha-agent-num').value.trim();
+    const pw   = document.getElementById('ha-agent-pw').value;
+    const msg  = document.getElementById('ha-agent-msg');
+    if (!num || !pw) { App.toast('Numéro et mot de passe requis.', 'error'); return; }
 
-    const agent = findAgent(est, num);
-    if (!agent) {
-      msg.innerHTML = `<div class="auth-register-info" style="border-color:var(--danger)">❌ Numéro non reconnu pour cet établissement. Demandez à l'administration de vous affilier.</div>`;
+    // 1) Authentification PERSONNELLE de l'agent (vraie session Firebase
+    //    à son nom → le serveur lira SON rôle). On réutilise le login
+    //    professionnel existant (Auth.loginProfessional) qui résout le
+    //    compte par numéro + rôle et fait signInWithEmailAndPassword.
+    let account = null;
+    try {
+      account = await window.Auth?.loginProfessionalSilently?.(role, num, pw);
+    } catch (_) { account = null; }
+
+    if (!account) {
+      msg.innerHTML = `<div class="auth-register-info" style="border-color:var(--danger)">❌ Identifiants incorrects. Utilisez votre numéro professionnel et votre mot de passe personnel (le même que sur mobile).</div>`;
       return;
     }
-    if (agent.notAffiliated) {
-      msg.innerHTML = `<div class="auth-register-info" style="border-color:var(--accent)">⚠️ Vous êtes vérifié, mais pas encore affilié à cet établissement. L'administration doit valider votre affiliation.</div>`;
+
+    // 2) Vérifier l'affiliation au staff de l'établissement.
+    const member = findStaffRole(est, account.uid, num, role);
+    if (!member) {
+      msg.innerHTML = `<div class="auth-register-info" style="border-color:var(--accent)">⚠️ Vous êtes authentifié, mais pas affilié à cet établissement. L'administration doit valider votre affiliation.</div>`;
+      if (firebaseAuth?.signOut) { try { await firebaseAuth.signOut(); } catch (_) {} }
       return;
     }
 
-    // Rôle VÉRIFIÉ → entrée avec le niveau d'accès correspondant.
-    enter(establishmentId, agent.role, { name: agent.name, professionalNumber: agent.professionalNumber });
+    // Rôle de session = rôle vérifié dans le staff (source de vérité
+    // de l'affiliation), qui doit concorder avec le compte.
+    enter(establishmentId, member.role || account.role || role, {
+      name: account.name || member.name,
+      professionalNumber: num,
+      uid: account.uid,
+    });
   }
 
   function enter(establishmentId, role, agentInfo = {}) {
@@ -262,6 +276,7 @@ const HospitalAuth = (() => {
       officialId: est.officialId || '',
       role,
       agentName: agentInfo.name || '',
+      agentUid: agentInfo.uid || '',
       professionalNumber: agentInfo.professionalNumber || '',
       loggedAt: new Date().toISOString(),
     };

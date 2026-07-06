@@ -744,8 +744,46 @@ const Auth = (() => {
   function getRoleIcon(r)  { return ICONS[r]  || '👤'; }
   function getRoleLabel(r) { return LABELS[r] || r; }
 
+  /* Authentifie un professionnel SANS démarrer le shell mobile.
+     Utilisé par la connexion agent desktop : retourne le compte
+     (avec uid Firebase réel) ou null. Gère aussi lab/reception,
+     qui n'ont pas de registre dédié : on résout alors via users/
+     mc_accounts par matricule + rôle. */
+  async function loginProfessionalSilently(role, num, pass) {
+    try {
+      // doctor/nurse/pharmacist : chemin existant (registres + auth).
+      if (['doctor', 'nurse', 'pharmacist'].includes(role)) {
+        return await _restoreProfessional(role, num, pass);
+      }
+      // lab/reception : résolution directe par users/mc_accounts.
+      if (!_hasFirebaseDB()) return null;
+      const N = String(num || '').toUpperCase();
+      let data = null;
+      for (const col of ['users', 'mc_accounts']) {
+        for (const field of ['matricule', 'order_num', 'username']) {
+          const snap = await firebaseDB.collection(col)
+            .where('role', '==', role).where(field, '==', N).limit(1).get();
+          if (!snap.empty) { data = { id: snap.docs[0].id, ...snap.docs[0].data() }; break; }
+        }
+        if (data) break;
+      }
+      if (!data) return null;
+      if (data.email && _hasFirebaseAuth()) {
+        const cred = await firebaseAuth.signInWithEmailAndPassword(data.email, pass);
+        data.uid = cred?.user?.uid || data.uid;
+        data.authUid = data.uid;
+      } else if (data.password && data.password !== pass) {
+        return null;
+      }
+      return _upsertAccount(data);
+    } catch (e) {
+      console.warn('[MedConnect] loginProfessionalSilently :', e?.code || e?.message);
+      return null;
+    }
+  }
+
   return {
-    getUser, isLogged, logout, showLogin,
+    getUser, isLogged, logout, showLogin, loginProfessionalSilently,
     _tab, _loginRole, _registerRole,
     _doPatient, _createPatientPin, _doDoctor, _doPharmacist, _doNurse,
     _regDoctor, _regPharmacist, _regNurse,

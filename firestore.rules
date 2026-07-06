@@ -42,41 +42,36 @@ service cloud.firestore {
         (hasCurrentUserDoc() && get(currentUserDoc()).data.role == role)
       );
     }
-    // 'hospital' = compte d'établissement authentifié (connexion
-    // desktop). C'est l'identité Firebase que porte tout agent en
-    // session desktop. Le rôle FIN de l'agent (médecin/labo/…) est
-    // vérifié côté client via le staff de l'établissement ; le serveur
-    // garantit ici que l'écriture émane d'un établissement authentifié.
-    // Le compte doit être validé (status actif) — voir isActiveHospital.
-    function isActiveHospital() {
-      return signedIn() && hasCurrentUserDoc() &&
-        get(currentUserDoc()).data.role == 'hospital' &&
-        get(currentUserDoc()).data.status in ['active', 'approved'];
-    }
+    // 'hospital' = compte propriétaire d'un établissement (créé à
+    // l'inscription desktop). Il n'écrit PAS de données médicales
+    // lui-même : chaque agent s'authentifie avec SON compte personnel,
+    // et c'est SON rôle réel (doctor/nurse/lab/reception) que les
+    // capacités ci-dessous vérifient. Le serveur distingue donc les
+    // agents entre eux.
     // Décider/valider un acte médical : médecin (ou admin plateforme/hôpital)
     function canDecideMedical() {
-      return isAdmin() || hasRole('doctor') || hasRole('admin_hospital') || isActiveHospital();
+      return isAdmin() || hasRole('doctor') || hasRole('admin_hospital');
     }
     // Prescrire : strictement médecin
     function canPrescribe() {
-      return isAdmin() || hasRole('doctor') || isActiveHospital();
+      return isAdmin() || hasRole('doctor');
     }
     // Décider un transfert médical : médecin (ou admin hôpital)
     function canDecideTransfer() {
-      return isAdmin() || hasRole('doctor') || hasRole('admin_hospital') || isActiveHospital();
+      return isAdmin() || hasRole('doctor') || hasRole('admin_hospital');
     }
     // Admettre / sortir / gérer lits : personnel de soins
     function canManageCare() {
-      return isAdmin() || hasRole('doctor') || hasRole('nurse') || hasRole('admin_hospital') || isActiveHospital();
+      return isAdmin() || hasRole('doctor') || hasRole('nurse') || hasRole('admin_hospital');
     }
     // Saisir un résultat de labo : laborantin (ou médecin/admin)
     function canEnterLabResult() {
-      return isAdmin() || hasRole('lab') || hasRole('doctor') || hasRole('admin_hospital') || isActiveHospital();
+      return isAdmin() || hasRole('lab') || hasRole('doctor') || hasRole('admin_hospital');
     }
     // Enregistrer une arrivée / créer patient à l'accueil : réception + soignants
     function canRegisterPatient() {
       return isAdmin() || hasRole('doctor') || hasRole('nurse') ||
-             hasRole('reception') || hasRole('admin_hospital') || isActiveHospital();
+             hasRole('reception') || hasRole('admin_hospital');
     }
 
     /* ── Abonnement établissement (contrat mobile ↔ desktop) ──
