@@ -23,6 +23,14 @@ const HospitalAuth = (() => {
 
   const SESSION_KEY = 'mc_hospital_session';
 
+  // Domaine technique pour les comptes établissement Firebase Auth.
+  // L'agent ne le voit jamais : il saisit matricule + mot de passe,
+  // on dérive l'email de façon déterministe pour signInWithEmailAndPassword.
+  const EST_EMAIL_DOMAIN = 'etablissement.medconnect';
+  function establishmentEmail(officialId) {
+    return `est_${String(officialId||'').trim().toLowerCase().replace(/[^a-z0-9]/g,'')}@${EST_EMAIL_DOMAIN}`;
+  }
+
   const DESK_ROLES = [
     { key:'admin_hospital', label:'Administration hôpital', icon:'🏛️' },
     { key:'doctor',         label:'Médecin',                icon:'👨‍⚕️' },
@@ -142,14 +150,31 @@ const HospitalAuth = (() => {
 
       const est = await findByOfficialId(mat);
       if (!est) { App.toast('Établissement introuvable pour ce matricule.', 'error'); return; }
-      if (!est.passwordHash) {
-        App.toast('Cet établissement n\'a pas encore de mot de passe défini. Contactez l\'administration.', 'error');
-        return;
-      }
-      const hash = await hashPassword(pw);
-      if (hash !== est.passwordHash) { App.toast('Mot de passe incorrect.', 'error'); return; }
 
-      // Établissement authentifié → choix du rôle de l'agent.
+      // 1) Session Firebase Auth RÉELLE (identité request.auth pour les
+      //    règles serveur). L'email est dérivé du matricule.
+      if (typeof firebaseAuth !== 'undefined' && firebaseAuth) {
+        try {
+          await firebaseAuth.signInWithEmailAndPassword(establishmentEmail(est.officialId), pw);
+        } catch (authErr) {
+          // Mot de passe refusé par Firebase = mauvais mot de passe
+          // (ou compte établissement pas encore créé côté Auth).
+          console.warn('[HospitalAuth] Auth établissement :', authErr?.code || authErr?.message);
+          App.toast('Mot de passe incorrect ou établissement non activé. Contactez l\'administration.', 'error');
+          return;
+        }
+      }
+
+      // 2) Double vérification locale par empreinte (défense en profondeur).
+      if (est.passwordHash) {
+        const hash = await hashPassword(pw);
+        if (hash !== est.passwordHash) {
+          if (firebaseAuth?.signOut) { try { await firebaseAuth.signOut(); } catch (_) {} }
+          App.toast('Mot de passe incorrect.', 'error'); return;
+        }
+      }
+
+      // Établissement authentifié → identification de l'agent.
       renderRolePicker(est);
     } catch (e) {
       console.error('[HospitalAuth] login :', e);
@@ -271,11 +296,43 @@ const HospitalAuth = (() => {
       if (existing) { App.toast('Un établissement existe déjà avec ce matricule.', 'error'); return; }
 
       const passwordHash = await hashPassword(pw);
+
+      // 1) Compte Firebase Auth de l'établissement (identité serveur).
+      let authUid = '';
+      if (typeof firebaseAuth !== 'undefined' && firebaseAuth) {
+        try {
+          const cred = await firebaseAuth.createUserWithEmailAndPassword(
+            establishmentEmail(mat), pw);
+          authUid = cred?.user?.uid || '';
+          // Document users/{uid} : rôle 'hospital', statut 'pending'
+          // (validé par l'admin comme les autres inscriptions).
+          if (authUid && typeof firebaseDB !== 'undefined' && firebaseDB) {
+            await firebaseDB.collection('users').doc(authUid).set({
+              uid: authUid,
+              role: 'hospital',
+              status: 'pending',
+              name: name,
+              officialId: mat.toUpperCase(),
+              establishmentName: name,
+            }, { merge: true });
+          }
+        } catch (authErr) {
+          if (authErr?.code === 'auth/email-already-in-use') {
+            App.toast('Un établissement existe déjà avec ce matricule.', 'error'); return;
+          }
+          console.warn('[HospitalAuth] Création compte établissement :', authErr?.code || authErr?.message);
+          App.toast('Création du compte impossible : ' + (authErr?.message || authErr), 'error');
+          return;
+        }
+      }
+
+      // 2) Document établissement (registre métier).
       const est = window.HospitalsRegistry?.addHospital?.({
         name,
         officialId: mat.toUpperCase(),
         city,
         passwordHash,
+        authUid,
         status: 'pending', // validation par l'admin MedConnect
         registeredFrom: 'desktop',
       });
@@ -292,6 +349,9 @@ const HospitalAuth = (() => {
 
   function logout() {
     clearSession();
+    if (typeof firebaseAuth !== 'undefined' && firebaseAuth?.signOut) {
+      try { firebaseAuth.signOut(); } catch (_) {}
+    }
     renderScreen();
   }
 

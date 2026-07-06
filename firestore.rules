@@ -42,30 +42,41 @@ service cloud.firestore {
         (hasCurrentUserDoc() && get(currentUserDoc()).data.role == role)
       );
     }
+    // 'hospital' = compte d'établissement authentifié (connexion
+    // desktop). C'est l'identité Firebase que porte tout agent en
+    // session desktop. Le rôle FIN de l'agent (médecin/labo/…) est
+    // vérifié côté client via le staff de l'établissement ; le serveur
+    // garantit ici que l'écriture émane d'un établissement authentifié.
+    // Le compte doit être validé (status actif) — voir isActiveHospital.
+    function isActiveHospital() {
+      return signedIn() && hasCurrentUserDoc() &&
+        get(currentUserDoc()).data.role == 'hospital' &&
+        get(currentUserDoc()).data.status in ['active', 'approved'];
+    }
     // Décider/valider un acte médical : médecin (ou admin plateforme/hôpital)
     function canDecideMedical() {
-      return isAdmin() || hasRole('doctor') || hasRole('admin_hospital');
+      return isAdmin() || hasRole('doctor') || hasRole('admin_hospital') || isActiveHospital();
     }
     // Prescrire : strictement médecin
     function canPrescribe() {
-      return isAdmin() || hasRole('doctor');
+      return isAdmin() || hasRole('doctor') || isActiveHospital();
     }
     // Décider un transfert médical : médecin (ou admin hôpital)
     function canDecideTransfer() {
-      return isAdmin() || hasRole('doctor') || hasRole('admin_hospital');
+      return isAdmin() || hasRole('doctor') || hasRole('admin_hospital') || isActiveHospital();
     }
     // Admettre / sortir / gérer lits : personnel de soins
     function canManageCare() {
-      return isAdmin() || hasRole('doctor') || hasRole('nurse') || hasRole('admin_hospital');
+      return isAdmin() || hasRole('doctor') || hasRole('nurse') || hasRole('admin_hospital') || isActiveHospital();
     }
     // Saisir un résultat de labo : laborantin (ou médecin/admin)
     function canEnterLabResult() {
-      return isAdmin() || hasRole('lab') || hasRole('doctor') || hasRole('admin_hospital');
+      return isAdmin() || hasRole('lab') || hasRole('doctor') || hasRole('admin_hospital') || isActiveHospital();
     }
     // Enregistrer une arrivée / créer patient à l'accueil : réception + soignants
     function canRegisterPatient() {
       return isAdmin() || hasRole('doctor') || hasRole('nurse') ||
-             hasRole('reception') || hasRole('admin_hospital');
+             hasRole('reception') || hasRole('admin_hospital') || isActiveHospital();
     }
 
     /* ── Abonnement établissement (contrat mobile ↔ desktop) ──
@@ -176,7 +187,10 @@ service cloud.firestore {
     }
 
     function publicUserRole(role) {
-      return role in ['patient', 'doctor', 'nurse', 'pharmacist'];
+      // 'hospital' : compte d'établissement (connexion desktop par
+      // matricule). Auto-créé en statut 'pending', validé par l'admin
+      // comme les autres inscriptions professionnelles.
+      return role in ['patient', 'doctor', 'nurse', 'pharmacist', 'hospital'];
     }
 
     function hasNoSecretFields(data) {

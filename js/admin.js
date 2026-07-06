@@ -638,6 +638,20 @@ const AdminModule = (() => {
       }, { merge: true });
 
       window.ExchangeBridge?.invalidateSubscriptionCache?.(hospitalId);
+
+      // Active aussi le COMPTE établissement (users/{authUid}, rôle
+      // 'hospital') : rend isActiveHospital() vrai côté règles, donc
+      // autorise les écritures depuis la session desktop.
+      try {
+        const _h = window.HospitalsRegistry?.getHospitalById?.(hospitalId);
+        if (_h?.authUid) {
+          await firebaseDB.collection('users').doc(_h.authUid).set({
+            status: 'active', role: 'hospital',
+          }, { merge: true });
+        }
+      } catch (accErr) {
+        console.warn('[Admin] Activation compte établissement :', accErr?.message || accErr);
+      }
       try {
         await window.CloudDB?.createAuditLog?.('subscription_activated', 'subscriptions', hospitalId, { plan, months });
       } catch (_) {}
