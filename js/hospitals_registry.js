@@ -91,7 +91,16 @@ const HospitalsRegistry = (() => {
     const requesterRole = raw.requesterRole || raw.role || account.role || 'doctor';
     const professionalNumber = raw.professionalNumber || raw.order_num || raw.matricule ||
       account.order_num || account.matricule || account.username || '';
-    const requestId = raw.requestId || raw.afid || DB.makeId('AFF');
+    // requestId STABLE : ne JAMAIS régénérer un ID aléatoire à la
+    // lecture — sinon l'ID affiché sur le bouton diffère de l'ID
+    // retrouvé au clic, et respondAffiliation ne trouve pas la
+    // demande (bouton sans effet). Si l'ID manque, on le dérive de
+    // façon DÉTERMINISTE de l'identité de la demande, pour que la
+    // même demande produise toujours le même ID.
+    const requestId = raw.requestId || raw.afid ||
+      ((requesterUid && establishmentId)
+        ? `AFF_${requesterUid}_${establishmentId}`
+        : DB.makeId('AFF'));
     const createdAt = raw.createdAt || raw.requested_at || raw.created_at || now();
     const updatedAt = raw.updatedAt || raw.decided_at || raw.updated_at || createdAt;
     const requesterName = raw.requesterName || raw.doctor_name || account.name || '';
@@ -307,12 +316,22 @@ const HospitalsRegistry = (() => {
 
   function respondAffiliation(requestId, approved) {
     const affs = getAffiliations();
-    const idx = affs.findIndex(a => a.requestId === requestId || a.afid === requestId);
-    if (idx === -1) return;
+    let idx = affs.findIndex(a => a.requestId === requestId || a.afid === requestId);
+    // Repli : l'ID déterministe encode uid+établissement.
+    if (idx === -1 && String(requestId).startsWith('AFF_')) {
+      const parts = String(requestId).slice(4).split('_');
+      const estId = parts.pop();
+      const uid = parts.join('_');
+      idx = affs.findIndex(a => a.requesterUid === uid && a.establishmentId === estId);
+    }
+    if (idx === -1) {
+      App?.toast?.('Demande introuvable (elle a peut-être déjà été traitée).', 'error');
+      return;
+    }
 
     const req = normalizeRequest(affs[idx]);
     const h = getHospitalById(req.establishmentId);
-    if (!h) return;
+    if (!h) { App?.toast?.('Établissement introuvable pour cette demande.', 'error'); return; }
 
     affs[idx] = normalizeRequest({
       ...req,
@@ -326,6 +345,7 @@ const HospitalsRegistry = (() => {
       upsertStaffMember(h, affs[idx]);
       updateUserAffiliation(affs[idx], h, true);
     }
+    App?.toast?.(approved ? '✅ Affiliation approuvée.' : '❌ Affiliation refusée.');
 
     if (window.Network?.notify) {
       Network.notify({
@@ -371,7 +391,28 @@ const HospitalsRegistry = (() => {
   }
 
   function getPendingAffiliations(establishmentId) {
-    return getAffiliations().filter(a => a.establishmentId === establishmentId && a.status === 'pending');
+    const h = getHospitalById(establishmentId);
+    const activeStaffUids = new Set(
+      (h?.staff || []).filter(s => s.status === 'active' || s.status === 'approved').map(s => s.uid));
+    // Une demande dont l'agent est DÉJÀ membre actif n'est plus « en
+    // attente » : c'est l'incohérence observée (personne active ET
+    // demande pending). On l'exclut de la file, et on réconcilie son
+    // statut en base pour ne plus la revoir.
+    const stillPending = [];
+    const toReconcile = [];
+    getAffiliations().forEach(a => {
+      if (a.establishmentId !== establishmentId || a.status !== 'pending') return;
+      if (activeStaffUids.has(a.requesterUid)) toReconcile.push(a);
+      else stillPending.push(a);
+    });
+    if (toReconcile.length) {
+      const all = getAffiliations().map(a =>
+        toReconcile.find(t => t.requestId === a.requestId)
+          ? { ...a, status: 'approved', decided_at: a.decided_at || now(), updatedAt: now() }
+          : a);
+      saveAffiliations(all);
+    }
+    return stillPending;
   }
 
   /* ── CONTEXTE ACTIF ─────────────────────────────── */
@@ -633,7 +674,11 @@ const HospitalsRegistry = (() => {
   }
 
   function renderAdminRequests() {
-    const pending = getAffiliations().filter(a => a.status === 'pending');
+    // Passe par getPendingAffiliations (qui exclut et réconcilie les
+    // demandes dont l'agent est déjà membre actif) pour CHAQUE
+    // établissement — évite d'afficher les doublons 'active + pending'.
+    const pending = getHospitals()
+      .flatMap(h => getPendingAffiliations(h.establishmentId));
     const history = getAffiliations().filter(a => a.status !== 'pending').slice().reverse().slice(0, 8);
     return `
       ${pending.length ? `<div class="records-list">
@@ -807,7 +852,9 @@ const HospitalsRegistry = (() => {
 
   function renderAdminPage(main, tab = 'list') {
     const hospitals = getHospitals();
-    const pending = getAffiliations().filter(a => a.status === 'pending');
+    // Compteur cohérent avec la liste : demandes réellement en attente
+    // (hors agents déjà membres actifs), via getPendingAffiliations.
+    const pending = hospitals.flatMap(h => getPendingAffiliations(h.establishmentId));
     const content = {
       list: renderAdminList,
       add: () => `<div class="card">${renderEstablishmentForm()}</div>`,
