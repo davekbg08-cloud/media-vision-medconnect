@@ -157,33 +157,87 @@ const HospitalAuth = (() => {
     }
   }
 
-  /* ── SÉLECTION DU RÔLE DE L'AGENT ──────────────────── */
+  /* ── VÉRIFICATION DE L'AGENT PAR NUMÉRO PROFESSIONNEL ──
+     Le rôle ne se CHOISIT pas : l'agent saisit son numéro d'ordre
+     (médecin) ou matricule (infirmier, pharmacien, labo…). On le
+     retrouve dans le staff VÉRIFIÉ de l'établissement, et son rôle
+     + niveau d'accès en découlent. Un laborantin ne peut donc pas
+     se présenter comme médecin. */
   function renderRolePicker(est) {
     const scr = document.getElementById('auth-screen');
     scr.innerHTML = `
       <div class="hospital-auth-wrap">
         <div class="hospital-auth-card">
           <div class="hospital-auth-brand">🏥 <strong>${esc(est.name || 'Établissement')}</strong><span>Matricule ${esc(est.officialId || '')}</span></div>
-          <p style="margin:.5rem 0 1rem;opacity:.75">Sélectionnez votre rôle pour cette session :</p>
-          <div class="ha-role-grid">
-            ${DESK_ROLES.map(r => `
-              <button class="ha-role-btn" onclick="HospitalAuth.enter('${esc(est.establishmentId || est.id)}','${r.key}')">
-                <span class="ha-role-icon">${r.icon}</span>
-                <span>${esc(r.label)}</span>
-              </button>`).join('')}
+          <p style="margin:.5rem 0 1rem;opacity:.75">Identifiez-vous avec votre numéro professionnel (numéro d'ordre pour les médecins, matricule pour les autres) :</p>
+          <div class="form-group">
+            <label>Numéro d'ordre / matricule</label>
+            <input id="ha-agent-num" placeholder="Votre numéro professionnel" autocomplete="off">
           </div>
+          <button class="btn btn-primary btn-full" onclick="HospitalAuth.verifyAgent('${esc(est.establishmentId || est.id)}')">Vérifier et entrer</button>
+          <div id="ha-agent-msg" style="margin-top:.8rem"></div>
           <button class="btn btn-ghost btn-full" style="margin-top:1rem" onclick="HospitalAuth.renderScreen()">← Retour</button>
         </div>
       </div>`;
   }
 
-  function enter(establishmentId, role) {
+  /* Cherche l'agent dans le staff de l'établissement (source de
+     vérité du rôle au sein de l'hôpital), avec repli sur les
+     registres professionnels vérifiés. */
+  function findAgent(est, number) {
+    const num = String(number || '').trim().toUpperCase();
+    if (!num) return null;
+
+    // 1) staff de l'établissement (rôle affilié + validé par l'admin)
+    const staff = Array.isArray(est.staff) ? est.staff : [];
+    const member = staff.find(s =>
+      String(s.professionalNumber || '').toUpperCase() === num &&
+      (s.status === 'active' || s.status === 'approved'));
+    if (member) {
+      return { role: member.role, name: member.name, professionalNumber: num, source: 'staff' };
+    }
+
+    // 2) registres professionnels vérifiés (identité nationale)
+    //    — n'accorde PAS l'accès seul : il faut être dans le staff.
+    //    Ici on distingue "numéro inconnu" de "connu mais non affilié".
+    const inRegistry =
+      window.ACL?.getVerifiedDoctors?.().some(d => String(d.order_num||'').toUpperCase() === num) ||
+      window.ACL?.getVerifiedNurses?.().some(n => String(n.matricule||'').toUpperCase() === num) ||
+      window.ACL?.getVerifiedPharmacists?.().some(p => String(p.matricule||'').toUpperCase() === num);
+    if (inRegistry) return { notAffiliated: true };
+
+    return null;
+  }
+
+  function verifyAgent(establishmentId) {
+    const est = (window.HospitalsRegistry?.getHospitalById?.(establishmentId)) || { establishmentId };
+    const num = document.getElementById('ha-agent-num').value.trim();
+    const msg = document.getElementById('ha-agent-msg');
+    if (!num) { App.toast('Numéro professionnel requis.', 'error'); return; }
+
+    const agent = findAgent(est, num);
+    if (!agent) {
+      msg.innerHTML = `<div class="auth-register-info" style="border-color:var(--danger)">❌ Numéro non reconnu pour cet établissement. Demandez à l'administration de vous affilier.</div>`;
+      return;
+    }
+    if (agent.notAffiliated) {
+      msg.innerHTML = `<div class="auth-register-info" style="border-color:var(--accent)">⚠️ Vous êtes vérifié, mais pas encore affilié à cet établissement. L'administration doit valider votre affiliation.</div>`;
+      return;
+    }
+
+    // Rôle VÉRIFIÉ → entrée avec le niveau d'accès correspondant.
+    enter(establishmentId, agent.role, { name: agent.name, professionalNumber: agent.professionalNumber });
+  }
+
+  function enter(establishmentId, role, agentInfo = {}) {
     const est = (window.HospitalsRegistry?.getHospitalById?.(establishmentId)) || { establishmentId };
     const session = {
       establishmentId,
       establishmentName: est.name || '',
       officialId: est.officialId || '',
       role,
+      agentName: agentInfo.name || '',
+      professionalNumber: agentInfo.professionalNumber || '',
       loggedAt: new Date().toISOString(),
     };
     saveSession(session);
@@ -241,7 +295,7 @@ const HospitalAuth = (() => {
     renderScreen();
   }
 
-  return { renderScreen, showTab, login, register, enter, logout, getSession, hashPassword };
+  return { renderScreen, showTab, login, register, enter, verifyAgent, logout, getSession, hashPassword };
 })();
 
 window.HospitalAuth = HospitalAuth;

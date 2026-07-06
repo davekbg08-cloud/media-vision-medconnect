@@ -116,12 +116,7 @@ const HospitalDesktopUI = (() => {
   function buildShell(user, hospital) {
     const menu = HospitalPermissions.visibleMenuFor(user.role);
     const isHospitalSession = !!window.HospitalAuth?.getSession?.();
-    const accessLevel = user.role === 'admin_hospital' ? 'Accès complet'
-      : user.role === 'doctor' ? 'Accès clinique'
-      : user.role === 'nurse' ? 'Accès soins'
-      : user.role === 'lab' ? 'Accès laboratoire'
-      : user.role === 'reception' ? 'Accès accueil'
-      : user.role === 'pharmacist' ? 'Accès pharmacie' : 'Accès limité';
+    const accessLevel = window.HospitalCapabilities?.accessLevel?.(user.role) || 'Accès limité';
     return `
       <aside class="hospital-sidebar">
         <div class="hospital-sidebar-brand">
@@ -267,6 +262,14 @@ const HospitalDesktopUI = (() => {
 
   installLauncher();
 
+  /* Déclenche un transfert — MAIS seulement si le rôle en session a
+     la capacité 'decide_transfer'. Contrôle au MOMENT de l'action
+     (pas juste à l'affichage) : masquer un bouton ne suffit pas. */
+  function requestTransfer(patientId) {
+    if (!HospitalCapabilities.require(_sessionRole, 'decide_transfer')) return;
+    window.HospitalPortal?.openEmergencyTransfer?.(patientId);
+  }
+
   function logoutSession() {
     close();
     window.HospitalAuth?.logout?.();
@@ -317,8 +320,9 @@ const HospitalDesktopUI = (() => {
                   <p class="muted">${esc(p.gender||'')}${p.birthdate ? ' · né(e) le '+esc(p.birthdate) : ''}</p>
                   <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.4rem">
                     <button class="btn btn-ghost btn-sm" onclick="HospitalPortal.openDetail?.('${esc(p.id)}')">📋 Dossier</button>
+                    ${HospitalCapabilities.can(_sessionRole, 'decide_transfer') ? `
                     <button class="btn btn-ghost btn-sm" style="color:var(--danger)"
-                      onclick="HospitalPortal.openEmergencyTransfer?.('${esc(p.id)}')">🚑 Transférer avec le dossier</button>
+                      onclick="HospitalDesktopUI.requestTransfer('${esc(p.id)}')">🚑 Transférer avec le dossier</button>` : ''}
                   </div>
                 </div>`).join('')}
             </div>
@@ -326,7 +330,7 @@ const HospitalDesktopUI = (() => {
     `;
   }
 
-  return { open, openForSession, close, navigate, isOpen, logoutSession };
+  return { open, openForSession, close, navigate, isOpen, logoutSession, requestTransfer };
 })();
 
 window.HospitalDesktopUI = HospitalDesktopUI;
