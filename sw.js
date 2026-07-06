@@ -2,11 +2,11 @@
    MedConnect 2.0 — Service Worker
    Optimisation chargement / PWA
    ===================================================== */
-const CACHE = 'medconnect-v3.8';
+const CACHE = 'medconnect-v3.9';
 
 const ASSETS = [
   './', './index.html', './css/style.css', './css/establishments-balance.css',
-  './css/hospital-desktop.css',
+  './css/hospital-desktop.css', './css/mobile-layout-fixes.css',
   // SDK Firebase : ne passait JAMAIS dans le cache dynamique (réponse
   // opaque cross-origin rejetée par le check type !== 'opaque') — la
   // PWA hors-ligne échouait au chargement. Le précache via addAll
