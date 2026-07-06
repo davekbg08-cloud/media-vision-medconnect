@@ -384,11 +384,18 @@ const HospitalsRegistry = (() => {
     sessionStorage.setItem('mc_current_hospital', establishmentId);
     const h = getHospitalById(establishmentId);
     App.toast(`🏥 Établissement : ${h?.name || '—'}`);
-    if (window.App?.buildNav) App.buildNav(Auth.getUser());
+
+    // Session hôpital desktop (connexion par matricule) : il n'y a pas
+    // d'utilisateur mobile ni de shell mobile à rafraîchir — on s'arrête
+    // là pour ne pas déclencher un rendu mobile parasite.
+    const user = Auth.getUser();
+    if (!user) return;
+
+    if (window.App?.buildNav) App.buildNav(user);
     if (window.App?.navigateTo) App.navigateTo('dashboard');
     // Les listeners du contrat d'échange filtrent sur l'hôpital actif :
     // ils doivent être relancés quand il change.
-    if (window.App?.startExchangeSync) App.startExchangeSync(Auth.getUser());
+    if (window.App?.startExchangeSync) App.startExchangeSync(user);
   }
 
   function clearCurrentHospital() {

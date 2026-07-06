@@ -384,6 +384,22 @@ const App = (() => {
       DB.init().catch(error => console.warn('[MedConnect] Sync Firebase non bloquante :', error));
     }, 0);
 
+    // ── AIGUILLAGE DESKTOP vs MOBILE ──
+    // Le desktop est destiné à l'hôpital : entrée par connexion
+    // d'établissement (matricule + mot de passe), jamais l'écran
+    // mobile d'inscription médecin/patient/infirmier/pharmacien.
+    const isDesktop = window.ExchangeBridge?.currentSourceDevice?.() === 'desktop';
+    if (isDesktop && window.HospitalAuth) {
+      const hs = HospitalAuth.getSession();
+      if (hs && window.HospitalDesktopUI?.openForSession) {
+        document.getElementById('auth-screen').style.display = 'none';
+        HospitalDesktopUI.openForSession(hs);
+      } else {
+        HospitalAuth.renderScreen();
+      }
+      return;
+    }
+
     const user = Auth.getUser();
     if (user) { afterLogin(user); return; }
 

@@ -33,19 +33,54 @@ const HospitalDesktopUI = (() => {
     lab:          (c) => HospitalLabModule.render(c),
     ai:           (c) => MedicalAIModule.render(c),
     subscription: (c) => HospitalSubscriptionModule.render(c),
+    patients:     (c) => renderPatientsByYear(c),
+    reception:    (c) => renderComingSoon(c, '🛎️ Réception / Accueil', 'Enregistrement des arrivées, orientation des patients et file d\'attente.'),
+    emergency:    (c) => renderComingSoon(c, '🚑 Urgences', 'Prise en charge des urgences et transferts entrants prioritaires.'),
+    maternity:    (c) => renderComingSoon(c, '🤰 Maternité', 'Suivi des grossesses, accouchements et nouveau-nés.'),
   };
-  // Routes déjà couvertes par l'app principale → renvoi.
+  // Routes encore déléguées à l'app mobile SI elle coexiste (cas d'un
+  // usage hybride). En connexion desktop pure (session hôpital), ces
+  // sections seront progressivement rendues nativement.
   const APP_SECTIONS = {
-    patients: 'patients',
     consultations: 'consultations',
     doctors: 'hospitals',
-    pharmacy: 'pos',
     settings: 'settings',
   };
 
   let _current = 'dashboard';
+  let _sessionRole = null;
 
   function isOpen() { return !!document.getElementById(ROOT_ID); }
+
+  /* Ouverture depuis une session HOSPITALIÈRE (connexion desktop par
+     matricule). Le rôle vient de la session hôpital, pas d'un compte
+     mobile — c'est l'entrée normale du produit desktop. */
+  function openForSession(session) {
+    try {
+      if (!session?.establishmentId) { HospitalAuth?.renderScreen?.(); return; }
+      // Synthétise l'identité minimale attendue par le reste du shell.
+      _sessionRole = session.role || 'reception';
+      const hospital = window.HospitalsRegistry?.getHospitalById?.(session.establishmentId)
+        || { establishmentId: session.establishmentId, name: session.establishmentName, officialId: session.officialId };
+      const agent = { uid: 'hospital_' + session.establishmentId, role: _sessionRole, name: roleName(_sessionRole) };
+
+      if (isOpen()) { navigate(_current); return; }
+      const root = document.createElement('div');
+      root.id = ROOT_ID;
+      root.innerHTML = buildShell(agent, hospital);
+      document.body.appendChild(root);
+      document.body.classList.add('hospital-desktop-open');
+      navigate('dashboard');
+    } catch (e) {
+      console.error('[HospitalDesktopUI] openForSession :', e);
+      App.toast(e.message || "Impossible d'ouvrir l'espace hôpital.", 'error');
+    }
+  }
+
+  function roleName(role) {
+    return ({ admin_hospital:'Administration', doctor:'Médecin', nurse:'Infirmier(e)',
+      lab:'Laboratoire', reception:'Réception', pharmacist:'Pharmacie' })[role] || 'Agent';
+  }
 
   function open() {
     try {
@@ -80,13 +115,20 @@ const HospitalDesktopUI = (() => {
 
   function buildShell(user, hospital) {
     const menu = HospitalPermissions.visibleMenuFor(user.role);
+    const isHospitalSession = !!window.HospitalAuth?.getSession?.();
+    const accessLevel = user.role === 'admin_hospital' ? 'Accès complet'
+      : user.role === 'doctor' ? 'Accès clinique'
+      : user.role === 'nurse' ? 'Accès soins'
+      : user.role === 'lab' ? 'Accès laboratoire'
+      : user.role === 'reception' ? 'Accès accueil'
+      : user.role === 'pharmacist' ? 'Accès pharmacie' : 'Accès limité';
     return `
       <aside class="hospital-sidebar">
         <div class="hospital-sidebar-brand">
           <span>🏥</span>
           <div>
             <strong>${esc(hospital.name || 'Établissement')}</strong>
-            <small>Espace hôpital — Desktop</small>
+            <small>${hospital.officialId ? 'Matricule ' + esc(hospital.officialId) : 'Espace hôpital — Desktop'}</small>
           </div>
         </div>
         <nav class="hospital-sidebar-nav">
@@ -96,15 +138,15 @@ const HospitalDesktopUI = (() => {
               <span>${m.icon}</span> ${esc(m.label)}
             </button>`).join('')}
         </nav>
-        <button class="hospital-sidebar-exit" onclick="HospitalDesktopUI.close()">
-          ← ${esc(window.I18n?.t ? I18n.t('hd_back_to_app') : "Retour à l'application")}
+        <button class="hospital-sidebar-exit" onclick="${isHospitalSession ? 'HospitalDesktopUI.logoutSession()' : 'HospitalDesktopUI.close()'}">
+          ${isHospitalSession ? '🔓 Déconnexion' : '← ' + esc(window.I18n?.t ? I18n.t('hd_back_to_app') : "Retour à l'application")}
         </button>
       </aside>
       <div class="hospital-main">
         <header class="hospital-topbar">
           <div id="hospital-topbar-title">Tableau de bord</div>
           <div class="hospital-topbar-user">
-            👤 ${esc(user.name || user.uid)} · ${esc(HospitalPermissions.roleLabel(user.role))}
+            ${esc(HospitalPermissions.roleLabel(user.role))} · <span style="opacity:.7">${esc(accessLevel)}</span>
           </div>
         </header>
         <div class="hospital-content" id="hospital-content"></div>
@@ -225,7 +267,66 @@ const HospitalDesktopUI = (() => {
 
   installLauncher();
 
-  return { open, close, navigate, isOpen };
+  function logoutSession() {
+    close();
+    window.HospitalAuth?.logout?.();
+  }
+
+  /* Placeholder honnête pour les sections encore à construire. */
+  function renderComingSoon(container, title, desc) {
+    container.innerHTML = `
+      <div class="hospital-page-header"><div><h1>${esc(title)}</h1><p>${esc(desc)}</p></div></div>
+      <div class="card empty-state">
+        <p>🚧 Module en cours de construction.</p>
+        <p class="muted">Cette section fera partie de la gestion médicale complète du desktop.</p>
+      </div>`;
+  }
+
+  /* Patients classés par ANNÉE, chacun prêt à être transféré avec son
+     dossier (bouton 🚑 relié au module de transfert d'urgence). */
+  function renderPatientsByYear(container) {
+    const hospital = window.HospitalsRegistry?.getCurrentHospital?.();
+    const hid = hospital?.establishmentId;
+    let patients = [];
+    try {
+      patients = (window.HospitalsRegistry?.getPatientsForEstablishment?.(hid)) || window.DB?.getPatients?.() || [];
+    } catch (_) { patients = window.DB?.getPatients?.() || []; }
+
+    // Regroupement par année (à partir de created_at, ou de l'année du n° MC).
+    const byYear = {};
+    patients.forEach(p => {
+      const y = String(p.created_at || '').slice(0,4) ||
+                (String(p.id||'').match(/MC-(\d{4})/)?.[1]) || 'Sans date';
+      (byYear[y] = byYear[y] || []).push(p);
+    });
+    const years = Object.keys(byYear).sort((a,b) => b.localeCompare(a));
+
+    container.innerHTML = `
+      <div class="hospital-page-header">
+        <div><h1>👥 Patients — dossiers par année</h1><p>${patients.length} dossier(s) · classés par année</p></div>
+      </div>
+      ${!years.length ? `<div class="card empty-state"><p>Aucun patient enregistré.</p></div>` :
+        years.map(y => `
+          <div class="card">
+            <h3>📁 ${esc(y)} <span class="muted">(${byYear[y].length})</span></h3>
+            <div class="records-list">
+              ${byYear[y].map(p => `
+                <div class="record-card">
+                  <p><strong>${esc(p.firstname||'')} ${esc(p.lastname||'')}</strong>
+                     <span class="id-tag">${esc(p.id||'')}</span></p>
+                  <p class="muted">${esc(p.gender||'')}${p.birthdate ? ' · né(e) le '+esc(p.birthdate) : ''}</p>
+                  <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.4rem">
+                    <button class="btn btn-ghost btn-sm" onclick="HospitalPortal.openDetail?.('${esc(p.id)}')">📋 Dossier</button>
+                    <button class="btn btn-ghost btn-sm" style="color:var(--danger)"
+                      onclick="HospitalPortal.openEmergencyTransfer?.('${esc(p.id)}')">🚑 Transférer avec le dossier</button>
+                  </div>
+                </div>`).join('')}
+            </div>
+          </div>`).join('')}
+    `;
+  }
+
+  return { open, openForSession, close, navigate, isOpen, logoutSession };
 })();
 
 window.HospitalDesktopUI = HospitalDesktopUI;

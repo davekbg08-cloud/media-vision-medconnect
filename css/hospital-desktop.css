@@ -190,3 +190,67 @@ body.hospital-desktop-open {
   .hospital-nav-item span { font-size: 1.1rem; }
   .hospital-sidebar-exit { font-size: .7rem; }
 }
+
+/* ── Écran de connexion hôpital (HospitalAuth) ── */
+.hospital-auth-wrap {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: var(--bg, #0f1420);
+}
+.hospital-auth-card {
+  width: 100%;
+  max-width: 440px;
+  background: var(--surface, #161d2e);
+  border: 1px solid var(--border, rgba(255,255,255,.08));
+  border-radius: 16px;
+  padding: 1.6rem;
+}
+.hospital-auth-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .2rem;
+  margin-bottom: 1.2rem;
+  font-size: 1.4rem;
+}
+.hospital-auth-brand span { font-size: .8rem; opacity: .6; }
+.hospital-auth-tabs {
+  display: flex;
+  gap: .4rem;
+  margin-bottom: 1.2rem;
+}
+.ha-tab {
+  flex: 1;
+  padding: .6rem;
+  border: 1px solid var(--border, rgba(255,255,255,.12));
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.ha-tab.active { background: var(--primary, #2f6df6); color: #fff; border-color: transparent; }
+.ha-role-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: .6rem;
+}
+.ha-role-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: .35rem;
+  padding: 1rem .5rem;
+  border: 1px solid var(--border, rgba(255,255,255,.12));
+  border-radius: 12px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+.ha-role-btn:hover { background: rgba(47,109,246,.12); border-color: var(--primary, #2f6df6); }
+.ha-role-icon { font-size: 1.6rem; }
