@@ -193,6 +193,7 @@ const HospitalBedsModule = (() => {
 
   async function saveAdmission() {
     try {
+      if (!window.HospitalCapabilities?.guardHospitalAction?.('admit_patient')) return;
       // Admission = acte desktop sous abonnement (même gating que
       // la consultation : bloqué si expiré côté desktop uniquement).
       await CloudDB.requireWritableSubscription('create_consultation');
@@ -241,6 +242,7 @@ const HospitalBedsModule = (() => {
 
   async function discharge(admissionId) {
     try {
+      if (!window.HospitalCapabilities?.guardHospitalAction?.('discharge_patient')) return;
       const adm = _admissions.find(a => a.id === admissionId);
       if (!adm) return;
       if (!confirm(`Confirmer la sortie de ${adm.patientName || adm.patientMc} ?`)) return;

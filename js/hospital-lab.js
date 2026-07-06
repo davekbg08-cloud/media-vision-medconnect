@@ -136,6 +136,7 @@ const HospitalLabModule = (() => {
 
   async function saveOrder() {
     try {
+      if (!window.HospitalCapabilities?.guardHospitalAction?.('request_lab')) return;
       await CloudDB.requireWritableSubscription('request_lab');
 
       const mc = document.getElementById('lab-mc').value.trim().toUpperCase();
@@ -207,6 +208,7 @@ const HospitalLabModule = (() => {
 
   async function saveResult(requestId) {
     try {
+      if (!window.HospitalCapabilities?.guardHospitalAction?.('enter_lab_result')) return;
       await CloudDB.requireWritableSubscription('add_lab_result');
 
       const req = _requests.find(x => x.id === requestId);

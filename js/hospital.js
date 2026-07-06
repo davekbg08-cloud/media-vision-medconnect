@@ -324,6 +324,7 @@ const HospitalPortal = (() => {
 
   function saveNewPatient(e) {
     e.preventDefault();
+    if (!window.HospitalCapabilities?.guardHospitalAction?.('create_patient')) return;
     const p = DB.addPatient({
       firstname: document.getElementById('hp-fn').value.trim(),
       lastname:  document.getElementById('hp-ln').value.trim(),
@@ -397,6 +398,10 @@ const HospitalPortal = (() => {
 
   function saveConsult(e, patientId) {
     e.preventDefault();
+    // Garde de capacité (desktop hôpital) : créer une consultation +
+    // prescrire est réservé au médecin. Un infirmier/labo/réception en
+    // session hôpital ne peut pas exécuter cette action.
+    if (!window.HospitalCapabilities?.guardHospitalAction?.('create_consultation')) return;
     const user = Auth.getUser() || {};
     const hosp = window.HospitalsRegistry?.getCurrentHospital?.();
 

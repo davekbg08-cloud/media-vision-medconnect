@@ -119,7 +119,18 @@ const HospitalCapabilities = (() => {
     return false;
   }
 
-  return { can, capabilitiesOf, label, accessLevel, require, CAPS };
+  /* Garde d'action sensible pour le DESKTOP hôpital uniquement.
+     En session hôpital (connexion par matricule), vérifie que le
+     rôle vérifié a la capacité. Hors de cette session (mobile,
+     praticien solo), ne bloque rien — le contrôle d'accès mobile
+     reste géré par l'ACL patient/consentement existante. */
+  function guardHospitalAction(action) {
+    const session = window.HospitalAuth?.getSession?.();
+    if (!session) return true; // pas une session hôpital desktop
+    return window.HospitalCapabilities?.require?.(session.role, action) ?? true;
+  }
+
+  return { can, capabilitiesOf, label, accessLevel, require, guardHospitalAction, CAPS };
 })();
 
 window.HospitalCapabilities = HospitalCapabilities;
