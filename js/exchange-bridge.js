@@ -25,7 +25,7 @@ const ExchangeBridge = (() => {
     'labRequests', 'labResults', 'appointments',
     'notifications', 'messages', 'hospitalMembers',
     'subscriptions', 'auditLogs',
-    'beds', 'admissions', 'aiQueries',
+    'beds', 'admissions', 'aiQueries', 'receptionVisits',
   ];
 
   const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');

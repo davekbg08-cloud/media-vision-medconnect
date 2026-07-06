@@ -530,6 +530,16 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    match /receptionVisits/{docId} {
+      // File d'accueil : lecture par le personnel clinique vérifié
+      // (même précédent que admissions).
+      allow read: if isAdmin() || currentRoleIs('doctor') || currentRoleIs('nurse') ||
+        canReadMedicalData(resource.data);
+      allow create, update: if isAdmin() ||
+        (signedIn() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
+      allow delete: if isAdmin();
+    }
+
     match /aiQueries/{docId} {
       // Historique des requêtes IA médicale : lecture réservée à
       // l'auteur et à l'admin (peut contenir du contexte clinique).
