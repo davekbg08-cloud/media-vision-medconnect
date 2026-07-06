@@ -29,6 +29,45 @@ service cloud.firestore {
       );
     }
 
+    /* ── CAPACITÉS PAR RÔLE (miroir serveur de HospitalCapabilities) ──
+       Le rôle est lu depuis users/{uid} (currentRoleIs) ou le token :
+       il est VÉRIFIÉ, non déclaré par le client. Ces helpers permettent
+       aux règles de refuser elles-mêmes une action que le rôle ne
+       permet pas — même si le client contourne le JavaScript.
+       Note : admin_hospital et lab n'ont pas de rôle mobile ; ils
+       apparaissent ici pour le desktop. La source reste users/{uid}. */
+    function hasRole(role) {
+      return signedIn() && (
+        request.auth.token.role == role ||
+        (hasCurrentUserDoc() && get(currentUserDoc()).data.role == role)
+      );
+    }
+    // Décider/valider un acte médical : médecin (ou admin plateforme/hôpital)
+    function canDecideMedical() {
+      return isAdmin() || hasRole('doctor') || hasRole('admin_hospital');
+    }
+    // Prescrire : strictement médecin
+    function canPrescribe() {
+      return isAdmin() || hasRole('doctor');
+    }
+    // Décider un transfert médical : médecin (ou admin hôpital)
+    function canDecideTransfer() {
+      return isAdmin() || hasRole('doctor') || hasRole('admin_hospital');
+    }
+    // Admettre / sortir / gérer lits : personnel de soins
+    function canManageCare() {
+      return isAdmin() || hasRole('doctor') || hasRole('nurse') || hasRole('admin_hospital');
+    }
+    // Saisir un résultat de labo : laborantin (ou médecin/admin)
+    function canEnterLabResult() {
+      return isAdmin() || hasRole('lab') || hasRole('doctor') || hasRole('admin_hospital');
+    }
+    // Enregistrer une arrivée / créer patient à l'accueil : réception + soignants
+    function canRegisterPatient() {
+      return isAdmin() || hasRole('doctor') || hasRole('nurse') ||
+             hasRole('reception') || hasRole('admin_hospital');
+    }
+
     /* ── Abonnement établissement (contrat mobile ↔ desktop) ──
        Aucun document subscriptions/{hospitalId} => traité comme
        "active" par défaut (rétro-compatibilité : ne bloque pas les
@@ -375,7 +414,10 @@ service cloud.firestore {
       // sans ça le listener global mc_consultations était rejeté en bloc.
       allow read: if currentRoleIs('doctor') || currentRoleIs('nurse') ||
         canReadMedicalData(resource.data);
-      allow write: if isAdmin() || currentRoleIs('doctor') || currentRoleIs('nurse');
+      // Créer/valider une consultation = acte médical : médecin
+      // uniquement (l'infirmier peut lire, pas créer). Verrouillage
+      // serveur du contrôle de capacité côté client.
+      allow write: if canDecideMedical();
     }
 
     match /mc_vaccinations/{docId} {
@@ -486,10 +528,11 @@ service cloud.firestore {
 
     match /labResults/{docId} {
       allow read: if isAdmin() || canReadMedicalData(resource.data);
+      // Saisir un résultat = capacité labo/médecin ET gating device.
       allow create: if isAdmin() ||
-        (signedIn() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
+        (canEnterLabResult() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
       allow update: if isAdmin() ||
-        (signedIn() && hospitalCanWriteFromDevice(resolveHospitalId(resource.data), request.resource.data.sourceDevice));
+        (canEnterLabResult() && hospitalCanWriteFromDevice(resolveHospitalId(resource.data), request.resource.data.sourceDevice));
       allow delete: if isAdmin();
     }
 
@@ -526,7 +569,7 @@ service cloud.firestore {
       allow read: if isAdmin() || currentRoleIs('doctor') || currentRoleIs('nurse') ||
         canReadMedicalData(resource.data);
       allow create, update: if isAdmin() ||
-        (signedIn() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
+        (canManageCare() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
       allow delete: if isAdmin();
     }
 
@@ -536,7 +579,7 @@ service cloud.firestore {
       allow read: if isAdmin() || currentRoleIs('doctor') || currentRoleIs('nurse') ||
         canReadMedicalData(resource.data);
       allow create, update: if isAdmin() ||
-        (signedIn() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
+        (canRegisterPatient() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
       allow delete: if isAdmin();
     }
 
