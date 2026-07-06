@@ -3,8 +3,8 @@
    ===================================================== */
 const Auth = (() => {
 
-  const ICONS  = { patient:'🩺', doctor:'👨‍⚕️', pharmacist:'💊', nurse:'🩹', admin:'⚙️' };
-  const LABELS = { patient:'Patient', doctor:'Médecin', pharmacist:'Pharmacien', nurse:'Infirmier(e)', admin:'Administrateur' };
+  const ICONS  = { patient:'🩺', doctor:'👨‍⚕️', pharmacist:'💊', nurse:'🩹', lab:'🧪', reception:'🛎️', admin:'⚙️' };
+  const LABELS = { patient:'Patient', doctor:'Médecin', pharmacist:'Pharmacien', nurse:'Infirmier(e)', lab:'Laboratoire', reception:'Réception', admin:'Administrateur' };
   const ADMIN  = { uid:'admin_root', role:'admin', name:'Administrateur' };
   const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
@@ -72,7 +72,7 @@ const Auth = (() => {
     </div>
     <p style="font-size:.8rem;color:var(--text-muted);margin:.75rem 0 .5rem">Choisissez votre rôle :</p>
     <div class="role-selector" id="register-roles">
-      ${['doctor','pharmacist','nurse'].map(r=>`
+      ${['doctor','pharmacist','nurse','lab','reception'].map(r=>`
         <button class="role-btn" data-role="${r}" onclick="Auth._registerRole('${r}')">
           <span>${ICONS[r]}</span><span>${LABELS[r]}</span>
         </button>`).join('')}
@@ -163,10 +163,12 @@ const Auth = (() => {
       doctor:     `👨‍⚕️ Votre <strong>N° d'Ordre Médical</strong> doit être enregistré par l'administrateur. Entrez-le ci-dessous.`,
       pharmacist: `💊 Votre <strong>N° Matricule RCCM</strong> doit être enregistré par l'administrateur.`,
       nurse:      `🩹 Votre <strong>N° Matricule infirmier</strong> doit être enregistré par l'administrateur.`,
+      lab:        `🧪 Votre <strong>N° Matricule de laboratoire</strong> doit être enregistré par l'administrateur.`,
+      reception:  `🛎️ Votre <strong>N° Matricule d'agent d'accueil</strong> doit être enregistré par l'administrateur.`,
     };
-    const labels = { doctor:'N° Ordre Médical *', pharmacist:'N° Matricule / RCCM *', nurse:'N° Matricule Infirmier *' };
-    const ids = { doctor:'rd-num', pharmacist:'rph-num', nurse:'rn-num' };
-    const actions = { doctor:`Auth._regDoctor()`, pharmacist:`Auth._regPharmacist()`, nurse:`Auth._regNurse()` };
+    const labels = { doctor:'N° Ordre Médical *', pharmacist:'N° Matricule / RCCM *', nurse:'N° Matricule Infirmier *', lab:'N° Matricule Laboratoire *', reception:'N° Matricule Réception *' };
+    const ids = { doctor:'rd-num', pharmacist:'rph-num', nurse:'rn-num', lab:'rl-num', reception:'rc-num' };
+    const actions = { doctor:`Auth._regDoctor()`, pharmacist:`Auth._regPharmacist()`, nurse:`Auth._regNurse()`, lab:`Auth._regLab()`, reception:`Auth._regReception()` };
 
     document.getElementById('register-form').innerHTML = `
       <div class="auth-register-info">${infos[role]}</div>
@@ -639,6 +641,26 @@ const Auth = (() => {
     _showPending();
   }
 
+  async function _regLab() {
+    const num   = (document.getElementById('rl-num')?.value || '').trim().toUpperCase();
+    const email = (document.getElementById('rl-num-email')?.value || '').trim();
+    const pass  = (document.getElementById('rl-num-pass')?.value || '').trim();
+    const pass2 = (document.getElementById('rl-num-pass2')?.value || '').trim();
+    const result = await _reg(num, pass, pass2, 'lab', { matricule:num, email });
+    if (result !== true) return;
+    _showPending();
+  }
+
+  async function _regReception() {
+    const num   = (document.getElementById('rc-num')?.value || '').trim().toUpperCase();
+    const email = (document.getElementById('rc-num-email')?.value || '').trim();
+    const pass  = (document.getElementById('rc-num-pass')?.value || '').trim();
+    const pass2 = (document.getElementById('rc-num-pass2')?.value || '').trim();
+    const result = await _reg(num, pass, pass2, 'reception', { matricule:num, email });
+    if (result !== true) return;
+    _showPending();
+  }
+
   function _showPending() {
     document.getElementById('register-form').innerHTML = `
       <div style="text-align:center;padding:1.5rem 1rem">
@@ -786,7 +808,7 @@ const Auth = (() => {
     getUser, isLogged, logout, showLogin, loginProfessionalSilently,
     _tab, _loginRole, _registerRole,
     _doPatient, _createPatientPin, _doDoctor, _doPharmacist, _doNurse,
-    _regDoctor, _regPharmacist, _regNurse,
+    _regDoctor, _regPharmacist, _regNurse, _regLab, _regReception,
     _setupAdmin, _doAdmin,
     getRoleIcon, getRoleLabel,
   };

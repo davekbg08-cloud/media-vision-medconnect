@@ -183,9 +183,10 @@ service cloud.firestore {
 
     function publicUserRole(role) {
       // 'hospital' : compte d'établissement (connexion desktop par
-      // matricule). Auto-créé en statut 'pending', validé par l'admin
+      // matricule). 'lab'/'reception' : agents hospitaliers desktop.
+      // Tous auto-créés en statut 'pending', validés par l'admin
       // comme les autres inscriptions professionnelles.
-      return role in ['patient', 'doctor', 'nurse', 'pharmacist', 'hospital'];
+      return role in ['patient', 'doctor', 'nurse', 'pharmacist', 'hospital', 'lab', 'reception'];
     }
 
     function hasNoSecretFields(data) {

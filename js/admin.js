@@ -5,7 +5,7 @@
 const AdminModule = (() => {
   const esc = s => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   const now = () => new Date().toISOString();
-  const PRO_ROLES = ['doctor', 'nurse', 'pharmacist'];
+  const PRO_ROLES = ['doctor', 'nurse', 'pharmacist', 'lab', 'reception'];
 
   function safeList(fn) {
     try {
