@@ -57,15 +57,14 @@ const ExchangeBridge = (() => {
       // on marque 'pwa' ; sinon 'mobile'. Les deux restent la version
       // mobile côté produit ; la distinction sert au contrat d'échange.
       _cachedDevice = isStandalone ? 'pwa' : 'mobile';
-    } else if (isStandalone) {
-      // Installé comme app sur un poste sans UA mobile → traité comme PWA.
-      _cachedDevice = 'pwa';
     } else {
-      // Candidat 'desktop' (aucun signe mobile dans l'UA). On confirme
-      // par des signaux physiques : un vrai ordinateur a un pointeur fin
-      // (souris) OU un écran large. Si l'appareil n'a QUE du tactile ET
-      // un écran étroit, c'est un mobile que l'UA n'a pas identifié →
-      // on le traite comme mobile par prudence.
+      // Aucun signe mobile dans l'UA : candidat ordinateur. On confirme
+      // par des signaux physiques : un vrai PC a un pointeur fin (souris)
+      // OU un écran large. Ceci vaut AUSSI en mode standalone : une app
+      // MedConnect INSTALLÉE sur un poste hospitalier doit afficher la
+      // version DESKTOP (connexion hôpital), pas la version mobile.
+      // Seul un appareil purement tactile à écran étroit non identifié
+      // par l'UA est traité comme mobile.
       const finePointer = window.matchMedia && window.matchMedia('(pointer: fine)').matches;
       const wideScreen = (window.screen && window.screen.width >= 1024) ||
         (window.innerWidth && window.innerWidth >= 1024);
