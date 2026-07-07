@@ -4,7 +4,8 @@
   "description": "MedConnect — Application médicale universelle",
   "main": "index.html",
   "scripts": {
-    "dev": "python -m http.server 8080"
+    "dev": "python -m http.server 8080",
+    "test": "node --test tests/*.test.js"
   },
   "dependencies": {
     "@capacitor/core": "^6.0.0"
