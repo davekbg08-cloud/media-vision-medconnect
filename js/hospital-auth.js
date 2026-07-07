@@ -151,6 +151,14 @@ const HospitalAuth = (() => {
       const est = await findByOfficialId(mat);
       if (!est) { App.toast('Établissement introuvable pour ce matricule.', 'error'); return; }
 
+      // L'établissement doit être VALIDÉ par l'administration MedConnect
+      // avant toute connexion. Une inscription ne s'active pas d'elle-même.
+      const estStatus = String(est.status || '').toLowerCase();
+      if (!['active', 'approved'].includes(estStatus)) {
+        App.toast('⏳ Cet établissement est en attente de validation par l\'administration MedConnect. Réessayez une fois validé.', 'error');
+        return;
+      }
+
       // Vérification du mot de passe hôpital (première barrière d'accès
       // à l'établissement). NB : la vraie session Firebase sera celle de
       // l'AGENT, pas de l'établissement — c'est ce qui permet au serveur
@@ -254,7 +262,33 @@ const HospitalAuth = (() => {
     // 2) Vérifier l'affiliation au staff de l'établissement.
     const member = findStaffRole(est, account.uid, num, role);
     if (!member) {
-      msg.innerHTML = `<div class="auth-register-info" style="border-color:var(--accent)">⚠️ Vous êtes authentifié, mais pas affilié à cet établissement. L'administration doit valider votre affiliation.</div>`;
+      // L'agent est authentifié mais pas affilié : on CRÉE une demande
+      // d'affiliation pour que l'administration puisse la valider.
+      // (Auparavant on affichait juste un message sans rien créer —
+      // l'admin ne recevait donc aucune demande.)
+      let created = false;
+      try {
+        const existing = (window.HospitalsRegistry?.getAffiliations?.() || []).find(a =>
+          a.requesterUid === account.uid && a.establishmentId === (est.establishmentId || establishmentId) &&
+          a.status === 'pending');
+        if (existing) {
+          created = 'exists';
+        } else {
+          const req = window.HospitalsRegistry?.requestAffiliation?.(
+            account.uid, account.name || `${role} ${num}`, est.establishmentId || establishmentId,
+            { role, professionalNumber: num });
+          created = !!req;
+        }
+      } catch (e) {
+        console.warn('[HospitalAuth] Création demande affiliation :', e);
+      }
+
+      msg.innerHTML = created === 'exists'
+        ? `<div class="auth-register-info" style="border-color:var(--accent)">⏳ Votre demande d'affiliation est déjà en attente de validation par l'administration.</div>`
+        : created
+          ? `<div class="auth-register-info" style="border-color:var(--secondary)">✅ Demande d'affiliation envoyée à l'administration. Vous pourrez vous connecter une fois validé.</div>`
+          : `<div class="auth-register-info" style="border-color:var(--danger)">⚠️ Vous êtes authentifié, mais pas affilié, et la demande n'a pas pu être créée. Contactez l'administration.</div>`;
+
       if (firebaseAuth?.signOut) { try { await firebaseAuth.signOut(); } catch (_) {} }
       return;
     }

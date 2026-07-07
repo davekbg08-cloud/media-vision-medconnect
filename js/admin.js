@@ -639,6 +639,14 @@ const AdminModule = (() => {
 
       window.ExchangeBridge?.invalidateSubscriptionCache?.(hospitalId);
 
+      // Valide aussi l'ÉTABLISSEMENT (status 'active') : sans ça la
+      // connexion resterait bloquée (on refuse les hôpitaux 'pending').
+      try {
+        window.HospitalsRegistry?.updateHospital?.(hospitalId, { status: 'active' });
+      } catch (estErr) {
+        console.warn('[Admin] Validation établissement :', estErr?.message || estErr);
+      }
+
       // Active aussi le COMPTE établissement (users/{authUid}, rôle
       // 'hospital') : rend isActiveHospital() vrai côté règles, donc
       // autorise les écritures depuis la session desktop.

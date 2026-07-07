@@ -205,8 +205,10 @@ const HospitalsRegistry = (() => {
   function requestAffiliation(requesterUid, requesterName, establishmentId, options = {}) {
     const user = Auth.getUser() || {};
     const account = DB.getAccounts().find(a => a.uid === requesterUid) || user;
-    const requesterRole = options.requesterRole || account.role || user.role || 'doctor';
-    if (!['doctor','nurse'].includes(requesterRole)) return false;
+    const requesterRole = options.role || options.requesterRole || account.role || user.role || 'doctor';
+    // Tous les rôles hospitaliers peuvent demander une affiliation
+    // (médecin, infirmier, pharmacie, laboratoire, réception).
+    if (!['doctor','nurse','pharmacist','lab','reception'].includes(requesterRole)) return false;
 
     const h = getHospitalById(establishmentId);
     if (!h) return false;
@@ -220,7 +222,9 @@ const HospitalsRegistry = (() => {
     if (existing) return false;
 
     const a = normalizeRequest({
-      requestId: DB.makeId('AFF'),
+      // ID déterministe (cohérent avec normalizeRequest) : évite les
+      // doublons et garantit que les boutons admin retrouvent la demande.
+      requestId: `AFF_${requesterUid}_${establishmentId}`,
       requesterUid,
       requesterName,
       requesterRole,
