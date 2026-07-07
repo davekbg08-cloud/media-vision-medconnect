@@ -38,11 +38,39 @@ const ExchangeBridge = (() => {
     // Figé au premier appel : la plateforme ne change pas en cours de
     // session, et cela évite qu'un basculement (ex. passage en mode
     // standalone) modifie le gating à la volée. Durcissement client
-    // modeste — la vraie protection reste un custom claim serveur.
+    // modeste — la vraie protection reste le rôle vérifié côté serveur.
     if (_cachedDevice) return _cachedDevice;
-    if (window.Capacitor || document.URL.startsWith('file://') || /android/i.test(navigator.userAgent)) _cachedDevice = 'mobile';
-    else if (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) _cachedDevice = 'pwa';
-    else _cachedDevice = 'desktop';
+
+    const ua = navigator.userAgent || '';
+    const isAndroid = /android/i.test(ua);
+    // iOS : iPhone/iPod/iPad. Les iPad récents (iPadOS 13+) se déclarent
+    // comme Mac — on les distingue par la présence du tactile.
+    const isIOS = /iphone|ipod|ipad/i.test(ua) ||
+      (/macintosh/i.test(ua) && typeof navigator.maxTouchPoints === 'number' && navigator.maxTouchPoints > 1);
+    const isMobileUA = /mobile|blackberry|iemobile|opera mini|windows phone/i.test(ua);
+    const isStandalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
+      window.navigator.standalone === true;
+
+    if (window.Capacitor || document.URL.startsWith('file://') ||
+        isAndroid || isIOS || isMobileUA) {
+      // Vrai appareil mobile/tablette. En mode installé (standalone),
+      // on marque 'pwa' ; sinon 'mobile'. Les deux restent la version
+      // mobile côté produit ; la distinction sert au contrat d'échange.
+      _cachedDevice = isStandalone ? 'pwa' : 'mobile';
+    } else if (isStandalone) {
+      // Installé comme app sur un poste sans UA mobile → traité comme PWA.
+      _cachedDevice = 'pwa';
+    } else {
+      // Candidat 'desktop' (aucun signe mobile dans l'UA). On confirme
+      // par des signaux physiques : un vrai ordinateur a un pointeur fin
+      // (souris) OU un écran large. Si l'appareil n'a QUE du tactile ET
+      // un écran étroit, c'est un mobile que l'UA n'a pas identifié →
+      // on le traite comme mobile par prudence.
+      const finePointer = window.matchMedia && window.matchMedia('(pointer: fine)').matches;
+      const wideScreen = (window.screen && window.screen.width >= 1024) ||
+        (window.innerWidth && window.innerWidth >= 1024);
+      _cachedDevice = (finePointer || wideScreen) ? 'desktop' : 'mobile';
+    }
     return _cachedDevice;
   }
 
