@@ -2,11 +2,12 @@
    MedConnect 2.0 — Service Worker
    Optimisation chargement / PWA
    ===================================================== */
-const CACHE = 'medconnect-v4.2';
+const CACHE = 'medconnect-v4.4';
 
 const ASSETS = [
   './', './index.html', './css/style.css', './css/establishments-balance.css',
-  './css/hospital-desktop.css', './css/mobile-layout-fixes.css',
+  './css/hospital-desktop.css', './css/medical-record-desktop.css', './css/mobile-layout-fixes.css',
+  './config/app-version.json', './js/version-manager.js',
   // SDK Firebase : ne passait JAMAIS dans le cache dynamique (réponse
   // opaque cross-origin rejetée par le check type !== 'opaque') — la
   // PWA hors-ligne échouait au chargement. Le précache via addAll
@@ -24,6 +25,7 @@ const ASSETS = [
   './js/cloud-db.js', './js/hospital-permissions.js', './js/hospital-capabilities.js', './js/hospital-auth.js', './js/hospital-i18n.js', './js/hospital-subscription.js',
   './js/medical-ai.js', './js/hospital-beds.js', './js/hospital-lab.js',
   './js/hospital-desktop-ui.js', './js/hospital-reception.js', './js/hospital-auth.js',
+  './js/medical-record-desktop.js',
   './js/i18n.js', './js/db.js', './js/currency.js',
   './js/access_control.js', './js/haptic_feedback.js',
   './js/transfer_service.js', './js/network.js', './js/inbox_message_controls.js', './js/transfer_ui_patch.js',
@@ -46,7 +48,13 @@ self.addEventListener('install', event => {
       .then(cache => cache.addAll(ASSETS))
       .catch(error => console.warn('[SW] Pré-cache partiel :', error))
   );
-  self.skipWaiting();
+  // PAS de self.skipWaiting() automatique ici : un nouveau SW installé
+  // doit rester "waiting" pendant qu'un onglet existant tourne encore,
+  // pour que VersionManager puisse demander confirmation ("Recharger
+  // maintenant ?") avant de basculer — jamais une mise à jour forcée
+  // en silence pendant qu'un utilisateur travaille. skipWaiting() n'est
+  // déclenché que sur demande explicite via le listener 'message'
+  // ci-dessous (VersionManager.reloadNow / applyUpdate).
 });
 
 self.addEventListener('activate', event => {
@@ -56,6 +64,14 @@ self.addEventListener('activate', event => {
     )
   );
   self.clients.claim();
+});
+
+// Permet à VersionManager (js/version-manager.js) de faire passer un
+// nouveau SW "waiting" en contrôle immédiat quand l'utilisateur
+// choisit explicitement "Mettre à jour" / "Recharger maintenant" —
+// jamais automatiquement de son propre chef.
+self.addEventListener('message', event => {
+  if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 function shouldBypassCache(request) {
@@ -76,7 +92,11 @@ function isFreshAppShellRequest(request) {
     request.destination === 'style' ||
     request.url.endsWith('.js') ||
     request.url.endsWith('.css') ||
-    request.url.endsWith('/index.html');
+    request.url.endsWith('/index.html') ||
+    // config/app-version.json : la détection de mise à jour (Version
+    // Manager) doit toujours comparer contre le fichier le plus frais
+    // possible, jamais une copie mise en cache potentiellement ancienne.
+    request.url.includes('/config/');
 }
 
 async function networkFirst(request) {

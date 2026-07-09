@@ -563,13 +563,34 @@ const Auth = (() => {
       return false;
     }
 
-    const verified = role === 'doctor' ? ACL.isDoctorVerified(num) : role === 'pharmacist' ? ACL.isPharmacistVerified(num) : ACL.isNurseVerified(num);
+    // Laboratoire / réception : aucun registre officiel équivalent à
+    // celui des médecins/pharmaciens/infirmiers n'existe pour ces deux
+    // rôles. Ne JAMAIS les faire passer par ACL.isNurseVerified() (leurs
+    // numéros ne s'y trouvent jamais, ce qui bloquait systématiquement
+    // l'inscription) : la demande est acceptée et reste 'pending'
+    // jusqu'à validation manuelle par l'administrateur, comme pour une
+    // demande dont le registre ne trouve pas de correspondance ailleurs.
+    let verified, info;
+    if (role === 'doctor') {
+      verified = ACL.isDoctorVerified(num);
+      info = ACL.getVerifiedDoctors().find(d => d.order_num === num);
+    } else if (role === 'pharmacist') {
+      verified = ACL.isPharmacistVerified(num);
+      info = ACL.getVerifiedPharmacists().find(p => p.matricule === num);
+    } else if (role === 'nurse') {
+      verified = ACL.isNurseVerified(num);
+      info = ACL.getVerifiedNurses().find(n => n.matricule === num);
+    } else if (role === 'lab' || role === 'reception') {
+      verified = true;
+      info = null;
+    } else {
+      verified = false;
+      info = null;
+    }
     if (!verified) {
       _err('reg-err', `❌ Numéro non reconnu dans le registre.\nContactez l'administrateur : +243 856 373 707\nou hallo.mediavision.tech@gmail.com`);
       return false;
     }
-
-    const info = role === 'doctor' ? ACL.getVerifiedDoctors().find(d => d.order_num === num) : role === 'pharmacist' ? ACL.getVerifiedPharmacists().find(p => p.matricule === num) : ACL.getVerifiedNurses().find(n => n.matricule === num);
     const acc = { uid:`${role.slice(0,3).toUpperCase()}_${num}_${Date.now()}`, username:num, role, name:info?.name || `${LABELS[role]} (${num})`, email, status:'pending', created_at:new Date().toISOString(), ...extraField };
     if (info?.specialty) acc.specialty = info.specialty;
     if (info?.country)   acc.country   = info.country;

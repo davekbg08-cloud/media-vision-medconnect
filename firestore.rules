@@ -605,11 +605,25 @@ service cloud.firestore {
     match /auditLogs/{docId} {
       // Journal d'audit : création libre pour tout utilisateur
       // signé (traçabilité, y compris des tentatives bloquées par
-      // abonnement), jamais modifiable après coup, lecture admin
-      // uniquement.
-      allow read: if isAdmin();
+      // abonnement), jamais modifiable après coup. Lecture : admin,
+      // et personnel clinique vérifié — même précédent que
+      // admissions/receptionVisits ci-dessus (rôle vérifié au niveau
+      // règle, portée établissement appliquée côté requête client
+      // via listByHospital). Nécessaire pour l'onglet "Historique des
+      // accès" du dossier médical (MedicalRecordDesktop), réservé aux
+      // rôles cliniques dans l'UI.
+      allow read: if isAdmin() || currentRoleIs('doctor') || currentRoleIs('nurse');
       allow create: if signedIn();
       allow update, delete: if false;
+    }
+
+    /* ── Version manager : maintenance / version minimale ──
+       Lecture publique (même non authentifié : le bandeau de
+       maintenance doit rester visible avant connexion), écriture
+       réservée à l'administrateur plateforme. */
+    match /system/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
     }
 
     /* ── Transfert d'urgence inter-hôpitaux ─────────────

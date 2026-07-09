@@ -198,6 +198,18 @@ const CloudDB = (() => {
     });
   }
 
+  /**
+   * Journal d'accès pour une cible donnée (ex: targetType='patient').
+   * Filtre côté serveur par établissement (comme listByHospital),
+   * puis par targetId côté client (peu de volume par patient).
+   */
+  async function listAuditLogForTarget(targetType, targetId, hospitalId) {
+    const logs = await listByHospital('auditLogs', hospitalId);
+    return logs
+      .filter(l => l.targetType === targetType && l.targetId === targetId)
+      .sort((a,b) => (b.createdAt||'').localeCompare(a.createdAt||''));
+  }
+
   async function createNotification(data) {
     return createDoc('notifications', {
       establishmentId: data.establishmentId || data.hospitalId,
@@ -219,7 +231,7 @@ const CloudDB = (() => {
     createDoc, updateDoc, deleteDoc, getDoc, listByHospital, listenByHospital,
     getCurrentUserProfile, getActiveHospitalId, getActiveHospital, getMyMembership,
     hasRole, requireRole, subscriptionAllowsWrite, requireWritableSubscription,
-    createAuditLog, createNotification,
+    createAuditLog, listAuditLogForTarget, createNotification,
   };
 })();
 

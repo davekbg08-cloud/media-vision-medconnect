@@ -33,17 +33,7 @@ Dépôt public utilisé comme point de repère :
 - Statut : site fonctionnel
 - Notes : ne pas modifier inutilement pour éviter de casser le site ; contient formulaire Netlify, pages applications, confidentialité et conditions
 
-### 3. Occasion
-
-- Type : application Flutter marketplace / petites annonces
-- Dépôt : `davekbg08-cloud/occasion`
-- Visibilité : privé
-- Lien GitHub : `https://github.com/davekbg08-cloud/occasion`
-- Statut : prototype avancé, pas encore prêt Play Store
-- Priorités : nettoyer branding Gestion Money, Firebase Android, auth réelle, produits Firestore, modération UGC, package Android, signature release
-- Note visible créée : `GESTION_MONEY_CLEANUP.md`
-
-### 4. React Native Gallery
+### 3. React Native Gallery
 
 - Type : dépôt existant / ancien projet ou test
 - Dépôt : `davekbg08-cloud/react-native-gallery`
@@ -51,7 +41,7 @@ Dépôt public utilisé comme point de repère :
 - Lien GitHub : `https://github.com/davekbg08-cloud/react-native-gallery`
 - Statut : à vérifier plus tard si encore utile
 
-### 5. Ma Gestion / Gestion Money
+### 4. Ma Gestion / Gestion Money
 
 - Type : application de gestion mobile money / commissions
 - Dépôt : non trouvé séparément pour l’instant
@@ -73,8 +63,7 @@ Dépôt public utilisé comme point de repère :
 2. Corriger les problèmes PWA/APK/Firebase de MedConnect.
 3. Générer ensuite un nouvel APK propre.
 4. Garder Media Vision stable.
-5. Nettoyer Occasion seulement après stabilisation.
-6. Créer ou pousser Ma Gestion / Gestion Money dans un dépôt séparé quand le code sera disponible.
+5. Créer ou pousser Ma Gestion / Gestion Money dans un dépôt séparé quand le code sera disponible.
 
 ## Commande utile pour Codex
 

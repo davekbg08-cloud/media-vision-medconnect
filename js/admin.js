@@ -590,7 +590,8 @@ const AdminModule = (() => {
               <strong>${esc(h.name || hid)}</strong>
               ${h.officialId ? `<br><small style="color:var(--text-muted);font-family:monospace">Matricule : ${esc(h.officialId)}</small>` : ''}
               <br><small style="color:${st.c};font-weight:600">${st.t}</small>
-              ${sub.endDate ? `<small style="color:var(--text-dim)"> · jusqu'au ${esc(String(sub.endDate).slice(0,10))}</small>` : ''}
+              ${sub.endDate ? `<small style="color:${st.c}"> · jusqu'au <strong>${esc(String(sub.endDate).slice(0,10))}</strong></small>` : ''}
+              ${sub.activatedAt ? `<br><small style="color:var(--text-dim);font-size:.7rem">Dernière activation : ${esc(String(sub.activatedAt).slice(0,10))}</small>` : ''}
             </div>
           </div>
           <div style="display:flex;gap:.5rem;margin-top:.5rem;flex-wrap:wrap">
@@ -670,7 +671,7 @@ const AdminModule = (() => {
         body: `L'abonnement ${SUB_PLANS[plan] || plan} de ${h?.name || hospitalId} est actif jusqu'au ${end.toISOString().slice(0,10)}.`,
       });
 
-      App.toast(`✅ Abonnement activé pour ${h?.name || hospitalId}.`);
+      App.toast(`✅ Abonnement ${SUB_PLANS[plan] || plan} de ${h?.name || hospitalId} — actif jusqu'au ${end.toISOString().slice(0,10)}.`);
       App.navigateTo('dashboard');
     } catch (e) {
       console.error('[Admin] activateSubscription :', e);
