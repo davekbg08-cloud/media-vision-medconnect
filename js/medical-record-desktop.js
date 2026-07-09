@@ -34,6 +34,7 @@ const MedicalRecordDesktop = (() => {
     consultations:'🩺 Consultations',
     prescriptions:'💊 Ordonnances',
     lab:          '🧪 Laboratoire',
+    vaccinations: '💉 Vaccinations',
     imaging:      '🩻 Imagerie',
     documents:    '📄 Documents',
     access_log:   '🔒 Historique des accès',
@@ -150,6 +151,18 @@ const MedicalRecordDesktop = (() => {
     _activeTab = sections[0] || 'summary';
     renderDetail();
 
+    // Le dossier affiché ci-dessus vient du cache local (rapide, marche
+    // hors-ligne) — mais ce cache ne doit jamais être la seule source :
+    // on relance une synchro Firebase en arrière-plan et on rafraîchit
+    // le dossier si de nouvelles données arrivent pendant que le
+    // patient est toujours ouvert (ex: consultation saisie sur un
+    // autre poste de l'établissement, pas encore vue localement).
+    DB.syncFromFirebaseInBackground?.(() => {
+      if (_activeId !== patientId) return; // l'utilisateur a changé de patient entre-temps
+      _recordCache[patientId] = loadRecord(patientId);
+      renderDetail();
+    });
+
     // Traçabilité de la consultation du dossier — best effort, ne
     // bloque jamais l'affichage (cf. CloudDB.createAuditLog déjà
     // utilisé partout ailleurs dans le desktop hôpital).
@@ -225,6 +238,7 @@ const MedicalRecordDesktop = (() => {
       case 'consultations': container.innerHTML = renderConsultations(record); break;
       case 'prescriptions': container.innerHTML = renderPrescriptions(record.prescriptions); break;
       case 'lab':           container.innerHTML = renderLab(record.labs); break;
+      case 'vaccinations':  container.innerHTML = renderVaccinations(record.vaccinations); break;
       case 'imaging':       container.innerHTML = renderImaging(record.imaging); break;
       case 'documents':     container.innerHTML = renderDocuments(record.documents); break;
       case 'access_log':    container.innerHTML = `<div class="loading">⏳</div>`; loadAccessLog(); break;
@@ -362,6 +376,23 @@ const MedicalRecordDesktop = (() => {
       </div>`;
   }
 
+  /* ── Vaccinations ───────────────────────────────── */
+  function renderVaccinations(list) {
+    return !list.length ? `<div class="card empty-state"><p>Aucune vaccination.</p></div>` : `
+      <div class="records-list">
+        ${list.map(v => `
+          <div class="record-card">
+            <div class="record-header">
+              <span class="record-date">${esc(v.date||'—')}</span>
+              <span class="record-doctor">${esc(v.doctor||'—')}</span>
+            </div>
+            <p><strong>${esc(v.vaccine||'—')}</strong>${v.dose ? ' — dose '+esc(v.dose) : ''}</p>
+            ${v.next_date ? `<p class="muted" style="font-size:.8rem">Prochain rappel : ${esc(v.next_date)}</p>` : ''}
+            ${v.notes ? `<p>${esc(v.notes)}</p>` : ''}
+          </div>`).join('')}
+      </div>`;
+  }
+
   /* ── Imagerie (prévue même sans document) ───────── */
   function renderImaging(list) {
     const TYPES = ['Radiographie','Scanner','IRM','Échographie'];
@@ -464,7 +495,17 @@ const MedicalRecordDesktop = (() => {
       </div>`;
   }
 
-  return { render, filter, open, switchTab, setFilter };
+  return {
+    render, filter, open, switchTab, setFilter,
+    // Exposés en plus pour être testables sans DOM (fonctions pures ou
+    // ne dépendant que de DB/HospitalsRegistry déjà chargés) — la
+    // logique de sécurité (isolation établissement, visibilité par
+    // rôle) doit pouvoir être vérifiée directement, sans navigateur.
+    establishmentPatients, patientsForList, loadRecord,
+    renderSummary, renderConsultations, renderPrescriptions,
+    renderLab, renderVaccinations, renderDocuments, renderImaging,
+    historyEntriesHtml,
+  };
 })();
 
 window.MedicalRecordDesktop = MedicalRecordDesktop;

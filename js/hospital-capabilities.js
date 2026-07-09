@@ -105,13 +105,13 @@ const HospitalCapabilities = (() => {
      filtré côté MedicalRecordDesktop pour les rôles non cliniques
      (réception, laboratoire). */
   const RECORD_SECTIONS = {
-    admin_hospital: ['summary','history','consultations','prescriptions','lab','imaging','documents','access_log'],
-    doctor:         ['summary','history','consultations','prescriptions','lab','imaging','documents','access_log'],
-    nurse:          ['summary','history','consultations','prescriptions','lab','imaging','documents'],
+    admin_hospital: ['summary','history','consultations','prescriptions','lab','vaccinations','imaging','documents','access_log'],
+    doctor:         ['summary','history','consultations','prescriptions','lab','vaccinations','imaging','documents','access_log'],
+    nurse:          ['summary','history','consultations','prescriptions','lab','vaccinations','imaging','documents'],
     lab:            ['summary','lab'],
     reception:      ['summary'],
     pharmacist:     ['summary','prescriptions'],
-    admin:          ['summary','history','consultations','prescriptions','lab','imaging','documents','access_log'],
+    admin:          ['summary','history','consultations','prescriptions','lab','vaccinations','imaging','documents','access_log'],
   };
 
   function visibleRecordSections(role) {

@@ -176,3 +176,154 @@ test('la route "records" est bien déclarée dans HospitalPermissions et Hospita
   const ui = fs.readFileSync(path.resolve(__dirname, '..', 'js/hospital-desktop-ui.js'), 'utf8');
   assert.match(ui, /records:\s*\(c\)\s*=>\s*window\.MedicalRecordDesktop/, 'la route doit être branchée sur MedicalRecordDesktop');
 });
+
+/* =====================================================
+   Tests d'intégration — MedicalRecordDesktop chargé pour de vrai
+   (db.js + hospitals_registry.js + hospital-capabilities.js +
+   hospital-permissions.js + medical-record-desktop.js dans le
+   même contexte). Permet de tester la recherche, l'assemblage
+   du dossier complet et le filtrage par rôle SANS DOM réel, en
+   appelant directement les fonctions exposées par le module.
+   ===================================================== */
+function loadIntegration() {
+  const storage = makeMemoryStorage();
+  const sessionStorage = makeMemoryStorage();
+  const sandbox = {
+    console,
+    localStorage: storage,
+    sessionStorage,
+    window: { addEventListener: () => {} },
+    document: { getElementById: () => null, querySelectorAll: () => [] },
+    setInterval: () => 0,
+    clearInterval: () => {},
+    setTimeout: () => 0,
+    crypto: globalThis.crypto,
+    firebaseReady: false,
+    firebaseDB: null,
+    // CloudDB (Firestore) n'est pas rechargé ici : stub minimal, les
+    // tests d'isolation établissement portent sur DB/HospitalsRegistry
+    // (source de vérité locale synchronisée depuis Firebase).
+    CloudDB: {
+      createAuditLog: async () => null,
+      listByHospital: async () => [],
+      listAuditLogForTarget: async () => [],
+    },
+    Date, JSON,
+  };
+  vm.createContext(sandbox);
+  for (const f of ['js/db.js', 'js/hospitals_registry.js', 'js/hospital-capabilities.js', 'js/hospital-permissions.js', 'js/medical-record-desktop.js']) {
+    const code = fs.readFileSync(path.resolve(__dirname, '..', f), 'utf8');
+    vm.runInContext(code, sandbox, { filename: f });
+  }
+  return {
+    DB: sandbox.window.DB,
+    Registry: sandbox.window.HospitalsRegistry,
+    MRD: sandbox.window.MedicalRecordDesktop,
+    setRole(role) { sandbox.window.HospitalAuth = { getSession: () => ({ role }) }; },
+    setHospital(id) { sessionStorage.setItem('mc_current_hospital', id); },
+  };
+}
+
+test('[intégration] recherche patient : ne trouve que dans l\'établissement actif, par nom/prénom/téléphone/n° dossier', () => {
+  const { DB, Registry, MRD, setHospital } = loadIntegration();
+  Registry.addHospital({ establishmentId: 'HOSP_A', name: 'Clinique A' });
+  Registry.addHospital({ establishmentId: 'HOSP_B', name: 'Clinique B' });
+  const alice = DB.addPatient({ firstname: 'Alice', lastname: 'Nkulu', phone: '+243800000001', country_code: 'CD', establishmentId: 'HOSP_A' });
+  DB.addPatient({ firstname: 'Bob', lastname: 'Mbala', phone: '+243800000002', country_code: 'CD', establishmentId: 'HOSP_A' });
+  DB.addPatient({ firstname: 'Alice', lastname: 'AutreHopital', phone: '+243800000003', country_code: 'CD', establishmentId: 'HOSP_B' });
+
+  setHospital('HOSP_A');
+  MRD.filter('alice'); // recherche par prénom
+  let results = MRD.patientsForList();
+  assert.strictEqual(results.length, 1, 'ne doit trouver que la patiente Alice de HOSP_A');
+  assert.strictEqual(results[0].id, alice.id);
+
+  MRD.filter(alice.id); // recherche par numéro de dossier (code patient)
+  assert.strictEqual(MRD.patientsForList().length, 1);
+
+  MRD.filter('+243800000001'); // recherche par téléphone
+  assert.strictEqual(MRD.patientsForList().length, 1);
+
+  MRD.filter('mbala'); // recherche par nom de famille
+  assert.strictEqual(MRD.patientsForList()[0].lastname, 'Mbala');
+
+  MRD.filter(''); // vide = tous les patients de l'établissement actif
+  assert.strictEqual(MRD.patientsForList().length, 2, 'HOSP_A a 2 patients, jamais celui de HOSP_B');
+});
+
+test('[intégration] ouverture d\'un dossier complet : identité, consultations, ordonnances, analyses, vaccinations, documents', () => {
+  const { DB, Registry, MRD, setHospital } = loadIntegration();
+  Registry.addHospital({ establishmentId: 'HOSP_A', name: 'Clinique A' });
+  const p = DB.addPatient({ firstname: 'Alice', lastname: 'Nkulu', dob: '1990-01-01', country_code: 'CD', establishmentId: 'HOSP_A' });
+  DB.addConsultation({ patient_id: p.id, date: '2026-01-01', doctor: 'Dr House', diagnosis: 'Grippe', reason: 'Fièvre' });
+  DB.addPrescription({ patient_id: p.id, date: '2026-01-01', doctor: 'Dr House', medicines: [{ name: 'Paracétamol', dosage: '500mg' }] });
+  DB.addLabResult({ patient_id: p.id, date: '2026-01-02', type: 'Glycémie', value: '0.95 g/L' });
+  DB.addVaccination({ patient_id: p.id, date: '2026-01-03', vaccine: 'Tétanos' });
+  DB.addEstablishmentDocument({ patientUid: p.id, documentType: 'consultation', documentTitle: 'Compte-rendu' });
+
+  setHospital('HOSP_A');
+  const record = MRD.loadRecord(p.id);
+
+  assert.strictEqual(record.patient.id, p.id, 'identité patient chargée');
+  assert.strictEqual(record.consultations.length, 1);
+  assert.strictEqual(record.prescriptions.length, 1);
+  assert.strictEqual(record.labs.length, 1);
+  assert.strictEqual(record.vaccinations.length, 1);
+  assert.strictEqual(record.documents.length, 1);
+
+  // Le dossier complet doit rester ouvrable sans lever d'exception
+  // (même sans DOM réel dans ce test).
+  assert.doesNotThrow(() => MRD.open(p.id));
+});
+
+test('[intégration] consultations, ordonnances et analyses sont bien rendues dans le contenu affiché', () => {
+  const { DB, Registry, MRD, setHospital } = loadIntegration();
+  Registry.addHospital({ establishmentId: 'HOSP_A', name: 'Clinique A' });
+  const p = DB.addPatient({ firstname: 'Alice', lastname: 'Nkulu', country_code: 'CD', establishmentId: 'HOSP_A' });
+  DB.addConsultation({ patient_id: p.id, date: '2026-01-01', doctor: 'Dr House', diagnosis: 'Paludisme sévère' });
+  DB.addPrescription({ patient_id: p.id, date: '2026-01-01', doctor: 'Dr House', medicines: [{ name: 'Artésunate', dosage: '120mg' }] });
+  DB.addLabResult({ patient_id: p.id, date: '2026-01-02', type: 'Goutte épaisse', value: 'Positif' });
+
+  setHospital('HOSP_A');
+  const record = MRD.loadRecord(p.id);
+
+  assert.match(MRD.renderConsultations(record), /Paludisme sévère/, 'la consultation doit être visible');
+  assert.match(MRD.renderPrescriptions(record.prescriptions), /Artésunate/, 'l\'ordonnance doit être visible');
+  assert.match(MRD.renderLab(record.labs), /Goutte épaisse/, 'l\'analyse doit être visible');
+});
+
+test('[intégration] réception ne voit pas les données médicales sensibles dans le résumé', () => {
+  const { DB, Registry, MRD, setHospital } = loadIntegration();
+  Registry.addHospital({ establishmentId: 'HOSP_A', name: 'Clinique A' });
+  const p = DB.addPatient({
+    firstname: 'Alice', lastname: 'Nkulu', phone: '+243800000001', country_code: 'CD',
+    establishmentId: 'HOSP_A', blood_type: 'O+', allergies: 'Pénicilline', chronic: 'Diabète',
+  });
+  setHospital('HOSP_A');
+
+  const receptionView = MRD.renderSummary(p, 'reception');
+  assert.match(receptionView, /Alice/, 'la réception doit voir l\'identité');
+  assert.match(receptionView, /\+243800000001/, 'la réception doit voir le contact');
+  assert.doesNotMatch(receptionView, /Pénicilline/, 'la réception NE DOIT PAS voir les allergies');
+  assert.doesNotMatch(receptionView, /Diabète/, 'la réception NE DOIT PAS voir les maladies chroniques');
+  assert.doesNotMatch(receptionView, /O\+/, 'la réception NE DOIT PAS voir le groupe sanguin');
+
+  const doctorView = MRD.renderSummary(p, 'doctor');
+  assert.match(doctorView, /Pénicilline/, 'le médecin doit voir les allergies');
+});
+
+test('[intégration] laboratoire ne voit pas l\'onglet ordonnances, pharmacie ne voit pas l\'onglet analyses', () => {
+  const win = loadIntoWindow(['js/hospital-capabilities.js']);
+  const labSections = win.HospitalCapabilities.visibleRecordSections('lab');
+  const pharmSections = win.HospitalCapabilities.visibleRecordSections('pharmacist');
+  assert.ok(!labSections.includes('prescriptions'), 'le laboratoire ne doit pas avoir accès aux ordonnances');
+  assert.ok(!pharmSections.includes('lab'), 'la pharmacie ne doit pas avoir accès aux analyses');
+});
+
+test('[intégration] sans établissement actif, aucun dossier n\'est listé', () => {
+  const { DB, Registry, MRD } = loadIntegration();
+  Registry.addHospital({ establishmentId: 'HOSP_A', name: 'Clinique A' });
+  DB.addPatient({ firstname: 'Alice', lastname: 'Nkulu', country_code: 'CD', establishmentId: 'HOSP_A' });
+  // Aucun setHospital(...) appelé : pas d'établissement actif en session.
+  assert.strictEqual(MRD.establishmentPatients().length, 0);
+});
