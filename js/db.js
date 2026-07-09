@@ -597,6 +597,15 @@ const DB = (() => {
     return d;
   }
 
+  /** Documents d'un patient (champ canonique de establishment_documents :
+      patientUid, cf. hospital.js addEstablishmentDocument), éventuellement
+      filtrés par documentType (ex: 'imaging' pour l'onglet Imagerie). */
+  function getPatientEstablishmentDocuments(pid, documentType) {
+    return getEstablishmentDocuments()
+      .filter(d => d.patientUid === pid && (!documentType || d.documentType === documentType))
+      .sort((a,b) => (b.createdAt||'').localeCompare(a.createdAt||''));
+  }
+
   function getAppointments() { return load('mc_appointments'); }
 
   function addAppointment(data) {
@@ -623,6 +632,10 @@ const DB = (() => {
     store('mc_appointments', getAppointments().filter(a => a.aid !== aid));
     _delete('mc_appointments', aid);
     _delete('appointments', aid);
+  }
+
+  function getPatientAppointments(pid) {
+    return getAppointments().filter(a => a.patient_id === pid).sort((a,b) => (b.date||'').localeCompare(a.date||''));
   }
 
   /* ══════════════════════════════════════════════════
@@ -787,8 +800,8 @@ const DB = (() => {
     getPatients, savePatients, addPatient, updatePatient, deletePatient, getPatientById, searchPatients,
     getConsultations, addConsultation, getPatientConsultations, deleteConsultation,
     getPrescriptions, addPrescription, updatePrescription, getPatientPrescriptions,
-    getEstablishmentDocuments, addEstablishmentDocument,
-    getAppointments, addAppointment, updateAppointment, deleteAppointment,
+    getEstablishmentDocuments, addEstablishmentDocument, getPatientEstablishmentDocuments,
+    getAppointments, addAppointment, updateAppointment, deleteAppointment, getPatientAppointments,
     getVaccinations, addVaccination, getPatientVaccinations, deleteVaccination,
     getAllLabResults, addLabResult, getPatientLabResults, deleteLabResult,
     getMedicines, addMedicine, updateMedicine, deleteMedicine,

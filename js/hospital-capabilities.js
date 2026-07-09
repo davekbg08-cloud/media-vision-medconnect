@@ -97,6 +97,28 @@ const HospitalCapabilities = (() => {
 
   function label(action) { return CAPS[action] || action; }
 
+  /* Onglets du dossier médical électronique (MedicalRecordDesktop)
+     visibles par rôle. Même principe que MATRIX : liste explicite,
+     rien par défaut. 'summary' (identité/contact) est nécessaire
+     pour identifier le patient dès qu'un rôle a view_patient ; son
+     CONTENU détaillé (allergies, maladies chroniques...) reste
+     filtré côté MedicalRecordDesktop pour les rôles non cliniques
+     (réception, laboratoire). */
+  const RECORD_SECTIONS = {
+    admin_hospital: ['summary','history','consultations','prescriptions','lab','imaging','documents','access_log'],
+    doctor:         ['summary','history','consultations','prescriptions','lab','imaging','documents','access_log'],
+    nurse:          ['summary','history','consultations','prescriptions','lab','imaging','documents'],
+    lab:            ['summary','lab'],
+    reception:      ['summary'],
+    pharmacist:     ['summary','prescriptions'],
+    admin:          ['summary','history','consultations','prescriptions','lab','imaging','documents','access_log'],
+  };
+
+  function visibleRecordSections(role) {
+    if (!can(role, 'view_patient')) return [];
+    return (RECORD_SECTIONS[role] || ['summary']).slice();
+  }
+
   /* Niveau d'accès lisible, dérivé du rôle (affichage topbar). */
   function accessLevel(role) {
     return ({
@@ -130,7 +152,7 @@ const HospitalCapabilities = (() => {
     return window.HospitalCapabilities?.require?.(session.role, action) ?? true;
   }
 
-  return { can, capabilitiesOf, label, accessLevel, require, guardHospitalAction, CAPS };
+  return { can, capabilitiesOf, label, accessLevel, require, guardHospitalAction, visibleRecordSections, CAPS };
 })();
 
 window.HospitalCapabilities = HospitalCapabilities;

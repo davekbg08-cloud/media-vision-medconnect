@@ -1,0 +1,113 @@
+/* =====================================================
+   MedConnect — MedicalRecordDesktop (dossier médical DME)
+   Vue à deux volets : liste patients (gauche) / dossier
+   complet à onglets (droite). Réutilise les classes déjà
+   existantes (.record-card, .patient-row, .id-tag, .chip,
+   .info-table) — ce fichier n'ajoute que la disposition.
+   ===================================================== */
+.mrd-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 320px) 1fr;
+  gap: 1rem;
+  align-items: start;
+  height: calc(100vh - 220px);
+  min-height: 420px;
+}
+
+.mrd-list-pane {
+  display: flex;
+  flex-direction: column;
+  gap: .6rem;
+  height: 100%;
+  min-height: 0;
+}
+.mrd-list-pane > #mrd-search {
+  flex-shrink: 0;
+}
+.mrd-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: .5rem;
+  padding-right: .2rem;
+}
+.mrd-patient-row.active {
+  border-color: var(--primary, #2f6df6);
+  background: rgba(47,109,246,.1);
+}
+
+.mrd-detail-pane {
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: .2rem;
+}
+
+.mrd-detail-header {
+  display: flex;
+  align-items: center;
+  gap: .8rem;
+  margin-bottom: .8rem;
+}
+.mrd-avatar, .mrd-photo {
+  font-size: 2.2rem;
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--surface, #161d2e);
+  border: 1px solid var(--border, rgba(255,255,255,.08));
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.mrd-photo img { width: 100%; height: 100%; object-fit: cover; }
+.mrd-photo-row { display: flex; gap: 1rem; align-items: flex-start; }
+.mrd-photo-row .info-table { flex: 1; }
+
+.mrd-tabs {
+  display: flex;
+  gap: .4rem;
+  flex-wrap: wrap;
+  margin-bottom: .9rem;
+  border-bottom: 1px solid var(--border, rgba(255,255,255,.08));
+  padding-bottom: .6rem;
+}
+.mrd-tab {
+  padding: .45rem .8rem;
+  border: 1px solid var(--border, rgba(255,255,255,.12));
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: .82rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.mrd-tab.active { background: var(--primary, #2f6df6); color: #fff; border-color: transparent; }
+
+.mrd-filters {
+  display: flex;
+  gap: .5rem;
+  flex-wrap: wrap;
+  margin-bottom: .8rem;
+}
+.mrd-filters select,
+.mrd-filters input {
+  padding: .4rem .55rem;
+  border: 1px solid var(--border, rgba(255,255,255,.12));
+  border-radius: 8px;
+  background: var(--surface, #161d2e);
+  color: inherit;
+  font: inherit;
+  font-size: .8rem;
+}
+
+@media (max-width: 900px) {
+  .mrd-layout { grid-template-columns: 1fr; height: auto; }
+  .mrd-list-pane { height: 320px; }
+  .mrd-detail-pane { height: auto; }
+}

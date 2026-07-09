@@ -18,6 +18,7 @@ const HospitalPermissions = (() => {
   const ROUTES = {
     dashboard:     ['admin', 'admin_hospital', 'doctor', 'nurse', 'pharmacist', 'lab', 'reception'],
     patients:      ['admin', 'admin_hospital', 'doctor', 'nurse', 'reception'],
+    records:       ['admin', 'admin_hospital', 'doctor', 'nurse', 'lab', 'reception', 'pharmacist'],
     consultations: ['admin', 'admin_hospital', 'doctor'],
     beds:          ['admin', 'admin_hospital', 'doctor', 'nurse'],
     maternity:     ['admin', 'admin_hospital', 'doctor', 'nurse'],
@@ -57,6 +58,7 @@ const HospitalPermissions = (() => {
     if (canAccess(role, 'dashboard'))     menu.push({ key:'dashboard',     label:L('hd_dashboard')     || 'Tableau de bord',        icon:'📊' });
     if (canAccess(role, 'reception'))     menu.push({ key:'reception',     label:'Réception / Accueil',  icon:'🛎️' });
     if (canAccess(role, 'patients'))      menu.push({ key:'patients',      label:L('hd_patients')      || 'Patients',                icon:'👥' });
+    if (canAccess(role, 'records'))       menu.push({ key:'records',       label:L('hd_records')       || 'Dossiers médicaux',      icon:'📁' });
     if (canAccess(role, 'consultations')) menu.push({ key:'consultations', label:L('hd_consultations') || 'Consultations',           icon:'🩺' });
     if (canAccess(role, 'emergency'))     menu.push({ key:'emergency',     label:'Urgences',             icon:'🚑' });
     if (canAccess(role, 'maternity'))     menu.push({ key:'maternity',     label:'Maternité',            icon:'🤰' });

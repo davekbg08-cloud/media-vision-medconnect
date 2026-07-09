@@ -2,11 +2,11 @@
    MedConnect 2.0 — Service Worker
    Optimisation chargement / PWA
    ===================================================== */
-const CACHE = 'medconnect-v4.2';
+const CACHE = 'medconnect-v4.3';
 
 const ASSETS = [
   './', './index.html', './css/style.css', './css/establishments-balance.css',
-  './css/hospital-desktop.css', './css/mobile-layout-fixes.css',
+  './css/hospital-desktop.css', './css/medical-record-desktop.css', './css/mobile-layout-fixes.css',
   // SDK Firebase : ne passait JAMAIS dans le cache dynamique (réponse
   // opaque cross-origin rejetée par le check type !== 'opaque') — la
   // PWA hors-ligne échouait au chargement. Le précache via addAll
@@ -24,6 +24,7 @@ const ASSETS = [
   './js/cloud-db.js', './js/hospital-permissions.js', './js/hospital-capabilities.js', './js/hospital-auth.js', './js/hospital-i18n.js', './js/hospital-subscription.js',
   './js/medical-ai.js', './js/hospital-beds.js', './js/hospital-lab.js',
   './js/hospital-desktop-ui.js', './js/hospital-reception.js', './js/hospital-auth.js',
+  './js/medical-record-desktop.js',
   './js/i18n.js', './js/db.js', './js/currency.js',
   './js/access_control.js', './js/haptic_feedback.js',
   './js/transfer_service.js', './js/network.js', './js/inbox_message_controls.js', './js/transfer_ui_patch.js',

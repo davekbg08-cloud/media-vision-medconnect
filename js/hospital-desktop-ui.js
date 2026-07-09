@@ -34,6 +34,7 @@ const HospitalDesktopUI = (() => {
     ai:           (c) => MedicalAIModule.render(c),
     subscription: (c) => HospitalSubscriptionModule.render(c),
     patients:     (c) => renderPatientsByYear(c),
+    records:      (c) => window.MedicalRecordDesktop?.render(c),
     reception:    (c) => HospitalReceptionModule.render(c),
     emergency:    (c) => renderComingSoon(c, '🚑 Urgences', 'Prise en charge des urgences et transferts entrants prioritaires.'),
     maternity:    (c) => renderComingSoon(c, '🤰 Maternité', 'Suivi des grossesses, accouchements et nouveau-nés.'),
