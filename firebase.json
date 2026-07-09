@@ -12,7 +12,8 @@
       "**/.*",
       "**/node_modules/**",
       "playstore/**",
-      "android/**"
+      "android/**",
+      "*.md"
     ],
     "headers": [
       {
