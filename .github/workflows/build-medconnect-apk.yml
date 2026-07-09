@@ -12,6 +12,18 @@ on:
       - 'css/**'
       - 'sw.js'
       - 'manifest.json'
+      - 'tests/**'
+      - 'package.json'
+  pull_request:
+    paths:
+      - 'android/**'
+      - 'index.html'
+      - 'js/**'
+      - 'css/**'
+      - 'sw.js'
+      - 'manifest.json'
+      - 'tests/**'
+      - 'package.json'
 
 permissions:
   contents: read
@@ -20,9 +32,36 @@ env:
   APK_NAME: medconnect-v2.4.apk
 
 jobs:
+  # Porte d'entrée obligatoire : aucun APK n'est construit si les tests
+  # (node --test tests/*.test.js) ne passent pas. Tourne sur push ET
+  # pull_request, y compris pour un changement qui ne touche que
+  # tests/** (auparavant hors du déclencheur — un test cassé seul ne
+  # lançait jamais la CI).
+  test:
+    name: Tests (node --test)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run test suite
+        run: npm test
+
   build-apk:
     name: Build APK v2.4
     runs-on: ubuntu-latest
+    needs: test
+    # L'APK ne se construit que sur push vers main (jamais pour une
+    # simple pull request) — comportement inchangé par rapport à avant,
+    # seul le déclencheur pull_request ajouté ci-dessus concerne le job
+    # "test" (retour rapide sur une PR, sans construire l'APK).
+    if: github.event_name == 'push'
 
     steps:
       - name: Checkout repository
