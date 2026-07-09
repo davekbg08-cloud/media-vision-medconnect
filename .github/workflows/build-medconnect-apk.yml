@@ -1,17 +1,17 @@
 name: Build MedConnect Android APK
 
+# ⚠️ Déclenchement MANUEL uniquement (workflow_dispatch). Ce build
+# produit un APK de RELEASE SIGNÉ, ce qui nécessite le keystore de
+# signature — un secret qui n'est PAS dans le dépôt (public). Tant que
+# le keystore n'est pas fourni via les secrets GitHub, ce workflow ne
+# doit se lancer qu'à la demande, jamais automatiquement à chaque push
+# (sinon il échoue systématiquement). Pour publier au Play Store,
+# construire l'APK localement (où le keystore est présent) ou configurer
+# les secrets GitHub (KEYSTORE_BASE64, STORE_PASSWORD, KEY_ALIAS,
+# KEY_PASSWORD) puis réactiver le déclencheur push.
+
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - 'android/**'
-      - 'index.html'
-      - 'js/**'
-      - 'css/**'
-      - 'sw.js'
-      - 'manifest.json'
 
 permissions:
   contents: read

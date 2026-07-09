@@ -1,0 +1,39 @@
+name: Tests MedConnect
+
+# Lance la suite de tests automatisés à chaque push sur main et sur
+# chaque pull request. Aucun secret ni keystore requis : ce workflow
+# vérifie uniquement la logique (js/ + tests/) et sert de garde-fou
+# qualité avant tout déploiement.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'js/**'
+      - 'tests/**'
+      - 'package.json'
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Suite de tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run tests
+        run: npm test
