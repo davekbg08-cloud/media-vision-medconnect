@@ -351,9 +351,20 @@
     }
   }
 
+  // Conserve l'implémentation d'origine (auth.js) pour les rôles que ce
+  // patch ne gère pas dans ROLE_META (lab, reception…). Sans ça, cliquer
+  // sur Laboratoire/Réception ne faisait RIEN (return silencieux) car
+  // le patch écrasait _registerRole pour tous les rôles.
+  const _originalRegisterRole = Auth._registerRole;
+
   Auth._registerRole = function patchedRegisterRole(role) {
     const meta = ROLE_META[role];
-    if (!meta) return;
+    if (!meta) {
+      // Rôle non géré ici (lab, reception…) → comportement d'origine.
+      return typeof _originalRegisterRole === 'function'
+        ? _originalRegisterRole.call(Auth, role)
+        : undefined;
+    }
 
     document.querySelectorAll('#register-roles .role-btn').forEach(b =>
       b.classList.toggle('active', b.dataset.role === role));

@@ -657,7 +657,10 @@ const HospitalsRegistry = (() => {
     const hospitals = getHospitals();
     if (!hospitals.length) return `<div class="card empty-state"><p>Aucun établissement enregistré</p></div>`;
     return `<div class="records-list">
-      ${hospitals.map(h => `
+      ${hospitals.map(h => {
+        const st = String(h.status || '').toLowerCase();
+        const isPending = st === 'pending' || (h.registeredFrom === 'desktop' && !['active','approved'].includes(st));
+        return `
         <div class="record-card">
           <div class="record-header">
             <span style="font-size:1.25rem">${TYPE_ICONS[h.type] || '🏥'}</span>
@@ -668,13 +671,49 @@ const HospitalsRegistry = (() => {
           <p style="font-size:.83rem;color:var(--text-muted)">
             <span style="font-family:monospace">${esc(h.officialId || 'Identifiant non renseigné')}</span>
             ${h.city ? ` · ${esc(h.city)}` : ''}${h.phone ? ` · 📞 ${esc(h.phone)}` : ''}
+            ${h.registeredFrom === 'desktop' ? ' · 🖥️ inscrit desktop' : ''}
           </p>
           <p style="font-size:.8rem;color:var(--text-dim)">
             GPS : ${h.latitude !== '' && h.longitude !== '' ? `${h.latitude}, ${h.longitude}` : 'Non renseignée'}
           </p>
+          ${isPending ? `
+          <div style="display:flex;gap:.5rem;margin-top:.5rem;flex-wrap:wrap">
+            <button class="btn btn-primary btn-sm" onclick="HospitalsRegistry.validateEstablishment('${esc(h.establishmentId)}',true)">✅ Valider</button>
+            <button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="HospitalsRegistry.validateEstablishment('${esc(h.establishmentId)}',false)">❌ Refuser</button>
+          </div>` : ''}
         </div>
-      `).join('')}
+      `;}).join('')}
     </div>`;
+  }
+
+  /* Valide (approved/active) ou refuse (rejected) un établissement en
+     attente — typiquement inscrit depuis le desktop. Met à jour le
+     document établissement (propagé aux collections miroir par
+     updateHospital → saveHospitals → pushCloud establishments +
+     mc_hospitals) ET le compte users/{authUid} pour autoriser la
+     connexion desktop. */
+  async function validateEstablishment(establishmentId, approve) {
+    const h = getHospitalById(establishmentId);
+    if (!h) { App?.toast?.('Établissement introuvable.', 'error'); return; }
+    if (!confirm(approve
+      ? `Valider l'établissement « ${h.name} » ? Il pourra se connecter.`
+      : `Refuser l'établissement « ${h.name} » ?`)) return;
+
+    updateHospital(establishmentId, { status: approve ? 'active' : 'rejected' });
+
+    // Compte Firebase de l'établissement (rôle 'hospital') : actif si
+    // validé, pour que la connexion desktop soit autorisée.
+    try {
+      if (h.authUid && typeof firebaseDB !== 'undefined' && firebaseDB) {
+        await firebaseDB.collection('users').doc(h.authUid).set({
+          status: approve ? 'active' : 'rejected', role: 'hospital',
+        }, { merge: true });
+      }
+    } catch (e) { console.warn('[Registry] MAJ compte établissement :', e?.message || e); }
+
+    App?.toast?.(approve ? '✅ Établissement validé.' : 'Établissement refusé.');
+    if (window.App?.navigateTo) App.navigateTo('dashboard');
+    else if (document.getElementById('main-content')) renderAdminPage(document.getElementById('main-content'), 'list');
   }
 
   function renderAdminRequests() {
@@ -932,7 +971,7 @@ const HospitalsRegistry = (() => {
 
   return {
     getHospitals, saveHospitals, addHospital, updateHospital, getHospitalById,
-    getAffiliations, saveAffiliations, requestAffiliation, respondAffiliation, removeStaff,
+    getAffiliations, saveAffiliations, requestAffiliation, respondAffiliation, removeStaff, validateEstablishment,
     getDoctorHospitals, getPendingAffiliations,
     getCurrentHospital, setCurrentHospital, clearCurrentHospital,
     getPatientsForContext, getAppointmentsForContext, getPatientsForEstablishment,

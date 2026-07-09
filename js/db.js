@@ -229,6 +229,10 @@ const DB = (() => {
       'patients','doctors','nurses','pharmacies','hospitals',
       'medical_records','prescriptions','appointments','notifications',
       'mc_hospitals','mc_affiliations',
+      // Collections des DEMANDES (écrites par un appareil, lues par
+      // l'admin sur un autre) : sans elles, une demande créée sur
+      // desktop ne redescendait jamais sur le mobile admin.
+      'affiliation_requests','registration_requests','establishments',
       'mc_verified_doctors','mc_verified_pharms','mc_verified_nurses',
     ];
     // Chaque collection en parallèle avec un timeout individuel : un

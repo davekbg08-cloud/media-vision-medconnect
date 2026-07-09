@@ -715,6 +715,11 @@ const Auth = (() => {
     if (!_hasFirebaseAuth() || !_hasFirebaseDB()) { showAdminError('❌ Firebase indisponible. Vérifiez la connexion internet puis réessayez.'); return; }
 
     try {
+      // Nettoie une éventuelle session Firebase résiduelle (ex. un agent
+      // hôpital connecté juste avant sur le même navigateur) pour éviter
+      // que les règles Firestore voient la mauvaise identité.
+      if (firebaseAuth.currentUser) { try { await firebaseAuth.signOut(); } catch (_) {} }
+
       const credential = await firebaseAuth.signInWithEmailAndPassword(email, pass);
       const uid = credential?.user?.uid;
       if (!uid) throw new Error('admin_uid_missing');
