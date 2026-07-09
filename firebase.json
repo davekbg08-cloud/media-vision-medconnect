@@ -12,8 +12,7 @@
       "**/.*",
       "**/node_modules/**",
       "playstore/**",
-      "android/**",
-      "occasion/**"
+      "android/**"
     ],
     "headers": [
       {
