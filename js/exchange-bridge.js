@@ -134,13 +134,20 @@ const ExchangeBridge = (() => {
     const cached = _subscriptionCache.get(hospitalId);
     if (cached && (Date.now() - cached.fetchedAt) < SUBSCRIPTION_CACHE_TTL_MS) return cached;
 
-    let result = { status: 'active', graceUntil: null, fetchedAt: Date.now() };
+    let result = { status: 'active', graceUntil: null, endDate: null, activatedAt: null, plan: null, fetchedAt: Date.now() };
     if (hasFirebaseDB()) {
       try {
         const doc = await firebaseDB.collection('subscriptions').doc(hospitalId).get();
         if (doc.exists) {
           const data = doc.data() || {};
-          result = { status: String(data.status || 'active').toLowerCase(), graceUntil: data.graceUntil || null, fetchedAt: Date.now() };
+          result = {
+            status: String(data.status || 'active').toLowerCase(),
+            graceUntil: data.graceUntil || null,
+            endDate: data.endDate || null,
+            activatedAt: data.activatedAt || null,
+            plan: data.plan || null,
+            fetchedAt: Date.now(),
+          };
         }
       } catch (e) {
         console.warn('[ExchangeBridge] Lecture abonnement impossible, traité comme actif :', e);
