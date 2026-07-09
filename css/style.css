@@ -1397,3 +1397,30 @@ body.rtl .tl-connector { left: auto; right: -1.1rem; }
 }
 .sync-badge-live:hover { background: rgba(255,255,255,.09); }
 .sync-badge-live span { font-size: .85rem; }
+
+/* ── Écran de blocage (VersionManager) : maintenance / mise à jour
+   obligatoire. Seul mécanisme qui empêche réellement l'utilisation
+   de l'app — activé uniquement par un administrateur (system/maintenance),
+   jamais par une mise à jour normale. ── */
+#mc-block-screen {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10,15,30,.92);
+  padding: 1.5rem;
+}
+.mc-block-card {
+  max-width: 420px;
+  width: 100%;
+  text-align: center;
+  background: var(--bg-2, #0F172A);
+  border: 1px solid var(--border, rgba(255,255,255,.08));
+  border-radius: 16px;
+  padding: 2rem 1.5rem;
+}
+.mc-block-icon { font-size: 2.6rem; margin-bottom: .6rem; }
+.mc-block-card h2 { margin: 0 0 .6rem; }
+.mc-block-card p { opacity: .8; line-height: 1.5; }

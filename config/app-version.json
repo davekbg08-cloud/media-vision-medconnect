@@ -1,0 +1,16 @@
+{
+  "version": "2.4.0",
+  "build": "2026.07.09.01",
+  "buildDate": "2026-07-09",
+  "changelog": [
+    {
+      "version": "2.4.0",
+      "date": "2026-07-09",
+      "notes": [
+        "Dossiers médicaux (DME) desktop hôpital : consultations, ordonnances, laboratoire, vaccinations, imagerie, documents, historique des accès",
+        "Correctif inscription laboratoire/réception (registre infirmier bloquant à tort)",
+        "Système de gestion des versions et des mises à jour"
+      ]
+    }
+  ]
+}

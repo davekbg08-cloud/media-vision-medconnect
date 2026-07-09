@@ -257,6 +257,13 @@ const DB = (() => {
         console.warn(`[MedConnect] Sync ${col} ignorée (lente/indisponible) :`, e?.message || e);
       }
     }));
+    // Horodatage pour l'écran "À propos" (VersionManager) — dernière
+    // fois que la synchro Firebase a été tentée avec succès.
+    try { localStorage.setItem('mc_last_sync_at', new Date().toISOString()); } catch (_) {}
+  }
+
+  function getLastSyncAt() {
+    try { return localStorage.getItem('mc_last_sync_at'); } catch (_) { return null; }
   }
 
   /** Version non bloquante : lance la sync en arrière-plan sans jamais
@@ -794,7 +801,7 @@ const DB = (() => {
   }
 
   return {
-    init, syncFromFirebase, syncFromFirebaseInBackground, setupUserScopedListeners, generatePatientId, makeId, pushAndReport, flushOutbox, outboxCount,
+    init, syncFromFirebase, syncFromFirebaseInBackground, setupUserScopedListeners, generatePatientId, makeId, pushAndReport, flushOutbox, outboxCount, getLastSyncAt,
     getAccounts, saveAccounts, getUsers, saveUsers, upsertUserProfile,
     getRegistrationRequests, saveRegistrationRequests, createRegistrationRequest,
     getPatients, savePatients, addPatient, updatePatient, deletePatient, getPatientById, searchPatients,
