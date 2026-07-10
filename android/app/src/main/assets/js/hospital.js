@@ -349,9 +349,13 @@ const HospitalPortal = (() => {
         <div class="form-group"><label>${t('consult_diagnosis')} *</label><textarea id="c-diag" rows="3" required></textarea></div>
         <div class="form-group"><label>${t('consult_treatment')}</label><textarea id="c-treat" rows="2"></textarea></div>
         <div class="form-group"><label>${t('consult_notes')}</label><textarea id="c-notes" rows="2"></textarea></div>
-        <div class="form-group">
-          <label>💊 Ordonnance <button type="button" class="btn btn-ghost btn-xs" onclick="HospitalPortal.addRxItem()">+ Ajouter</button></label>
+        <div class="rx-block">
+          <div class="rx-block-header">
+            <span class="rx-block-title">💊 Ordonnance</span>
+          </div>
+          <p class="rx-block-hint">Ajoutez au moins un médicament pour créer une ordonnance.</p>
           <div id="rx-list"></div>
+          <button type="button" class="btn btn-ghost btn-sm rx-add-btn" onclick="HospitalPortal.addRxItem()">+ Ajouter un médicament</button>
         </div>
         <div id="smart-check-result"></div>
         <div class="form-actions">
@@ -360,16 +364,35 @@ const HospitalPortal = (() => {
           <button type="submit" class="btn btn-primary">${t('btn_save')}</button>
         </div>
       </form>`);
+    // Première ligne médicament affichée automatiquement à l'ouverture.
+    addRxItem();
   }
 
   function addRxItem() {
+    const list = document.getElementById('rx-list');
+    if (!list) return;
     const el = document.createElement('div');
     el.className = 'rx-item';
     el.innerHTML = `
       <input type="text" class="rx-name"   placeholder="${t('med_name')}">
       <input type="text" class="rx-dosage" placeholder="Dosage / fréquence">
-      <button type="button" class="btn btn-ghost btn-xs" onclick="this.parentElement.remove()">✕</button>`;
-    document.getElementById('rx-list').appendChild(el);
+      <button type="button" class="btn btn-ghost btn-sm rx-remove" onclick="HospitalPortal.removeRxItem(this)">✕ Retirer</button>`;
+    list.appendChild(el);
+    _refreshRxRemoveButtons();
+  }
+
+  function removeRxItem(btn) {
+    const item = btn.closest('.rx-item');
+    if (item) item.remove();
+    _refreshRxRemoveButtons();
+  }
+
+  function _refreshRxRemoveButtons() {
+    const items = [...document.querySelectorAll('#rx-list .rx-item')];
+    items.forEach(it => {
+      const rm = it.querySelector('.rx-remove');
+      if (rm) rm.style.display = items.length <= 1 ? 'none' : '';
+    });
   }
 
   function runSmartCheck(patientId) {
@@ -394,6 +417,11 @@ const HospitalPortal = (() => {
       App.toast("Impossible de créer l'ordonnance : aucun établissement actif. Sélectionnez un établissement.", 'error'); return;
     }
 
+    const fDate    = document.getElementById('c-date').value;
+    const fDoctor  = document.getElementById('c-doc').value;
+    const fReason  = document.getElementById('c-reason').value;
+    const fTreat   = document.getElementById('c-treat').value;
+    const fNotes   = document.getElementById('c-notes').value;
     const diag = document.getElementById('c-diag').value;
     const meds = [...document.querySelectorAll('.rx-item')]
       .map(el => ({ name: el.querySelector('.rx-name').value, dosage: el.querySelector('.rx-dosage').value }))
@@ -402,25 +430,25 @@ const HospitalPortal = (() => {
     const est = currentEstablishmentFields();
     const consult = DB.addConsultation({
       patient_id: patientId,
-      date:       document.getElementById('c-date').value,
-      doctor:     document.getElementById('c-doc').value,
+      date:       fDate,
+      doctor:     fDoctor,
       doctorOrderNumber: user.order_num || '',
       doctorSpecialty:   user.specialty || '',
-      reason:     document.getElementById('c-reason').value,
+      reason:     fReason,
       diagnosis:  diag,
-      treatment:  document.getElementById('c-treat').value,
-      notes:      document.getElementById('c-notes').value,
+      treatment:  fTreat,
+      notes:      fNotes,
       ...est,
     });
 
     DB.addEstablishmentDocument({
       relatedId:        consult.cid,
       documentType:     'consultation',
-      documentTitle:     `Consultation — ${document.getElementById('c-reason').value || diag}`,
+      documentTitle:     `Consultation — ${fReason || diag}`,
       establishmentId:   est.establishmentId || '',
       establishmentName: est.establishmentName || '',
       doctorUid:          user.uid || '',
-      doctorName:         document.getElementById('c-doc').value,
+      doctorName:         fDoctor,
       doctorOrderNumber:  user.order_num || '',
       patientUid:         patientId,
       patientCode:        patientId,
@@ -430,13 +458,12 @@ const HospitalPortal = (() => {
       accessLevel:        'establishment',
     });
 
-    App.closeModal();
-
+    let rxId = null;
     if (meds.length) {
       const rx = DB.addPrescription({
         patient_id: patientId,
-        date:       document.getElementById('c-date').value,
-        doctor:     document.getElementById('c-doc').value,
+        date:       fDate,
+        doctor:     fDoctor,
         doctor_uid: user.uid || '',
         doctorOrderNumber: user.order_num || '',
         doctorSpecialty:   user.specialty || '',
@@ -452,7 +479,7 @@ const HospitalPortal = (() => {
         establishmentId:    est.establishmentId || '',
         establishmentName:  est.establishmentName || '',
         doctorUid:           user.uid || '',
-        doctorName:          document.getElementById('c-doc').value,
+        doctorName:          fDoctor,
         doctorOrderNumber:   user.order_num || '',
         patientUid:          patientId,
         patientCode:         patientId,
@@ -461,10 +488,14 @@ const HospitalPortal = (() => {
         createdByRole:       user.role || '',
         accessLevel:         'establishment',
       });
-
-      openPrescriptionTarget(rx.pid);
-      return;
+      rxId = rx.pid;
     }
+
+    // Fermeture APRÈS création complète (consultation + ordonnance +
+    // documents) : plus aucune lecture du formulaire ensuite.
+    App.closeModal();
+
+    if (rxId) { openPrescriptionTarget(rxId); return; }
 
     App.toast(t('msg_saved')); App.navigateTo('consultations');
   }
@@ -553,7 +584,7 @@ const HospitalPortal = (() => {
   return {
     render, filter, openDetail, openNewPatient, saveNewPatient, deletePatient,
     openExternalSearch, searchExternalPatient, requestPatientAccess,
-    openConsult, addRxItem, runSmartCheck, saveConsult, delConsult,
+    openConsult, addRxItem, removeRxItem, runSmartCheck, saveConsult, delConsult,
     openPrescriptionTarget, confirmPrescriptionTarget,
     renderConsultations, renderPrescriptions,
   };

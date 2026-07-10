@@ -526,14 +526,47 @@ input::placeholder { color:var(--text-dim); }
   margin-top: .85rem;
 }
 
-/* Rx items */
+/* ── Bloc Ordonnance (formulaire consultation) ── */
+.rx-block {
+  border: 1px solid var(--primary, #0ea5e9);
+  border-radius: 12px;
+  background: rgba(14,165,233,.06);
+  padding: .9rem;
+  margin: .6rem 0 1rem;
+}
+.rx-block-header { display: flex; align-items: center; margin-bottom: .3rem; }
+.rx-block-title { font-size: 1.05rem; font-weight: 700; }
+.rx-block-hint {
+  font-size: .8rem;
+  color: var(--text-muted, #94a3b8);
+  margin: 0 0 .7rem;
+}
+.rx-add-btn { margin-top: .3rem; }
+
 .rx-item {
   display: flex;
+  flex-direction: column;
   gap: .5rem;
-  align-items: center;
-  margin-bottom: .4rem;
+  padding: .7rem;
+  margin-bottom: .7rem;
+  border: 1px solid var(--border, rgba(255,255,255,.1));
+  border-radius: 10px;
+  background: var(--surface, rgba(255,255,255,.03));
 }
-.rx-name, .rx-dosage { flex:1; }
+.rx-item .rx-name,
+.rx-item .rx-dosage {
+  width: 100%;
+  min-height: 44px;
+  box-sizing: border-box;
+}
+.rx-item .rx-remove { align-self: flex-end; min-height: 40px; }
+
+@media (min-width: 700px) {
+  .rx-item { flex-direction: row; align-items: center; flex-wrap: wrap; }
+  .rx-item .rx-name,
+  .rx-item .rx-dosage { flex: 1; width: auto; }
+  .rx-item .rx-remove { align-self: center; }
+}
 
 /* ── BUTTONS ───────────────────────────────────────── */
 .btn {
