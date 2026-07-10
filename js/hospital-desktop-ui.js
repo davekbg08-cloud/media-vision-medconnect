@@ -277,15 +277,6 @@ const HospitalDesktopUI = (() => {
   }
 
   /* Placeholder honnête pour les sections encore à construire. */
-  function renderComingSoon(container, title, desc) {
-    container.innerHTML = `
-      <div class="hospital-page-header"><div><h1>${esc(title)}</h1><p>${esc(desc)}</p></div></div>
-      <div class="card empty-state">
-        <p>🚧 Module en cours de construction.</p>
-        <p class="muted">Cette section fera partie de la gestion médicale complète du desktop.</p>
-      </div>`;
-  }
-
   /* Patients classés par ANNÉE, chacun prêt à être transféré avec son
      dossier (bouton 🚑 relié au module de transfert d'urgence). */
   function renderPatientsByYear(container) {
