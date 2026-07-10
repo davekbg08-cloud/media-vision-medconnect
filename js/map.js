@@ -212,7 +212,9 @@ window.MapModule = (() => {
       try {
         const snap = await query.get();
         snap.docs.forEach(doc => rows.push({ uid: doc.id, ...doc.data() }));
-      } catch (e) {}
+      } catch (e) {
+        console.warn('[Map] Requête établissements échouée :', e?.message || e);
+      }
     }
     return rows;
   }

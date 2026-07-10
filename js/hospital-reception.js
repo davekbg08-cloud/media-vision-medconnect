@@ -219,7 +219,14 @@ const HospitalReceptionModule = (() => {
           dischargedAt: '',
           ...est,
         }, admissionId);
-        try { await CloudDB.updateDoc('beds', bedId, { status: 'occupied' }); } catch (_) {}
+        try {
+          await CloudDB.updateDoc('beds', bedId, { status: 'occupied' });
+        } catch (bedErr) {
+          // L'admission a réussi mais le lit n'a pas pu être marqué
+          // occupé : incohérence à signaler (sinon le lit paraît libre).
+          console.error('[Reception] Occupation du lit échouée :', bedErr);
+          App.toast('⚠️ Patient admis, mais le lit n\'a pas pu être marqué occupé. Vérifiez l\'état des lits.', 'error');
+        }
       }
 
       // Notifie le médecin orienté (file de travail côté mobile/desktop).
@@ -234,7 +241,9 @@ const HospitalReceptionModule = (() => {
             targetType: 'receptionVisits',
             targetId: visitId,
           });
-        } catch (_) {}
+        } catch (notifErr) {
+          console.error('[Reception] Notification médecin échouée :', notifErr);
+        }
       }
 
       await CloudDB.createAuditLog('reception_intake', 'receptionVisits', visitId, { patientMc: mc, doctorUid, bedId });

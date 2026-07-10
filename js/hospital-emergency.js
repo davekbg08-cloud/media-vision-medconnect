@@ -193,7 +193,7 @@ const HospitalEmergencyModule = (() => {
 
       App.closeModal();
       App.toast('🚑 Urgence enregistrée.');
-      render(document.getElementById('hospital-native-content') || document.body);
+      HospitalDesktopUI.navigate('emergency');
     } catch (e) {
       console.error('[Urgences] saveIntake :', e);
       App.toast(e.message || 'Enregistrement impossible.', 'error');
@@ -214,7 +214,7 @@ const HospitalEmergencyModule = (() => {
         takenChargeAt: new Date().toISOString(),
       });
       App.toast('Prise en charge enregistrée.');
-      render(document.getElementById('hospital-native-content') || document.body);
+      HospitalDesktopUI.navigate('emergency');
     } catch (e) {
       console.error('[Urgences] takeCharge :', e);
       App.toast(e.message || 'Action impossible.', 'error');
@@ -229,7 +229,7 @@ const HospitalEmergencyModule = (() => {
         closedAt: new Date().toISOString(),
       });
       App.toast(outcome === 'hospitalized' ? '🛏️ Patient hospitalisé.' : '✅ Sortie enregistrée.');
-      render(document.getElementById('hospital-native-content') || document.body);
+      HospitalDesktopUI.navigate('emergency');
     } catch (e) {
       console.error('[Urgences] closeCase :', e);
       App.toast(e.message || 'Action impossible.', 'error');

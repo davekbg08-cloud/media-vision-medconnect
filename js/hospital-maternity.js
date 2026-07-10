@@ -182,7 +182,7 @@ const HospitalMaternityModule = (() => {
 
       App.closeModal();
       App.toast('🤰 Dossier de grossesse créé.');
-      render(document.getElementById('hospital-native-content') || document.body);
+      HospitalDesktopUI.navigate('maternity');
     } catch (e) {
       console.error('[Maternité] saveNew :', e);
       App.toast(e.message || 'Création impossible.', 'error');
@@ -200,7 +200,7 @@ const HospitalMaternityModule = (() => {
         lastPrenatalAt: new Date().toISOString(),
       });
       App.toast('Consultation prénatale enregistrée.');
-      render(document.getElementById('hospital-native-content') || document.body);
+      HospitalDesktopUI.navigate('maternity');
     } catch (e) {
       console.error('[Maternité] addPrenatalVisit :', e);
       App.toast(e.message || 'Action impossible.', 'error');
@@ -253,7 +253,7 @@ const HospitalMaternityModule = (() => {
       });
       App.closeModal();
       App.toast('👶 Accouchement enregistré.');
-      render(document.getElementById('hospital-native-content') || document.body);
+      HospitalDesktopUI.navigate('maternity');
     } catch (e) {
       console.error('[Maternité] saveDelivery :', e);
       App.toast(e.message || 'Action impossible.', 'error');
@@ -268,7 +268,7 @@ const HospitalMaternityModule = (() => {
         closedAt: new Date().toISOString(),
       });
       App.toast('✅ Dossier clôturé.');
-      render(document.getElementById('hospital-native-content') || document.body);
+      HospitalDesktopUI.navigate('maternity');
     } catch (e) {
       console.error('[Maternité] closeCase :', e);
       App.toast(e.message || 'Action impossible.', 'error');
