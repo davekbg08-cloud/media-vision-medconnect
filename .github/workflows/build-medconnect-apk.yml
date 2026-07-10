@@ -1,17 +1,22 @@
 name: Build MedConnect Android APK
 
-# ⚠️ Déclenchement MANUEL uniquement (workflow_dispatch). Ce build
-# produit un APK de RELEASE SIGNÉ, ce qui nécessite le keystore de
-# signature — un secret qui n'est PAS dans le dépôt (public). Tant que
-# le keystore n'est pas fourni via les secrets GitHub, ce workflow ne
-# doit se lancer qu'à la demande, jamais automatiquement à chaque push
-# (sinon il échoue systématiquement). Pour publier au Play Store,
-# construire l'APK localement (où le keystore est présent) ou configurer
-# les secrets GitHub (KEYSTORE_BASE64, STORE_PASSWORD, KEY_ALIAS,
-# KEY_PASSWORD) puis réactiver le déclencheur push.
-
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'android/**'
+      - 'index.html'
+      - 'js/**'
+      - 'css/**'
+      - 'sw.js'
+      - 'manifest.json'
+      - 'config/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tests/**'
+      - '.github/workflows/build-medconnect-apk.yml'
 
 permissions:
   contents: read
@@ -20,13 +25,8 @@ env:
   APK_NAME: medconnect-v2.4.apk
 
 jobs:
-  # Porte d'entrée obligatoire : aucun APK n'est construit si les tests
-  # (node --test tests/*.test.js) ne passent pas. Tourne sur push ET
-  # pull_request, y compris pour un changement qui ne touche que
-  # tests/** (auparavant hors du déclencheur — un test cassé seul ne
-  # lançait jamais la CI).
   test:
-    name: Tests (node --test)
+    name: Tests web MedConnect
     runs-on: ubuntu-latest
 
     steps:
@@ -37,25 +37,24 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
 
       - name: Run test suite
         run: npm test
 
   build-apk:
-    name: Build APK v2.4
+    name: Build signed APK v2.4
     runs-on: ubuntu-latest
     needs: test
-    # L'APK ne se construit que sur push vers main (jamais pour une
-    # simple pull request) — comportement inchangé par rapport à avant,
-    # seul le déclencheur pull_request ajouté ci-dessus concerne le job
-    # "test" (retour rapide sur une PR, sans construire l'APK).
-    if: github.event_name == 'push'
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up JDK
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -69,9 +68,41 @@ jobs:
         with:
           gradle-version: '8.2'
 
+      - name: Validate signing secrets
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEYSTORE_ALIAS: ${{ secrets.KEYSTORE_ALIAS }}
+          KEYSTORE_KEY_PASSWORD: ${{ secrets.KEYSTORE_KEY_PASSWORD }}
+        run: |
+          test -n "$KEYSTORE_BASE64" || (echo "Missing secret: KEYSTORE_BASE64" && exit 1)
+          test -n "$KEYSTORE_PASSWORD" || (echo "Missing secret: KEYSTORE_PASSWORD" && exit 1)
+          test -n "$KEYSTORE_ALIAS" || (echo "Missing secret: KEYSTORE_ALIAS" && exit 1)
+          test -n "$KEYSTORE_KEY_PASSWORD" || (echo "Missing secret: KEYSTORE_KEY_PASSWORD" && exit 1)
+
+      - name: Decode and setup keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > android/keystore.jks
+          ls -lh android/keystore.jks
+
+      - name: Create keystore.properties
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEYSTORE_ALIAS: ${{ secrets.KEYSTORE_ALIAS }}
+          KEYSTORE_KEY_PASSWORD: ${{ secrets.KEYSTORE_KEY_PASSWORD }}
+        run: |
+          cat > android/keystore.properties << EOF
+          storeFile=keystore.jks
+          storePassword=$KEYSTORE_PASSWORD
+          keyAlias=$KEYSTORE_ALIAS
+          keyPassword=$KEYSTORE_KEY_PASSWORD
+          EOF
+
       - name: Build release APK
         working-directory: android
-        run: gradle assembleRelease --no-daemon
+        run: gradle assembleRelease --no-daemon --stacktrace
 
       - name: Prepare APK artifact
         run: |
