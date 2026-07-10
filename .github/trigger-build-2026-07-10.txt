@@ -1,0 +1,4 @@
+Trigger build initiated by assistant to run workflow 'Build MedConnect Android APK'.
+Date: 2026-07-10
+
+This file was added to trigger a workflow run on push to main.
