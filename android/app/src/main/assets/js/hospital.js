@@ -223,16 +223,19 @@ const HospitalPortal = (() => {
   function patRow(p) {
     const age = p.dob ? Math.floor((Date.now()-new Date(p.dob))/(365.25*24*3600*1000)) : '?';
     const nc  = DB.getPatientConsultations(p.id).length;
+    const pending = p.medical_completion_status === 'pending';
     return `
       <div class="record-card patient-row" onclick="HospitalPortal.openDetail('${p.id}')">
         <div class="patient-row-avatar">${p.gender==='F'?'👩':'👨'}</div>
         <div class="patient-row-info">
           <strong>${esc(p.firstname)} ${esc(p.lastname)}</strong>
           <span class="id-tag">${p.id}</span>
+          ${pending ? `<span class="badge-pending">🩺 À compléter par le médecin</span>` : ''}
           <small>${age} ${t('years')} · 🩸 ${p.blood_type||'—'} · 📋 ${nc}</small>
         </div>
         <div class="patient-row-actions">
-          <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();HospitalPortal.openConsult('${p.id}')">🩺</button>
+          ${window.HospitalCapabilities?.can?.(Auth.getUser()?.role, 'create_consultation')
+            ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();HospitalPortal.openConsult('${p.id}')">🩺</button>` : ''}
           <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();HospitalPortal.deletePatient('${p.id}')">🗑️</button>
         </div>
       </div>`;
@@ -267,7 +270,8 @@ const HospitalPortal = (() => {
           <button class="btn btn-ghost btn-xs" onclick="HospitalPortal.delConsult('${c.cid}','${id}')">🗑️</button>
         </div>`).join('')||`<p style="color:var(--text-muted);font-size:.85rem">${t('no_data')}</p>`}
       <div class="modal-footer">
-        <button class="btn btn-primary btn-sm" onclick="App.closeModal();HospitalPortal.openConsult('${id}')">🩺 ${t('new_consultation')}</button>
+        ${window.HospitalCapabilities?.can?.(Auth.getUser()?.role, 'create_consultation')
+          ? `<button class="btn btn-primary btn-sm" onclick="App.closeModal();HospitalPortal.openConsult('${id}')">🩺 ${t('new_consultation')}</button>` : ''}
         <button class="btn btn-ghost btn-sm" onclick="App.closeModal();LabModule.openNew('${id}')">🧪 Analyse</button>
         <button class="btn btn-ghost btn-sm" onclick="App.closeModal();AppointmentsModule.openNew('${id}')">📅 RDV</button>
         <button class="btn btn-ghost btn-sm" onclick="PatientPortal.printRecord('${id}')">🖨️ ${t('btn_print')}</button>
@@ -310,6 +314,23 @@ const HospitalPortal = (() => {
 
   function saveNewPatient(e) {
     e.preventDefault();
+    const user = Auth.getUser() || {};
+    const isNurse = user.role === 'nurse';
+    const completionFields = isNurse
+      ? {
+          created_by: user.uid || '',
+          created_by_role: 'nurse',
+          nurse_uid: user.uid || '',
+          nurse_name: user.name || '',
+          nurse_registration_number: user.matricule || user.order_num || '',
+          status: 'awaiting_doctor',
+          medical_completion_status: 'pending',
+        }
+      : {
+          created_by: user.uid || '',
+          created_by_role: user.role || '',
+          medical_completion_status: (user.role === 'doctor') ? 'completed' : 'pending',
+        };
     const p = DB.addPatient({
       firstname: document.getElementById('hp-fn').value.trim(),
       lastname:  document.getElementById('hp-ln').value.trim(),
@@ -323,6 +344,7 @@ const HospitalPortal = (() => {
       chronic:   document.getElementById('hp-chronic').value,
       emergency: document.getElementById('hp-emerg').value,
       ...currentEstablishmentFields(),
+      ...completionFields,
     });
     App.closeModal(); App.toast(`✅ ${t('msg_saved')} — ${p.id}`); App.navigateTo('patients');
   }
@@ -441,6 +463,21 @@ const HospitalPortal = (() => {
       ...est,
     });
 
+    // Parcours infirmière → médecin : la 1ère consultation médicale
+    // marque la fiche complétée (traçabilité conservée).
+    if (user.role === 'doctor') {
+      const pat = DB.getPatientById(patientId);
+      if (pat && pat.medical_completion_status === 'pending') {
+        DB.updatePatient(patientId, {
+          medical_completion_status: 'completed',
+          status: 'active',
+          completed_by_doctor_uid: user.uid || '',
+          completed_by_doctor_name: fDoctor || user.name || '',
+          completed_at: new Date().toISOString(),
+        });
+      }
+    }
+
     DB.addEstablishmentDocument({
       relatedId:        consult.cid,
       documentType:     'consultation',
@@ -502,6 +539,7 @@ const HospitalPortal = (() => {
 
   /* ── PARTIE E/F — choix de la destination de l'ordonnance ── */
   function openPrescriptionTarget(pid) {
+    if (!window.HospitalCapabilities?.guardHospitalAction?.('prescribe')) return;
     const pharmacies = Network.getAvailablePharmacies();
     App.openModal('💊 Envoyer l\'ordonnance', `
       <p style="font-size:.84rem;color:var(--text-muted);margin-bottom:1rem">
@@ -521,6 +559,7 @@ const HospitalPortal = (() => {
   }
 
   function confirmPrescriptionTarget(pid) {
+    if (!window.HospitalCapabilities?.guardHospitalAction?.('prescribe')) return;
     const target = document.getElementById('rx-target')?.value || 'patient';
     Network.sendPrescriptionToPharmacy(pid, target);
     App.closeModal();
@@ -569,7 +608,8 @@ const HospitalPortal = (() => {
               <span class="record-date">📅 ${rx.date}</span>
               ${p?`<span class="id-tag">${p.id}</span><strong>${esc(p.firstname)} ${esc(p.lastname)}</strong>`:''}
               <span class="record-doctor">👨‍⚕️ ${esc(rx.doctor)||'—'}</span>
-              <button class="btn btn-ghost btn-xs" onclick="Network.sendPrescriptionToPharmacy('${rx.pid}','Pharmacie')">📤 Pharmacie</button>
+              ${window.HospitalCapabilities?.can?.(Auth.getUser()?.role, 'prescribe')
+                ? `<button class="btn btn-ghost btn-xs" onclick="Network.sendPrescriptionToPharmacy('${rx.pid}','Pharmacie')">📤 Pharmacie</button>` : ''}
               <button class="btn btn-ghost btn-xs" onclick="PatientPortal.printRx('${rx.pid}')">🖨️</button>
             </div>
             <p><strong>Diagnostic :</strong> ${esc(rx.diagnosis)}</p>

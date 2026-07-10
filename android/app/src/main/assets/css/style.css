@@ -1412,3 +1412,16 @@ body.rtl .tl-connector { left: auto; right: -1.1rem; }
 }
 .auth-orientation-box p { margin-bottom: .2rem; }
 .auth-orientation-box strong { color: var(--text); }
+
+/* Badge « À compléter par le médecin » (fiche créée par une infirmière) */
+.badge-pending {
+  display: inline-block;
+  font-size: .7rem;
+  font-weight: 600;
+  color: #f59e0b;
+  background: rgba(245,158,11,.12);
+  border: 1px solid rgba(245,158,11,.4);
+  border-radius: 6px;
+  padding: .1rem .4rem;
+  margin: .15rem 0;
+}
