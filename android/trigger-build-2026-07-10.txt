@@ -1,0 +1,2 @@
+Trigger build of Build MedConnect Android APK — new trigger file placed inside android/ to match workflow path filters.
+Date: 2026-07-10
