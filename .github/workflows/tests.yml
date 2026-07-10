@@ -1,19 +1,15 @@
 name: Tests MedConnect
 
-# Lance la suite de tests automatisés à chaque push sur main et sur
-# chaque pull request. Aucun secret ni keystore requis : ce workflow
-# vérifie uniquement la logique (js/ + tests/) et sert de garde-fou
-# qualité avant tout déploiement.
+# Retour rapide sur pull request (et déclenchement manuel), SANS
+# reconstruire l'APK. Le déclencheur push vers main a été retiré :
+# .github/workflows/build-medconnect-apk.yml a son propre job "test"
+# qui gate déjà le build sur push vers main pour les mêmes chemins —
+# le garder ici en plus faisait tourner la suite deux fois par push
+# (minutes Actions gaspillées, alors que la facturation est justement
+# la contrainte).
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - 'js/**'
-      - 'tests/**'
-      - 'package.json'
   pull_request:
     branches:
       - main
