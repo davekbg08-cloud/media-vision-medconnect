@@ -605,6 +605,17 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    match /maternityCases/{docId} {
+      // Maternité : suivi grossesse/accouchement. Même modèle d'accès
+      // que les urgences (personnel clinique en lecture, écriture par
+      // personnel habilité avec gating device).
+      allow read: if isAdmin() || currentRoleIs('doctor') || currentRoleIs('nurse') ||
+        canReadMedicalData(resource.data);
+      allow create, update: if isAdmin() ||
+        (canRegisterPatient() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
+      allow delete: if isAdmin();
+    }
+
     match /aiQueries/{docId} {
       // Historique des requêtes IA médicale : lecture réservée à
       // l'auteur et à l'admin (peut contenir du contexte clinique).

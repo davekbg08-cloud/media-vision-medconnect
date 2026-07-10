@@ -37,7 +37,7 @@ const HospitalDesktopUI = (() => {
     records:      (c) => window.MedicalRecordDesktop?.render(c),
     reception:    (c) => HospitalReceptionModule.render(c),
     emergency:    (c) => HospitalEmergencyModule.render(c),
-    maternity:    (c) => renderComingSoon(c, '🤰 Maternité', 'Suivi des grossesses, accouchements et nouveau-nés.'),
+    maternity:    (c) => HospitalMaternityModule.render(c),
   };
   // Routes encore déléguées à l'app mobile SI elle coexiste (cas d'un
   // usage hybride). En connexion desktop pure (session hôpital), ces
