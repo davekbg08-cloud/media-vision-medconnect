@@ -356,7 +356,18 @@ const DB = (() => {
     const scoped = (query, key, idField) => {
       try {
         const unsub = query.onSnapshot(
-          snap => { if (!snap.empty) mergeStore(key, idField, snap.docs.map(d => d.data())); },
+          snap => {
+            if (!snap.empty) {
+              mergeStore(key, idField, snap.docs.map(d => d.data()));
+              // Rafraîchit la vue affichée si elle dépend de ces données
+              // (ex. l'écran Ordonnances quand mc_prescriptions arrive),
+              // pour un affichage immédiat sans rechargement manuel.
+              try {
+                const section = { mc_prescriptions: 'prescriptions', mc_messages: 'messages' }[key];
+                if (section && window.App?.refreshIfCurrent) window.App.refreshIfCurrent(section);
+              } catch (_) {}
+            }
+          },
           err => console.warn(`[MedConnect] Listener ${key} (scoped) rejeté :`, err?.message || err)
         );
         _userListenersUnsubs.push(unsub);
@@ -373,6 +384,18 @@ const DB = (() => {
     // Pharmacien : ses ordonnances reçues (pharmacyCanReadPrescription).
     if (user.role === 'pharmacist') {
       scoped(firebaseDB.collection('mc_prescriptions').where('pharmacyUid', '==', user.uid),
+        'mc_prescriptions', 'pid');
+    }
+
+    // Médecin / infirmier : la règle Firestore les autorise à LIRE la
+    // collection mc_prescriptions (currentRoleIs doctor/nurse). Sans ce
+    // listener, leurs ordonnances n'étaient jamais rechargées après la
+    // connexion — cause du bug « ordonnances qui n'apparaissent pas ».
+    // Le filtrage métier (contexte établissement, consentement patient)
+    // reste appliqué à l'affichage par prescriptionsForContext ; ici on
+    // se contente de ramener les données en local par fusion.
+    if (user.role === 'doctor' || user.role === 'nurse') {
+      scoped(firebaseDB.collection('mc_prescriptions'),
         'mc_prescriptions', 'pid');
     }
   }

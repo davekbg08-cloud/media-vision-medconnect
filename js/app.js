@@ -406,10 +406,19 @@ const App = (() => {
     Auth.showLogin();
   }
 
+  /* Re-render une section UNIQUEMENT si elle est actuellement
+     affichée. Appelé par les listeners Firestore (ex. arrivée
+     d'ordonnances) pour un affichage immédiat sans rechargement. */
+  function refreshIfCurrent(section) {
+    if (section && section === currentSection) {
+      try { routeSection(currentSection); } catch (_) {}
+    }
+  }
+
   return {
     afterLogin, buildNav, navigateTo, goHome, refresh, startExchangeSync,
     toggleTheme, openModal, closeModal, toast, init,
-    closeMobileSidebar,
+    closeMobileSidebar, refreshIfCurrent,
   };
 })();
 
