@@ -5,7 +5,7 @@
 const AdminModule = (() => {
   const esc = s => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   const now = () => new Date().toISOString();
-  const PRO_ROLES = ['doctor', 'nurse', 'pharmacist'];
+  const PRO_ROLES = ['doctor', 'nurse', 'pharmacist', 'lab', 'reception'];
 
   function safeList(fn) {
     try {
@@ -130,6 +130,47 @@ const AdminModule = (() => {
     if (changed) DB.saveRegistrationRequests?.(next);
   }
 
+  /** Suppression DÉFINITIVE d'une demande (le « impossible à
+      supprimer » signalé). Retire la demande de registration_requests
+      ET, s'il existe, le compte mc_accounts non approuvé associé ;
+      propage la suppression au cloud. */
+  async function deleteRequest(uid) {
+    if (!confirm('Supprimer définitivement cette demande ? Cette action est irréversible.')) return;
+
+    // 1) registration_requests (match par requesterUid OU requestId)
+    const requests = getRequestsSafe();
+    const kept = requests.filter(r =>
+      r.requesterUid !== uid && r.requestId !== uid);
+    const removed = requests.filter(r =>
+      r.requesterUid === uid || r.requestId === uid);
+    DB.saveRegistrationRequests?.(kept);
+
+    // 2) compte mc_accounts associé s'il n'est pas déjà approuvé
+    const accounts = getAccountsSafe();
+    const acc = accounts.find(a => a.uid === uid);
+    if (acc && !['approved', 'active'].includes(String(acc.status || '').toLowerCase())) {
+      DB.saveAccounts?.(accounts.filter(a => a.uid !== uid));
+    }
+
+    // 3) propagation cloud (suppression des documents)
+    try {
+      if (typeof firebaseDB !== 'undefined' && firebaseDB) {
+        for (const r of removed) {
+          if (r.requestId) await firebaseDB.collection('registration_requests').doc(r.requestId).delete().catch(() => {});
+        }
+        if (acc?.uid && !['approved','active'].includes(String(acc.status||'').toLowerCase())) {
+          await firebaseDB.collection('mc_accounts').doc(acc.uid).delete().catch(() => {});
+        }
+      }
+    } catch (e) {
+      console.warn('[Admin] Suppression cloud demande :', e);
+    }
+
+    App.toast('🗑️ Demande supprimée.');
+    App.closeModal?.();
+    App.navigateTo('dashboard');
+  }
+
   /** Écrit users/mc_accounts/registration_requests via DB.pushAndReport()
       (confirme le succès, ne masque plus l'échec — Étape 2). */
   async function pushRegistrationCloud(uid, account, status) {
@@ -158,7 +199,7 @@ const AdminModule = (() => {
   }
 
   function renderPendingRow(a) {
-    const uid = a.uid || a.requesterUid || '';
+    const uid = a.uid || a.requesterUid || a.requestId || '';
     const role = safeRole(a.role || a.requesterRole);
     const numberLabel = role === 'doctor' ? 'N° Ordre' : 'Matricule';
     return `
@@ -179,6 +220,9 @@ const AdminModule = (() => {
         <div style="display:flex;gap:.5rem;margin-top:.65rem;flex-wrap:wrap">
           <button class="btn btn-primary btn-sm" onclick="AdminModule.openDetail('${esc(uid)}')">
             🔍 Vérifier la demande
+          </button>
+          <button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="AdminModule.deleteRequest('${esc(uid)}')">
+            🗑️ Supprimer
           </button>
         </div>
       </div>`;
@@ -273,6 +317,16 @@ const AdminModule = (() => {
           </div>` : `<div class="card empty-state"><p>Aucun utilisateur actif</p></div>`}
 
         <div class="page-header" style="margin-top:1.5rem">
+          <h3>💳 Abonnements hôpitaux</h3>
+        </div>
+        <div class="auth-register-info" style="margin-bottom:.8rem">
+          Paiement par mobile money au <strong>0856373707</strong>. Activez l'abonnement d'un établissement après réception du paiement.
+        </div>
+        <div id="admin-subscriptions-list">
+          <div class="card empty-state"><p>Chargement des abonnements…</p></div>
+        </div>
+
+        <div class="page-header" style="margin-top:1.5rem">
           <h3>📋 Registres officiels</h3>
           <button class="btn btn-ghost btn-sm" onclick="AdminModule.openRegistryManager()">⚙️ Gérer</button>
         </div>
@@ -281,6 +335,10 @@ const AdminModule = (() => {
           <div class="stat-card" style="flex:1;min-width:140px;border-top:3px solid var(--purple)"><div class="stat-icon">💊</div><div class="stat-value">${pharms.length}</div><div class="stat-label">Pharmaciens vérifiés</div></div>
           <div class="stat-card" style="flex:1;min-width:140px;border-top:3px solid #06B6D4"><div class="stat-icon">🩹</div><div class="stat-value">${nurses.length}</div><div class="stat-label">Infirmiers vérifiés</div></div>
         </div>`;
+
+      // Remplissage asynchrone de la section abonnements (statuts lus
+      // depuis subscriptions/{hospitalId} via ExchangeBridge).
+      renderSubscriptionsSection();
     } catch (e) {
       console.error('[MedConnect] Admin dashboard failed:', e);
       if (main) main.innerHTML = `
@@ -297,7 +355,21 @@ const AdminModule = (() => {
   async function approve(uid) {
     const accounts = getAccountsSafe();
     const idx = accounts.findIndex(a => a.uid === uid);
-    if (idx === -1) { App.toast('❌ Compte introuvable pour cette demande.', 'error'); return; }
+    if (idx === -1) {
+      // Demande SANS compte mc_accounts (source 'request' pure) : le cas
+      // des fantômes. Impossible d'activer un compte inexistant — on clôt
+      // la demande pour qu'elle quitte la liste (option de purge offerte
+      // par le bouton 🗑️ Supprimer distinct).
+      const row = getRegistrationRows().find(x => x.requesterUid === uid || x.uid === uid);
+      if (!row) { App.toast('❌ Demande introuvable.', 'error'); return; }
+      if (!confirm('Cette demande n\'a aucun compte associé (probablement obsolète). La retirer de la liste ?')) return;
+      updateRegistrationRequests(row.requestId || uid, 'approved');
+      await pushRegistrationCloud(row.requestId || uid, { ...row, status: 'approved' }, 'approved');
+      App.toast('✅ Demande clôturée.');
+      App.closeModal?.();
+      App.navigateTo('dashboard');
+      return;
+    }
     if (!confirm('Approuver cette demande après vérification des informations ?')) return;
 
     accounts[idx].status      = 'approved';
@@ -488,10 +560,193 @@ const AdminModule = (() => {
     App.navigateTo('dashboard');
   }
 
+  /* Remplit la section abonnements (statuts asynchrones). */
+  async function renderSubscriptionsSection() {
+    const box = document.getElementById('admin-subscriptions-list');
+    if (!box) return;
+    const hospitals = window.HospitalsRegistry?.getHospitals?.() || [];
+    if (!hospitals.length) {
+      box.innerHTML = `<div class="card empty-state"><p>Aucun établissement enregistré.</p></div>`;
+      return;
+    }
+
+    const STATUS_LABEL = {
+      active:       { t:'✅ Actif',            c:'var(--secondary)' },
+      grace_period: { t:'⏳ Période de grâce', c:'var(--accent)' },
+      expired:      { t:'🔒 Expiré',           c:'var(--danger)' },
+      suspended:    { t:'🚫 Suspendu',         c:'var(--danger)' },
+    };
+
+    const rows = await Promise.all(hospitals.map(async h => {
+      const hid = h.establishmentId || h.hid;
+      let sub = { status: 'active', endDate: null };
+      try { sub = await window.ExchangeBridge?.getSubscriptionStatus?.(hid) || sub; } catch (_) {}
+      const st = STATUS_LABEL[sub.status] || STATUS_LABEL.active;
+      const isActive = sub.status === 'active' || sub.status === 'grace_period';
+      return `
+        <div class="record-card">
+          <div class="record-header">
+            <div style="flex:1;min-width:0">
+              <strong>${esc(h.name || hid)}</strong>
+              ${h.officialId ? `<br><small style="color:var(--text-muted);font-family:monospace">Matricule : ${esc(h.officialId)}</small>` : ''}
+              <br><small style="color:${st.c};font-weight:600">${st.t}</small>
+              ${sub.endDate ? `<small style="color:${st.c}"> · jusqu'au <strong>${esc(String(sub.endDate).slice(0,10))}</strong></small>` : ''}
+              ${sub.activatedAt ? `<br><small style="color:var(--text-dim);font-size:.7rem">Dernière activation : ${esc(String(sub.activatedAt).slice(0,10))}</small>` : ''}
+            </div>
+          </div>
+          <div style="display:flex;gap:.5rem;margin-top:.5rem;flex-wrap:wrap">
+            <button class="btn btn-primary btn-sm" onclick="AdminModule.openSubscriptionActivator('${esc(hid)}')">
+              💳 ${isActive ? 'Renouveler / changer' : 'Activer'}
+            </button>
+            ${isActive ? `<button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="AdminModule.deactivateSubscription('${esc(hid)}')">Désactiver</button>` : ''}
+          </div>
+        </div>`;
+    }));
+
+    box.innerHTML = rows.join('');
+  }
+
+  /* ══ ABONNEMENTS HÔPITAUX (activation manuelle après paiement) ══
+     Paiement manuel par mobile money au 0856373707, puis l'admin
+     active ici. Source de vérité : subscriptions/{hospitalId}
+     (admin-only côté règles), lue par ExchangeBridge. */
+  const SUBSCRIPTION_PAY_NUMBER = '0856373707';
+  const SUB_PLANS = { essentiel:'Essentiel', pro:'Pro', institution:'Institution' };
+
+  async function activateSubscription(hospitalId, plan = 'pro', months = 1) {
+    if (typeof firebaseDB === 'undefined' || !firebaseDB) {
+      App.toast('❌ Connexion requise pour activer un abonnement.', 'error'); return;
+    }
+    const h = window.HospitalsRegistry?.getHospitalById?.(hospitalId);
+    const start = new Date();
+    const end = new Date(); end.setMonth(end.getMonth() + Number(months || 1));
+
+    if (!confirm(`Activer l'abonnement « ${SUB_PLANS[plan] || plan} » pour ${h?.name || hospitalId} pendant ${months} mois ?\n\nÀ ne faire qu'après réception du paiement au ${SUBSCRIPTION_PAY_NUMBER}.`)) return;
+
+    try {
+      await firebaseDB.collection('subscriptions').doc(hospitalId).set({
+        hospitalId,
+        establishmentId: hospitalId,
+        plan,
+        status: 'active',
+        billingCycle: 'monthly',
+        startDate: start.toISOString(),
+        endDate: end.toISOString(),
+        graceUntil: '',
+        activatedBy: currentAdminUid(),
+        activatedAt: start.toISOString(),
+        paymentNote: `Paiement mobile money ${SUBSCRIPTION_PAY_NUMBER}`,
+      }, { merge: true });
+
+      window.ExchangeBridge?.invalidateSubscriptionCache?.(hospitalId);
+
+      // Valide aussi l'ÉTABLISSEMENT (status 'active') : sans ça la
+      // connexion resterait bloquée (on refuse les hôpitaux 'pending').
+      try {
+        window.HospitalsRegistry?.updateHospital?.(hospitalId, { status: 'active' });
+      } catch (estErr) {
+        console.warn('[Admin] Validation établissement :', estErr?.message || estErr);
+      }
+
+      // Active aussi le COMPTE établissement (users/{authUid}, rôle
+      // 'hospital') : rend isActiveHospital() vrai côté règles, donc
+      // autorise les écritures depuis la session desktop.
+      try {
+        const _h = window.HospitalsRegistry?.getHospitalById?.(hospitalId);
+        if (_h?.authUid) {
+          await firebaseDB.collection('users').doc(_h.authUid).set({
+            status: 'active', role: 'hospital',
+          }, { merge: true });
+        }
+      } catch (accErr) {
+        console.warn('[Admin] Activation compte établissement :', accErr?.message || accErr);
+      }
+      try {
+        await window.CloudDB?.createAuditLog?.('subscription_activated', 'subscriptions', hospitalId, { plan, months });
+      } catch (_) {}
+
+      Network?.notify?.({
+        to_role: 'admin', to_id: hospitalId, type: 'info',
+        subject: '✅ Abonnement activé',
+        body: `L'abonnement ${SUB_PLANS[plan] || plan} de ${h?.name || hospitalId} est actif jusqu'au ${end.toISOString().slice(0,10)}.`,
+      });
+
+      App.toast(`✅ Abonnement ${SUB_PLANS[plan] || plan} de ${h?.name || hospitalId} — actif jusqu'au ${end.toISOString().slice(0,10)}.`);
+      App.navigateTo('dashboard');
+    } catch (e) {
+      console.error('[Admin] activateSubscription :', e);
+      const perm = /permission|insufficient/i.test(e.message || '');
+      if (perm) {
+        const uid = window.firebaseAuth?.currentUser?.uid || Auth.getUser?.()?.uid || '(inconnu)';
+        console.warn('[Admin] Activation refusée. Vérifiez users/' + uid + '.role == "admin" dans Firestore.');
+        App.toast('❌ Droits insuffisants. Votre compte doit avoir role:"admin" dans Firestore (users/' + uid + '). Vérifiez aussi que les règles sont déployées.', 'error');
+      } else {
+        App.toast('❌ Activation impossible : ' + (e.message || e), 'error');
+      }
+    }
+  }
+
+  async function deactivateSubscription(hospitalId) {
+    if (typeof firebaseDB === 'undefined' || !firebaseDB) {
+      App.toast('❌ Connexion requise.', 'error'); return;
+    }
+    const h = window.HospitalsRegistry?.getHospitalById?.(hospitalId);
+    if (!confirm(`Désactiver l'abonnement de ${h?.name || hospitalId} ? L'hôpital repassera en lecture seule sur desktop.`)) return;
+    try {
+      await firebaseDB.collection('subscriptions').doc(hospitalId).set({
+        hospitalId, establishmentId: hospitalId,
+        status: 'expired',
+        deactivatedBy: currentAdminUid(),
+        deactivatedAt: new Date().toISOString(),
+      }, { merge: true });
+      window.ExchangeBridge?.invalidateSubscriptionCache?.(hospitalId);
+      App.toast(`Abonnement désactivé pour ${h?.name || hospitalId}.`);
+      App.navigateTo('dashboard');
+    } catch (e) {
+      console.error('[Admin] deactivateSubscription :', e);
+      App.toast('❌ ' + (e.message || e), 'error');
+    }
+  }
+
+  function openSubscriptionActivator(hospitalId) {
+    const h = window.HospitalsRegistry?.getHospitalById?.(hospitalId);
+    App.openModal(`💳 Activer un abonnement — ${esc(h?.name || hospitalId)}`, `
+      <div class="auth-register-info" style="margin-bottom:1rem">
+        À activer uniquement après réception du paiement par mobile money au
+        <strong>${SUBSCRIPTION_PAY_NUMBER}</strong>.
+      </div>
+      <div class="form-group">
+        <label>Formule</label>
+        <select id="sub-plan">
+          ${Object.entries(SUB_PLANS).map(([k,v]) => `<option value="${k}"${k==='pro'?' selected':''}>${v}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Durée (mois)</label>
+        <select id="sub-months">
+          <option value="1">1 mois</option>
+          <option value="3">3 mois</option>
+          <option value="6">6 mois</option>
+          <option value="12">12 mois</option>
+        </select>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-primary" onclick="AdminModule.confirmActivate('${esc(hospitalId)}')">✅ Activer</button>
+      </div>`);
+  }
+
+  function confirmActivate(hospitalId) {
+    const plan = document.getElementById('sub-plan')?.value || 'pro';
+    const months = document.getElementById('sub-months')?.value || '1';
+    App.closeModal();
+    activateSubscription(hospitalId, plan, months);
+  }
+
   return {
-    renderDashboard, approve, reject, suspend, openDetail,
+    renderDashboard, approve, reject, suspend, openDetail, deleteRequest,
     openBroadcast, sendBroadcast,
     openRegistryManager, openAddToRegistry, saveToRegistry,
+    activateSubscription, deactivateSubscription, openSubscriptionActivator, confirmActivate,
   };
 })();
 

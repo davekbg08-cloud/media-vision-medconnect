@@ -60,6 +60,9 @@ window.ShareModule = (() => {
 
   // ===== Pharmacist: Dispense prescription =====
   function dispensePrescription(code, pharmacyName) {
+    // Garde de capacité (desktop hôpital) : la dispensation est
+    // réservée à la pharmacie. Sans effet sur le mobile.
+    if (!window.HospitalCapabilities?.guardHospitalAction?.('dispense')) return null;
     const all = getAllPrescriptions();
     const idx = all.findIndex(p => p.code === code);
     if (idx === -1) return null;

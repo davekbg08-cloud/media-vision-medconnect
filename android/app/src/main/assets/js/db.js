@@ -14,6 +14,53 @@ const DB = (() => {
   const store = (k, v)    => localStorage.setItem(k, JSON.stringify(v));
   const today = ()        => new Date().toISOString().slice(0, 10);
 
+  /* ── FILE D'ÉCRITURE CLOUD PERSISTANTE ─────────────────
+     Firestore est la source de vérité. Mais une écriture peut
+     échouer ponctuellement (hors-ligne, latence, règle en cours
+     de déploiement). Sans file, cette donnée ne vivrait qu'en
+     localStorage et disparaîtrait à la réinstallation — cause
+     racine des pertes de données signalées.
+
+     Chaque écriture cloud échouée est mémorisée ici (dans
+     localStorage, donc elle survit à une fermeture d'app) et
+     rejouée automatiquement dès que Firestore répond. La donnée
+     n'est réputée « à l'abri » que lorsqu'elle a atteint le cloud. */
+  const OUTBOX_KEY = 'mc_cloud_outbox';
+
+  function _outboxAdd(collection, docId, data) {
+    const q = load(OUTBOX_KEY);
+    // Dédoublonnage : une réécriture plus récente du même document
+    // remplace l'ancienne en file (dernière valeur = la bonne).
+    const filtered = q.filter(e => !(e.collection === collection && e.docId === String(docId)));
+    filtered.push({ collection, docId: String(docId), data, queuedAt: new Date().toISOString() });
+    store(OUTBOX_KEY, filtered);
+  }
+
+  function _outboxCount() { return load(OUTBOX_KEY).length; }
+  const outboxCount = _outboxCount;
+
+  let _flushing = false;
+  async function flushOutbox() {
+    if (_flushing || !firebaseReady || !firebaseDB) return;
+    const q = load(OUTBOX_KEY);
+    if (!q.length) return;
+    _flushing = true;
+    const remaining = [];
+    for (const e of q) {
+      try {
+        await firebaseDB.collection(e.collection).doc(e.docId).set(e.data, { merge: true });
+      } catch (err) {
+        console.warn(`[MedConnect] Outbox : réécriture ${e.collection}/${e.docId} encore en échec :`, err?.message || err);
+        remaining.push(e); // on garde pour le prochain essai
+      }
+    }
+    store(OUTBOX_KEY, remaining);
+    _flushing = false;
+    // Rafraîchit le badge de synchronisation pour refléter l'état réel.
+    try { window.SyncBadge?.render?.(); } catch (_) {}
+    if (remaining.length) console.warn(`[MedConnect] Outbox : ${remaining.length} écriture(s) toujours en attente.`);
+  }
+
   /* ── IDs UNIQUES ──────────────────────────────────────
      Remplace les anciens `${PREFIX}${Date.now()}` qui pouvaient
      entrer en collision si deux écritures arrivaient dans la
@@ -52,14 +99,17 @@ const DB = (() => {
   ──────────────────────────────────────────────────── */
   async function _push(collection, docId, data) {
     if (!firebaseReady || !firebaseDB) {
-      console.warn(`[MedConnect] Firestore indisponible — écriture locale seulement (${collection}/${docId})`);
+      // Firestore pas prêt : on ne perd PAS l'écriture, on la met en
+      // file pour rejeu automatique dès que le cloud répond.
+      _outboxAdd(collection, docId, data);
       return false;
     }
     try {
       await firebaseDB.collection(collection).doc(String(docId)).set(data);
       return true;
     } catch (e) {
-      console.warn(`[MedConnect] Échec écriture Firestore ${collection}/${docId} :`, e?.message || e);
+      console.warn(`[MedConnect] Échec écriture Firestore ${collection}/${docId} — mise en file :`, e?.message || e);
+      _outboxAdd(collection, docId, data);
       return false;
     }
   }
@@ -86,14 +136,46 @@ const DB = (() => {
     }
   }
 
+  // Seules ces collections ADMINISTRATIVES, gérées côté cloud, se
+  // vident quand le serveur confirme un snapshot vide (les « demandes
+  // fantômes » du dashboard). Pour les données MÉDICALES créées
+  // localement (ordonnances, consultations…), un cloud vide ne doit
+  // JAMAIS effacer le travail local : d'anciennes écritures cloud ont
+  // pu échouer en silence, le local est alors la seule copie.
+  const EMPTY_WIPE_WHITELIST = new Set([
+    'registration_requests', 'affiliation_requests',
+    'establishments', 'establishment_documents',
+  ]);
+
   function storeSnapshot(key, snap) {
+    if (snap.empty) {
+      if (!snap.metadata?.fromCache && EMPTY_WIPE_WHITELIST.has(key)) store(key, []);
+      return;
+    }
     store(key, snap.docs.map(d => d.data()));
+  }
+
+  /** Fusionne des documents dans une liste locale par identifiant,
+      sans écraser les entrées locales absentes du snapshot (un
+      listener FILTRÉ ne voit qu'une tranche de la collection : le
+      remplacement intégral effacerait le reste). */
+  function mergeStore(key, idField, docs) {
+    const list = load(key);
+    const byId = new Map(list.map(x => [x[idField], x]));
+    docs.forEach(d => { if (d && d[idField] != null) byId.set(d[idField], d); });
+    store(key, Array.from(byId.values()));
   }
 
   function listen(query, onData) {
     try {
-      query.onSnapshot(onData, () => {});
-    } catch (e) {}
+      // Ne JAMAIS avaler l'erreur : c'est ce silence qui a masqué
+      // pendant des semaines le rejet en bloc des requêtes
+      // collection-entière par les règles Firestore.
+      query.onSnapshot(onData, err =>
+        console.warn('[MedConnect] Listener Firestore rejeté :', err?.message || err));
+    } catch (e) {
+      console.warn('[MedConnect] Listener impossible :', e?.message || e);
+    }
   }
 
   function roleCollection(role) {
@@ -133,18 +215,25 @@ const DB = (() => {
   /* ── SYNC AU DÉMARRAGE ───────────────────────────── */
   async function syncFromFirebase() {
     if (!firebaseReady || !firebaseDB) return;
+    // Collections SANS listener temps réel : seul le .get() initial
+    // les charge. Les 12 collections couvertes par un listener dans
+    // setupRealtimeListeners() sont volontairement EXCLUES d'ici :
+    // la première émission d'un onSnapshot livre déjà l'intégralité
+    // de la collection — le .get() préalable doublait chaque lecture
+    // Firestore au démarrage (coût facturé + bande passante, bug
+    // documenté de la version publiée). 'users' reste ici car son
+    // listener est un sous-ensemble filtré (pharmacies publiques).
     const collections = [
-      'mc_patients','mc_accounts','mc_consultations','mc_prescriptions',
-      'mc_appointments','mc_vaccinations','mc_lab_results',
-      'mc_medicines','mc_sales','mc_messages','mc_consents',
+      'mc_vaccinations','mc_lab_results','mc_consents',
       'users',
       'patients','doctors','nurses','pharmacies','hospitals',
       'medical_records','prescriptions','appointments','notifications',
-      'registration_requests',
       'mc_hospitals','mc_affiliations',
-      'establishments','affiliation_requests',
+      // Collections des DEMANDES (écrites par un appareil, lues par
+      // l'admin sur un autre) : sans elles, une demande créée sur
+      // desktop ne redescendait jamais sur le mobile admin.
+      'affiliation_requests','registration_requests','establishments',
       'mc_verified_doctors','mc_verified_pharms','mc_verified_nurses',
-      'establishment_documents',
     ];
     // Chaque collection en parallèle avec un timeout individuel : un
     // réseau lent ou une requête bloquée ne doit jamais figer toute
@@ -159,11 +248,22 @@ const DB = (() => {
     await Promise.all(collections.map(async col => {
       try {
         const snap = await withTimeout(firebaseDB.collection(col).get(), PER_COLLECTION_TIMEOUT_MS);
+        // Vide confirmé serveur : vidage UNIQUEMENT pour les collections
+        // administratives de la whitelist (fantômes du dashboard) —
+        // jamais pour les données médicales créées localement.
         if (!snap.empty) store(col, snap.docs.map(d => d.data()));
+        else if (!snap.metadata?.fromCache && EMPTY_WIPE_WHITELIST.has(col)) store(col, []);
       } catch (e) {
         console.warn(`[MedConnect] Sync ${col} ignorée (lente/indisponible) :`, e?.message || e);
       }
     }));
+    // Horodatage pour l'écran "À propos" (VersionManager) — dernière
+    // fois que la synchro Firebase a été tentée avec succès.
+    try { localStorage.setItem('mc_last_sync_at', new Date().toISOString()); } catch (_) {}
+  }
+
+  function getLastSyncAt() {
+    try { return localStorage.getItem('mc_last_sync_at'); } catch (_) { return null; }
   }
 
   /** Version non bloquante : lance la sync en arrière-plan sans jamais
@@ -178,66 +278,140 @@ const DB = (() => {
   /* ── LISTENERS TEMPS RÉEL ────────────────────────── */
   function setupRealtimeListeners() {
     if (!firebaseReady || !firebaseDB) return;
-    // Patients
+    // Patients — FUSION : un dossier créé localement dont la montée
+    // cloud a échoué ne doit pas disparaître au snapshot suivant.
     listen(firebaseDB.collection('mc_patients'), snap => {
-      if (!snap.empty) storeSnapshot('mc_patients', snap);
+      if (!snap.empty) mergeStore('mc_patients', 'id', snap.docs.map(d => d.data()));
     });
-    // Messages
-    listen(firebaseDB.collection('mc_messages'), snap => {
-      if (!snap.empty) storeSnapshot('mc_messages', snap);
-    });
-    // Rendez-vous
+    // Messages : PAS de listener global ici — la règle Firestore exige
+    // to_id == uid par document, une écoute collection-entière est
+    // rejetée en bloc pour tout le monde (c'était le cas depuis
+    // toujours, silencieusement). Voir setupUserScopedListeners().
+    // Rendez-vous — FUSION (même principe que mc_patients).
     listen(firebaseDB.collection('mc_appointments'), snap => {
-      if (!snap.empty) storeSnapshot('mc_appointments', snap);
+      if (!snap.empty) mergeStore('mc_appointments', 'aid', snap.docs.map(d => d.data()));
     });
     // Comptes
     listen(firebaseDB.collection('mc_accounts'), snap => {
-      if (!snap.empty) storeSnapshot('mc_accounts', snap);
+      storeSnapshot('mc_accounts', snap);
     });
-    // Profils pharmacies visibles publiquement
+    // Profils pharmacies visibles publiquement — listener FILTRÉ :
+    // fusion obligatoire, un remplacement intégral écraserait les
+    // autres profils chargés par la sync initiale.
     listen(firebaseDB.collection('users')
       .where('role', '==', 'pharmacist')
       .where('status', 'in', ['active', 'approved'])
       .where('isLocationVisible', '==', true), snap => {
-        storeSnapshot('users', snap);
+        if (!snap.empty) mergeStore('users', 'uid', snap.docs.map(d => d.data()));
     });
     // Établissements
     listen(firebaseDB.collection('establishments'), snap => {
-      if (!snap.empty) storeSnapshot('establishments', snap);
+      storeSnapshot('establishments', snap);
     });
     // Demandes d'affiliation
     listen(firebaseDB.collection('affiliation_requests'), snap => {
-      if (!snap.empty) storeSnapshot('affiliation_requests', snap);
+      storeSnapshot('affiliation_requests', snap);
     });
     listen(firebaseDB.collection('registration_requests'), snap => {
-      if (!snap.empty) storeSnapshot('registration_requests', snap);
+      storeSnapshot('registration_requests', snap);
     });
-    // Ordonnances — pour rafraîchir l'inbox pharmacie/médecin en quasi temps réel
+    // Ordonnances — FUSION : c'est la protection qui garantit que
+    // l'ordonnance du médecin reste visible même si sa montée cloud
+    // a échoué (cause de l'écran « Aucune donnée »).
     listen(firebaseDB.collection('mc_prescriptions'), snap => {
-      if (!snap.empty) storeSnapshot('mc_prescriptions', snap);
+      if (!snap.empty) mergeStore('mc_prescriptions', 'pid', snap.docs.map(d => d.data()));
     });
-    // Consultations
+    // Consultations — FUSION (même principe).
     listen(firebaseDB.collection('mc_consultations'), snap => {
-      if (!snap.empty) storeSnapshot('mc_consultations', snap);
+      if (!snap.empty) mergeStore('mc_consultations', 'cid', snap.docs.map(d => d.data()));
     });
     // Inventaire pharmacie (stock partagé entre appareils du même pharmacien)
     listen(firebaseDB.collection('mc_medicines'), snap => {
-      if (!snap.empty) storeSnapshot('mc_medicines', snap);
+      storeSnapshot('mc_medicines', snap);
     });
     // Ventes
     listen(firebaseDB.collection('mc_sales'), snap => {
-      if (!snap.empty) storeSnapshot('mc_sales', snap);
+      storeSnapshot('mc_sales', snap);
     });
     // Trace documents établissement (audit)
     listen(firebaseDB.collection('establishment_documents'), snap => {
-      if (!snap.empty) storeSnapshot('establishment_documents', snap);
+      storeSnapshot('establishment_documents', snap);
     });
+  }
+
+  /** Listeners dépendants de l'utilisateur connecté — montés APRÈS
+      login (App.startExchangeSync), pas au boot. Requêtes filtrées :
+      seule forme que les règles par-document acceptent. Fusion par
+      identifiant : un snapshot filtré ne doit jamais écraser le
+      reste de la liste locale. */
+  let _userListenersUnsubs = [];
+  function setupUserScopedListeners() {
+    if (!firebaseReady || !firebaseDB) return;
+    const user = window.Auth?.getUser?.();
+    if (!user?.uid) return;
+
+    _userListenersUnsubs.forEach(u => { try { u(); } catch (_) {} });
+    _userListenersUnsubs = [];
+
+    const scoped = (query, key, idField) => {
+      try {
+        const unsub = query.onSnapshot(
+          snap => {
+            if (!snap.empty) {
+              mergeStore(key, idField, snap.docs.map(d => d.data()));
+              // Rafraîchit la vue affichée si elle dépend de ces données
+              // (ex. l'écran Ordonnances quand mc_prescriptions arrive),
+              // pour un affichage immédiat sans rechargement manuel.
+              try {
+                const section = { mc_prescriptions: 'prescriptions', mc_messages: 'messages' }[key];
+                if (section && window.App?.refreshIfCurrent) window.App.refreshIfCurrent(section);
+              } catch (_) {}
+            }
+          },
+          err => console.warn(`[MedConnect] Listener ${key} (scoped) rejeté :`, err?.message || err)
+        );
+        _userListenersUnsubs.push(unsub);
+      } catch (e) {
+        console.warn(`[MedConnect] Listener ${key} impossible :`, e?.message || e);
+      }
+    };
+
+    // Messagerie : la règle exige to_id == uid — c'est la seule
+    // écoute des messages qui fonctionne réellement.
+    scoped(firebaseDB.collection('mc_messages').where('to_id', '==', user.uid),
+      'mc_messages', 'mid');
+
+    // Pharmacien : ses ordonnances reçues (pharmacyCanReadPrescription).
+    if (user.role === 'pharmacist') {
+      scoped(firebaseDB.collection('mc_prescriptions').where('pharmacyUid', '==', user.uid),
+        'mc_prescriptions', 'pid');
+    }
+
+    // Médecin / infirmier : la règle Firestore les autorise à LIRE la
+    // collection mc_prescriptions (currentRoleIs doctor/nurse). Sans ce
+    // listener, leurs ordonnances n'étaient jamais rechargées après la
+    // connexion — cause du bug « ordonnances qui n'apparaissent pas ».
+    // Le filtrage métier (contexte établissement, consentement patient)
+    // reste appliqué à l'affichage par prescriptionsForContext ; ici on
+    // se contente de ramener les données en local par fusion.
+    if (user.role === 'doctor' || user.role === 'nurse') {
+      scoped(firebaseDB.collection('mc_prescriptions'),
+        'mc_prescriptions', 'pid');
+    }
   }
 
   /* ── INIT ────────────────────────────────────────── */
   async function init() {
     await syncFromFirebase();
     setupRealtimeListeners();
+    // Rejoue immédiatement les écritures d'une session précédente qui
+    // n'avaient pas atteint le cloud (fermeture d'app hors-ligne, etc.),
+    // puis réessaie régulièrement tant qu'il en reste.
+    flushOutbox();
+    setInterval(flushOutbox, 20000);
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', flushOutbox);
+    }
   }
 
   /* ══════════════════════════════════════════════════
@@ -409,7 +583,8 @@ const DB = (() => {
 
   function addPrescription(data) {
     const list = getPrescriptions();
-    const p = { ...data, pid: makeId('P'), date: data.date || today(), status: data.status || 'sent' };
+    const p = { ...data, pid: makeId('P'), date: data.date || today(), status: data.status || 'sent',
+      sourceDevice: data.sourceDevice || window.ExchangeBridge?.currentSourceDevice?.() || 'mobile' };
     list.push(p); store('mc_prescriptions', list);
     _push('mc_prescriptions', p.pid, p);
     _push('prescriptions', p.pid, p);
@@ -452,6 +627,15 @@ const DB = (() => {
     return d;
   }
 
+  /** Documents d'un patient (champ canonique de establishment_documents :
+      patientUid, cf. hospital.js addEstablishmentDocument), éventuellement
+      filtrés par documentType (ex: 'imaging' pour l'onglet Imagerie). */
+  function getPatientEstablishmentDocuments(pid, documentType) {
+    return getEstablishmentDocuments()
+      .filter(d => d.patientUid === pid && (!documentType || d.documentType === documentType))
+      .sort((a,b) => (b.createdAt||'').localeCompare(a.createdAt||''));
+  }
+
   function getAppointments() { return load('mc_appointments'); }
 
   function addAppointment(data) {
@@ -478,6 +662,10 @@ const DB = (() => {
     store('mc_appointments', getAppointments().filter(a => a.aid !== aid));
     _delete('mc_appointments', aid);
     _delete('appointments', aid);
+  }
+
+  function getPatientAppointments(pid) {
+    return getAppointments().filter(a => a.patient_id === pid).sort((a,b) => (b.date||'').localeCompare(a.date||''));
   }
 
   /* ══════════════════════════════════════════════════
@@ -636,14 +824,14 @@ const DB = (() => {
   }
 
   return {
-    init, syncFromFirebase, syncFromFirebaseInBackground, generatePatientId, makeId, pushAndReport,
+    init, syncFromFirebase, syncFromFirebaseInBackground, setupUserScopedListeners, generatePatientId, makeId, pushAndReport, flushOutbox, outboxCount, getLastSyncAt,
     getAccounts, saveAccounts, getUsers, saveUsers, upsertUserProfile,
     getRegistrationRequests, saveRegistrationRequests, createRegistrationRequest,
     getPatients, savePatients, addPatient, updatePatient, deletePatient, getPatientById, searchPatients,
     getConsultations, addConsultation, getPatientConsultations, deleteConsultation,
     getPrescriptions, addPrescription, updatePrescription, getPatientPrescriptions,
-    getEstablishmentDocuments, addEstablishmentDocument,
-    getAppointments, addAppointment, updateAppointment, deleteAppointment,
+    getEstablishmentDocuments, addEstablishmentDocument, getPatientEstablishmentDocuments,
+    getAppointments, addAppointment, updateAppointment, deleteAppointment, getPatientAppointments,
     getVaccinations, addVaccination, getPatientVaccinations, deleteVaccination,
     getAllLabResults, addLabResult, getPatientLabResults, deleteLabResult,
     getMedicines, addMedicine, updateMedicine, deleteMedicine,

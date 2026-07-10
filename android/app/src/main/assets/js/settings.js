@@ -75,9 +75,29 @@ const Settings = (() => {
                 onclick="Auth.logout()">🚪 Se déconnecter</button>
       </div>
 
-      <!-- VERSION -->
+      ${renderAboutSection()}`;
+  }
+
+  /* ── À PROPOS (version, build, état Firebase/sync) ──────────── */
+  function renderAboutSection() {
+    const v = window.VersionManager?.getCurrent?.() || {};
+    const firebaseOk = typeof firebaseReady !== 'undefined' && firebaseReady && typeof firebaseDB !== 'undefined' && !!firebaseDB;
+    const pending = window.DB?.outboxCount?.() || 0;
+    const lastSync = window.DB?.getLastSyncAt?.();
+
+    return `
       <div class="settings-section" style="text-align:center;color:var(--text-muted)">
-        <p style="font-size:.8rem">MedConnect v2.0 © 2026 — MediaVision Tech</p>
+        <h3 style="text-align:left;color:var(--text)">ℹ️ À propos</h3>
+        <table class="info-table" style="text-align:left;margin-top:.5rem">
+          <tr><td>Version</td><td>${esc(v.version || '—')}</td></tr>
+          <tr><td>Build</td><td style="font-family:monospace">${esc(v.build || '—')}</td></tr>
+          <tr><td>Date du build</td><td>${esc(v.buildDate || '—')}</td></tr>
+          <tr><td>État Firebase</td><td style="color:${firebaseOk ? 'var(--secondary)' : 'var(--danger)'}">${firebaseOk ? '✅ Connecté' : '❌ Indisponible'}</td></tr>
+          <tr><td>État synchronisation</td><td style="color:${pending ? 'var(--accent)' : 'var(--secondary)'}">${pending ? `⏳ ${pending} en attente` : '☁️ À jour'}</td></tr>
+          <tr><td>Dernière synchronisation</td><td>${lastSync ? esc(new Date(lastSync).toLocaleString('fr-FR')) : '—'}</td></tr>
+        </table>
+        <button class="btn btn-ghost btn-sm" style="margin-top:.8rem" onclick="VersionManager.openChangelog()">📋 Journal des versions</button>
+        <p style="font-size:.8rem;margin-top:1rem">MedConnect © 2026 — MediaVision Tech</p>
         <p style="font-size:.75rem;margin-top:.2rem">📞 +243 856 373 707 · ✉️ hallo.mediavision.tech@gmail.com</p>
         <p style="font-size:.72rem;margin-top:.35rem;color:var(--text-dim)">
           Les données peuvent être stockées localement pour le mode hors ligne.<br>
@@ -366,7 +386,7 @@ const Settings = (() => {
     Settings.render(document.getElementById('main-content'));
   }
 
-  return { render, updatePharmacyLocation, openAddDoctor, saveDoctor, openAddPharmacist, savePharmacist };
+  return { render, updatePharmacyLocation, openAddDoctor, saveDoctor, openAddPharmacist, savePharmacist, renderAboutSection };
 })();
 
 window.Settings = Settings;

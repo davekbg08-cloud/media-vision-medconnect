@@ -1,3 +1,6 @@
+@import url('./mobile-pos-fix.css');
+@import url('./mobile-responsive-fix.css');
+
 /* =====================================================
    MedConnect — Ajustement visuel Établissements
    -----------------------------------------------------
@@ -67,6 +70,58 @@
     align-items: center;
     justify-content: center;
   }
+
+  /* Dashboard admin : rendre les 3 premières cartes visibles sur mobile */
+  .main-content > .page-header + .stats-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: .55rem;
+    margin-bottom: 1rem;
+  }
+
+  .main-content > .page-header + .stats-grid .stat-card {
+    min-height: auto;
+    padding: .72rem .45rem;
+    border-radius: 14px;
+    overflow: visible;
+  }
+
+  .main-content > .page-header + .stats-grid .stat-icon {
+    font-size: 1.15rem;
+    margin-bottom: .2rem;
+  }
+
+  .main-content > .page-header + .stats-grid .stat-value {
+    font-size: 1.35rem;
+    line-height: 1.05;
+  }
+
+  .main-content > .page-header + .stats-grid .stat-label {
+    font-size: .54rem;
+    line-height: 1.18;
+    letter-spacing: .15px;
+    text-transform: uppercase;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  /* Fenêtre admin vérification : boutons Approuver / Refuser / Fermer visibles */
+  #global-modal .modal .form-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: .6rem;
+    width: 100%;
+  }
+
+  #global-modal .modal .form-actions .btn,
+  #global-modal .modal .form-actions button {
+    width: 100%;
+    max-width: 100%;
+    white-space: normal;
+    min-height: 44px;
+    text-align: center;
+  }
 }
 
 @media (max-width: 430px) {
@@ -93,6 +148,27 @@
   .main-content > .stats-grid + .header-actions {
     grid-template-columns: 1fr 1fr;
   }
+
+  .main-content > .page-header + .stats-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: .45rem;
+  }
+
+  .main-content > .page-header + .stats-grid .stat-card {
+    padding: .62rem .35rem;
+  }
+
+  .main-content > .page-header + .stats-grid .stat-icon {
+    font-size: 1.05rem;
+  }
+
+  .main-content > .page-header + .stats-grid .stat-value {
+    font-size: 1.22rem;
+  }
+
+  .main-content > .page-header + .stats-grid .stat-label {
+    font-size: .48rem;
+  }
 }
 
 @media (max-width: 360px) {
@@ -102,5 +178,9 @@
 
   .main-content > .stats-grid + .header-actions {
     grid-template-columns: 1fr;
+  }
+
+  .main-content > .page-header + .stats-grid .stat-label {
+    font-size: .44rem;
   }
 }

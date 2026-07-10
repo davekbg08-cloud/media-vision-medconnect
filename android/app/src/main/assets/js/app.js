@@ -56,57 +56,60 @@ const App = (() => {
   /* ── MENUS PAR RÔLE ──────────────────────────────── */
   const MENUS = {
     patient: () => [
-      { label:'Ma Fiche',          icon:'🪪', s:'my_record'     },
-      { label:'Timeline',          icon:'🗓️', s:'timeline'      },
-      { label:'Historique',        icon:'📋', s:'history'       },
-      { label:'Ordonnances',       icon:'💊', s:'prescriptions' },
-      { label:'Analyses',          icon:'🧪', s:'lab'           },
-      { label:'Vaccinations',      icon:'💉', s:'vaccinations'  },
-      { label:'Rendez-vous',       icon:'📅', s:'appointments'  },
-      { label:'Messagerie',        icon:'📨', s:'inbox'         },
-      { label:'Carte pharmacies',  icon:'💊', s:'pharmacy_map'  },
-      { label:'Carte & GPS',       icon:'🗺️', s:'map'           },
-      { label:'Paramètres',        icon:'⚙️', s:'settings'      },
+      { label:I18n.t('nav_my_record'),     icon:'🪪', s:'my_record'     },
+      { label:I18n.t('nav_timeline'),      icon:'🗓️', s:'timeline'      },
+      { label:I18n.t('nav_history'),       icon:'📋', s:'history'       },
+      { label:I18n.t('nav_prescriptions'), icon:'💊', s:'prescriptions' },
+      { label:I18n.t('nav_lab'),           icon:'🧪', s:'lab'           },
+      { label:I18n.t('nav_vaccinations'),  icon:'💉', s:'vaccinations'  },
+      { label:I18n.t('nav_appointments'),  icon:'📅', s:'appointments'  },
+      { label:I18n.t('nav_inbox'),         icon:'📨', s:'inbox'         },
+      { label:I18n.t('nav_pharmacy_map'),  icon:'💊', s:'pharmacy_map'  },
+      { label:I18n.t('nav_map'),           icon:'🗺️', s:'map'           },
+      { label:I18n.t('nav_settings'),      icon:'⚙️', s:'settings'      },
     ],
     doctor: () => [
-      { label:'Tableau de Bord',   icon:'📊', s:'dashboard'     },
-      { label:'Patients',          icon:'👥', s:'patients'      },
-      { label:'Consultations',     icon:'🩺', s:'consultations' },
-      { label:'Ordonnances',       icon:'💊', s:'prescriptions' },
-      { label:'Laboratoire',       icon:'🧪', s:'lab'           },
-      { label:'Rendez-vous',       icon:'📅', s:'appointments'  },
-      { label:'Messagerie',        icon:'📨', s:'inbox'         },
-      { label:'Établissements',    icon:'🏥', s:'hospitals'     },
-      { label:'Carte & GPS',       icon:'🗺️', s:'map'           },
-      { label:'Paramètres',        icon:'⚙️', s:'settings'      },
+      { label:I18n.t('nav_dashboard'),     icon:'📊', s:'dashboard'     },
+      { label:I18n.t('nav_patients'),      icon:'👥', s:'patients'      },
+      { label:I18n.t('nav_consultations'), icon:'🩺', s:'consultations' },
+      { label:I18n.t('nav_prescriptions'), icon:'💊', s:'prescriptions' },
+      { label:'Transferts',                icon:'🚑', s:'transfers'     },
+      { label:I18n.t('nav_lab'),           icon:'🧪', s:'lab'           },
+      { label:I18n.t('nav_appointments'),  icon:'📅', s:'appointments'  },
+      { label:I18n.t('nav_inbox'),         icon:'📨', s:'inbox'         },
+      { label:I18n.t('nav_hospitals'),     icon:'🏥', s:'hospitals'     },
+      { label:I18n.t('nav_map'),           icon:'🗺️', s:'map'           },
+      { label:I18n.t('nav_settings'),      icon:'⚙️', s:'settings'      },
     ],
     nurse: () => [
-      { label:'Patients',          icon:'👥', s:'patients'      },
-      { label:'Vaccinations',      icon:'💉', s:'vaccinations'  },
-      { label:'Rendez-vous',       icon:'📅', s:'appointments'  },
-      { label:'Messagerie',        icon:'📨', s:'inbox'         },
-      { label:'Établissements',    icon:'🏥', s:'hospitals'     },
-      { label:'Carte pharmacies',  icon:'💊', s:'pharmacy_map'  },
-      { label:'Carte & GPS',       icon:'🗺️', s:'map'           },
-      { label:'Paramètres',        icon:'⚙️', s:'settings'      },
+      { label:I18n.t('nav_patients'),      icon:'👥', s:'patients'      },
+      { label:I18n.t('nav_prescriptions'), icon:'💊', s:'prescriptions' },
+      { label:I18n.t('nav_vaccinations'),  icon:'💉', s:'vaccinations'  },
+      { label:'Transferts',                icon:'🚑', s:'transfers'     },
+      { label:I18n.t('nav_appointments'),  icon:'📅', s:'appointments'  },
+      { label:I18n.t('nav_inbox'),         icon:'📨', s:'inbox'         },
+      { label:I18n.t('nav_hospitals'),     icon:'🏥', s:'hospitals'     },
+      { label:I18n.t('nav_pharmacy_map'),  icon:'💊', s:'pharmacy_map'  },
+      { label:I18n.t('nav_map'),           icon:'🗺️', s:'map'           },
+      { label:I18n.t('nav_settings'),      icon:'⚙️', s:'settings'      },
     ],
     pharmacist: () => [
-      { label:'Tableau de Bord',   icon:'📊', s:'dashboard'     },
-      { label:'Ordonnances reçues',icon:'💊', s:'pharmacy_rx'   },
-      { label:'Point de Vente',    icon:'🛒', s:'pos'           },
-      { label:'Inventaire',        icon:'📦', s:'inventory'     },
-      { label:'Ventes',            icon:'📈', s:'sales'         },
-      { label:'Messagerie',        icon:'📨', s:'inbox'         },
-      { label:'Carte pharmacies',  icon:'💊', s:'pharmacy_map'  },
-      { label:'Carte & GPS',       icon:'🗺️', s:'map'           },
-      { label:'Paramètres',        icon:'⚙️', s:'settings'      },
+      { label:I18n.t('nav_dashboard'),     icon:'📊', s:'dashboard'     },
+      { label:I18n.t('nav_pharmacy_rx'),   icon:'💊', s:'pharmacy_rx'   },
+      { label:I18n.t('nav_pos'),           icon:'🛒', s:'pos'           },
+      { label:I18n.t('nav_inventory'),     icon:'📦', s:'inventory'     },
+      { label:I18n.t('nav_sales'),         icon:'📈', s:'sales'         },
+      { label:I18n.t('nav_inbox'),         icon:'📨', s:'inbox'         },
+      { label:I18n.t('nav_pharmacy_map'),  icon:'💊', s:'pharmacy_map'  },
+      { label:I18n.t('nav_map'),           icon:'🗺️', s:'map'           },
+      { label:I18n.t('nav_settings'),      icon:'⚙️', s:'settings'      },
     ],
     admin: () => [
-      { label:'Administration',    icon:'⚙️', s:'dashboard'     },
-      { label:'Établissements',    icon:'🏥', s:'hospitals'     },
-      { label:'Rendez-vous',       icon:'📅', s:'appointments'  },
-      { label:'Carte & GPS',       icon:'🗺️', s:'map'           },
-      { label:'Messagerie',        icon:'📨', s:'inbox'         },
+      { label:I18n.t('nav_admin_dashboard'),icon:'⚙️', s:'dashboard'    },
+      { label:I18n.t('nav_hospitals'),     icon:'🏥', s:'hospitals'     },
+      { label:I18n.t('nav_appointments'),  icon:'📅', s:'appointments'  },
+      { label:I18n.t('nav_map'),           icon:'🗺️', s:'map'           },
+      { label:I18n.t('nav_inbox'),         icon:'📨', s:'inbox'         },
     ],
   };
 
@@ -129,8 +132,14 @@ const App = (() => {
       case 'hospitals':     HospitalsRegistry.renderManagePage(main);                       break;
 
       case 'prescriptions':
-        if (role === 'doctor' || role === 'admin') HospitalPortal.renderPrescriptions(main);
+        // L'infirmière passait dans la vue PATIENT (qui filtre sur un
+        // patient_id qu'elle n'a pas → toujours vide). Elle partage la
+        // vue établissement, filtrée par consentement dans itemInContext.
+        if (role === 'doctor' || role === 'admin' || role === 'nurse') HospitalPortal.renderPrescriptions(main);
         else PatientPortal.renderPrescriptions(main);
+        break;
+      case 'transfers':
+        HospitalPortal.renderTransfers(main);
         break;
 
       case 'lab':
@@ -161,16 +170,78 @@ const App = (() => {
     document.getElementById('auth-screen').style.display  = 'none';
     document.getElementById('landing').style.display      = 'none';
     document.getElementById('app-layout').style.display   = 'flex';
-    buildNav(user);
-    const first = (MENUS[user.role] || MENUS.patient)()[0];
-    navigateTo(first.s);
+    try { buildNav(user); } catch (e) { console.warn('[App] buildNav :', e); }
+    try {
+      const first = (MENUS[user.role] || MENUS.patient)()[0];
+      navigateTo(first.s);
+    } catch (e) {
+      console.warn('[App] navigation initiale :', e);
+    }
+    startExchangeSync(user);
+  }
+
+  /* ── ÉCOUTE DU CONTRAT D'ÉCHANGE mobile ↔ desktop ──
+     ExchangeBridge.startRoleListeners existait mais n'était
+     branché nulle part : le desktop écrivait, le mobile ne
+     recevait jamais. Première émission de chaque collection =
+     état initial (silencieux, sauf compteur de notifications
+     non lues) ; les suivantes = vraie nouveauté, notifiée.
+     Les écritures restent gatées par l'abonnement desktop
+     (ExchangeBridge + règles) ; l'écoute est de la lecture,
+     toujours autorisée par le contrat à deux vitesses. */
+  const _exchangeSeen = new Set();
+  function startExchangeSync(user) {
+    if (!user) return;
+    // Tout ce bloc est secondaire à l'affichage de l'écran : s'il
+    // échoue (listener rejeté, module absent…), il ne doit JAMAIS
+    // empêcher l'ouverture de la session — sinon un simple souci de
+    // pont d'échange fait « planter » un compte (ex. admin) au login.
+    try {
+      window.DB?.setupUserScopedListeners?.();
+    } catch (e) {
+      console.warn('[App] setupUserScopedListeners a échoué (ignoré) :', e);
+    }
+    if (!window.ExchangeBridge?.startRoleListeners) return;
+    _exchangeSeen.clear();
+    const LIVE_LABELS = {
+      labResults:            '🧪 Nouveau résultat d\'analyse disponible',
+      labRequests:           '🧪 Nouvelle demande d\'analyse au laboratoire',
+      prescriptions:         '💊 Ordonnance mise à jour',
+      consultations:         '🩺 Consultation mise à jour',
+      notifications:         '📨 Nouvelle notification',
+      registration_requests: '🆕 Nouvelle demande d\'inscription',
+    };
+    try {
+      ExchangeBridge.startRoleListeners((col, docs) => {
+        if (!_exchangeSeen.has(col)) {
+          _exchangeSeen.add(col);
+          if (col === 'notifications' && docs.length) {
+            toast(`📨 ${docs.length} notification(s) non lue(s)`);
+          }
+          return;
+        }
+        if (LIVE_LABELS[col] && docs.length) toast(LIVE_LABELS[col]);
+        // Rafraîchit la section affichée si elle correspond à la donnée reçue.
+        const related = { labResults:'lab', labRequests:'lab', prescriptions:'prescriptions', consultations:'consultations' };
+        if (related[col] && related[col] === currentSection) {
+          try { routeSection(currentSection); } catch (_) {}
+        }
+      });
+    } catch (e) {
+      console.warn('[App] startRoleListeners a échoué (ignoré) :', e);
+    }
   }
 
   /* ── BUILD NAV ───────────────────────────────────── */
   function buildNav(user) {
     const role  = user?.role || 'patient';
     const items = (MENUS[role] || MENUS.patient)();
-    const unread = DB.getMessages().filter(m => m.to_role === role && !m.read).length;
+    // Comptage par destinataire réel (uid/matricule/n° patient) via
+    // Network.getUnread — l'ancien filtre to_role comptait les
+    // messages de TOUS les utilisateurs du même rôle et ignorait
+    // readStatus (lecture faite sur un autre appareil).
+    const unread = window.Network?.getUnread ? Network.getUnread(role)
+      : DB.getMessages().filter(m => m.to_role === role && !m.read).length;
 
     document.getElementById('sidebar-brand').innerHTML =
       `<span>${Auth.getRoleIcon(role)}</span> MedConnect`;
@@ -313,16 +384,41 @@ const App = (() => {
       DB.init().catch(error => console.warn('[MedConnect] Sync Firebase non bloquante :', error));
     }, 0);
 
+    // ── AIGUILLAGE DESKTOP vs MOBILE ──
+    // Le desktop est destiné à l'hôpital : entrée par connexion
+    // d'établissement (matricule + mot de passe), jamais l'écran
+    // mobile d'inscription médecin/patient/infirmier/pharmacien.
+    const isDesktop = window.ExchangeBridge?.currentSourceDevice?.() === 'desktop';
+    if (isDesktop && window.HospitalAuth) {
+      const hs = HospitalAuth.getSession();
+      if (hs && window.HospitalDesktopUI?.openForSession) {
+        document.getElementById('auth-screen').style.display = 'none';
+        HospitalDesktopUI.openForSession(hs);
+      } else {
+        HospitalAuth.renderScreen();
+      }
+      return;
+    }
+
     const user = Auth.getUser();
     if (user) { afterLogin(user); return; }
 
     Auth.showLogin();
   }
 
+  /* Re-render une section UNIQUEMENT si elle est actuellement
+     affichée. Appelé par les listeners Firestore (ex. arrivée
+     d'ordonnances) pour un affichage immédiat sans rechargement. */
+  function refreshIfCurrent(section) {
+    if (section && section === currentSection) {
+      try { routeSection(currentSection); } catch (_) {}
+    }
+  }
+
   return {
-    afterLogin, buildNav, navigateTo, goHome, refresh,
+    afterLogin, buildNav, navigateTo, goHome, refresh, startExchangeSync,
     toggleTheme, openModal, closeModal, toast, init,
-    closeMobileSidebar,
+    closeMobileSidebar, refreshIfCurrent,
   };
 })();
 

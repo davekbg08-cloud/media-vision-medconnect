@@ -20,11 +20,14 @@
   <!-- App CSS -->
   <link rel="stylesheet" href="css/style.css">
   <link rel="stylesheet" href="css/establishments-balance.css">
+  <link rel="stylesheet" href="css/hospital-desktop.css">
+  <link rel="stylesheet" href="css/medical-record-desktop.css">
+  <link rel="stylesheet" href="css/mobile-layout-fixes.css">
 
   <!-- Firebase SDK (v9 compat) -->
-  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+  <script defer src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+  <script defer src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+  <script defer src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
 </head>
 <body>
 
@@ -66,6 +69,7 @@
       </div>
       <ul class="sidebar-nav" id="sidebar-nav"></ul>
       <div class="sidebar-footer">
+        <div id="sync-badge-container"></div>
         <div id="sidebar-lang-container"></div>
         <div class="sidebar-user" id="sidebar-user"></div>
         <p style="font-size:.67rem;color:var(--text-dim);margin-top:.3rem">MedConnect v2.0 © 2026</p>
@@ -90,48 +94,72 @@
   <div class="toast-container" id="toast-container" aria-live="polite"></div>
 
   <!-- ══════════════ SCRIPTS (ordre crucial) ══════════════ -->
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <!-- 1. Config Firebase (remplir les valeurs dans ce fichier) -->
-  <script src="js/firebase-config.js"></script>
+  <script defer src="js/firebase-config.js"></script>
 
   <!-- 2. Modules de base -->
-  <script src="js/i18n.js"></script>
-  <script src="js/db.js"></script>
-  <script src="js/currency.js"></script>
-  <script src="js/access_control.js"></script>
-  <script src="js/haptic_feedback.js"></script>
+  <script defer src="js/i18n.js"></script>
+  <script defer src="js/db.js"></script>
+  <script defer src="js/exchange-bridge.js"></script>
+  <script defer src="js/medical-record-sharing.js"></script>
+  <script defer src="js/emergency-transfer.js"></script>
+  <script defer src="js/sync-badge.js"></script>
+
+  <!-- Bundle desktop hôpital (adapté) : couche cloud, permissions,
+       modules métier, puis shell plein écran séparé -->
+  <script defer src="js/cloud-db.js"></script>
+  <script defer src="js/hospital-permissions.js"></script>
+  <script defer src="js/hospital-capabilities.js"></script>
+  <script defer src="js/hospital-i18n.js"></script>
+  <script defer src="js/hospital-subscription.js"></script>
+  <script defer src="js/medical-ai.js"></script>
+  <script defer src="js/hospital-beds.js"></script>
+  <script defer src="js/hospital-lab.js"></script>
+  <script defer src="js/hospital-desktop-ui.js"></script>
+  <script defer src="js/medical-record-desktop.js"></script>
+  <script defer src="js/hospital-reception.js"></script>
+  <script defer src="js/hospital-emergency.js"></script>
+  <script defer src="js/hospital-maternity.js"></script>
+  <script defer src="js/hospital-auth.js"></script>
+  <script defer src="js/currency.js"></script>
+  <script defer src="js/access_control.js"></script>
+  <script defer src="js/haptic_feedback.js"></script>
 
   <!-- 3. Modules fonctionnels -->
-  <script src="js/transfer_service.js"></script>
-  <script src="js/network.js"></script>
-  <script src="js/inbox_message_controls.js"></script>
-  <script src="js/transfer_ui_patch.js"></script>
-  <script src="js/hospitals_registry.js"></script>
-  <script src="js/timeline.js"></script>
-  <script src="js/appointments.js"></script>
-  <script src="js/lab.js"></script>
-  <script src="js/map.js"></script>
+  <script defer src="js/transfer_service.js"></script>
+  <script defer src="js/network.js"></script>
+  <script defer src="js/inbox_message_controls.js"></script>
+  <script defer src="js/transfer_ui_patch.js"></script>
+  <script defer src="js/hospitals_registry.js"></script>
+  <script defer src="js/timeline.js"></script>
+  <script defer src="js/appointments.js"></script>
+  <script defer src="js/lab.js"></script>
+  <script defer src="js/map.js"></script>
 
   <!-- 4. Portails -->
-  <script src="js/patient.js"></script>
-  <script src="js/hospital.js"></script>
-  <script src="js/pharmacy.js"></script>
-  <script src="js/share.js"></script>
+  <script defer src="js/patient.js"></script>
+  <script defer src="js/hospital.js"></script>
+  <script defer src="js/pharmacy.js"></script>
+  <script defer src="js/share.js"></script>
+  <script defer src="js/prescription-flow-fix.js"></script>
 
   <!-- 5. Admin & Settings -->
-  <script src="js/admin.js"></script>
-  <script src="js/settings.js"></script>
-  <script src="js/prescription-flow-fix.js"></script>
+  <script defer src="js/admin.js"></script>
+  <script defer src="js/settings.js"></script>
 
   <!-- 6. Auth & App (en dernier) -->
-  <script src="js/auth.js"></script>
-  <script src="js/registration-submit-flow.js"></script>
-  <script src="js/app.js"></script>
-  <script src="js/global_back_button.js"></script>
-  <script src="js/patient_edit_guard.js"></script>
-  <script src="js/auth-ui-cleanup.js"></script>
-  <script src="js/affiliation-cleanup.js"></script>
+  <script defer src="js/auth.js"></script>
+  <script defer src="js/registration-submit-flow.js"></script>
+  <script defer src="js/app.js"></script>
+  <script defer src="js/global_back_button.js"></script>
+  <script defer src="js/patient_edit_guard.js"></script>
+  <script defer src="js/auth-ui-cleanup.js"></script>
+  <script defer src="js/affiliation-cleanup.js"></script>
+
+  <!-- 7. Gestion des versions / mises à jour (PWA + Android + Desktop) -->
+  <script defer src="js/version-manager.js"></script>
 
   <!-- PWA Service Worker -->
   <script>

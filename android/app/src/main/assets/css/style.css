@@ -543,6 +543,8 @@ input::placeholder { color:var(--text-dim); }
 }
 .rx-add-btn { margin-top: .3rem; }
 
+/* Une ligne médicament : champs empilés verticalement, pleine largeur,
+   confortables au doigt. Espacement net entre médicaments. */
 .rx-item {
   display: flex;
   flex-direction: column;
@@ -559,10 +561,18 @@ input::placeholder { color:var(--text-dim); }
   min-height: 44px;
   box-sizing: border-box;
 }
-.rx-item .rx-remove { align-self: flex-end; min-height: 40px; }
+.rx-item .rx-remove {
+  align-self: flex-end;
+  min-height: 40px;
+}
 
+/* Sur écran large, on peut mettre nom + dosage côte à côte. */
 @media (min-width: 700px) {
-  .rx-item { flex-direction: row; align-items: center; flex-wrap: wrap; }
+  .rx-item {
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: wrap;
+  }
   .rx-item .rx-name,
   .rx-item .rx-dosage { flex: 1; width: auto; }
   .rx-item .rx-remove { align-self: center; }
@@ -1412,6 +1422,51 @@ body.rtl .tl-connector { left: auto; right: -1.1rem; }
 }
 .auth-orientation-box p { margin-bottom: .2rem; }
 .auth-orientation-box strong { color: var(--text); }
+
+/* ── Badge de synchronisation cloud (SyncBadge) ── */
+.sync-badge-live {
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+  font-size: .72rem;
+  font-weight: 600;
+  padding: .35rem .5rem;
+  margin-bottom: .4rem;
+  border-radius: 8px;
+  background: rgba(255,255,255,.04);
+  cursor: pointer;
+  user-select: none;
+  transition: background .15s;
+}
+.sync-badge-live:hover { background: rgba(255,255,255,.09); }
+.sync-badge-live span { font-size: .85rem; }
+
+/* ── Écran de blocage (VersionManager) : maintenance / mise à jour
+   obligatoire. Seul mécanisme qui empêche réellement l'utilisation
+   de l'app — activé uniquement par un administrateur (system/maintenance),
+   jamais par une mise à jour normale. ── */
+#mc-block-screen {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10,15,30,.92);
+  padding: 1.5rem;
+}
+.mc-block-card {
+  max-width: 420px;
+  width: 100%;
+  text-align: center;
+  background: var(--bg-2, #0F172A);
+  border: 1px solid var(--border, rgba(255,255,255,.08));
+  border-radius: 16px;
+  padding: 2rem 1.5rem;
+}
+.mc-block-icon { font-size: 2.6rem; margin-bottom: .6rem; }
+.mc-block-card h2 { margin: 0 0 .6rem; }
+.mc-block-card p { opacity: .8; line-height: 1.5; }
 
 /* Badge « À compléter par le médecin » (fiche créée par une infirmière) */
 .badge-pending {

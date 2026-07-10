@@ -1,0 +1,240 @@
+/* =====================================================
+   MedConnect — Correctifs globaux mobile
+   Scope: toutes les pages, cartes, formulaires, tableaux, modales et bouton menu.
+   ===================================================== */
+
+html,
+body {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+body,
+.app-layout,
+.main-content,
+.sidebar,
+.card,
+.record-card,
+.stat-card,
+.info-card,
+.auth-card,
+.modal,
+.modal * {
+  max-width: 100%;
+}
+
+.main-content {
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+.card,
+.record-card,
+.stat-card,
+.info-card,
+.auth-register-info,
+.alert-box,
+.empty-state,
+.modal,
+#modal-body,
+.page-header,
+.records-list,
+.stats-grid,
+.info-grid,
+.form-grid,
+.table-wrapper,
+.data-table,
+.admin-row,
+.patient-row,
+.mini-record {
+  min-width: 0;
+}
+
+.card,
+.record-card,
+.stat-card,
+.info-card,
+.auth-register-info,
+.alert-box,
+.empty-state,
+.modal,
+#modal-body,
+.sidebar-user,
+.nav-item,
+.record-header,
+.info-table,
+.info-table td,
+small,
+strong,
+p,
+span,
+div {
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+input,
+select,
+textarea,
+button,
+.btn {
+  max-width: 100%;
+}
+
+.table-wrapper {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.data-table {
+  width: 100%;
+}
+
+.cleanup-preview-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .45rem .75rem;
+  color: var(--text-muted);
+  font-size: .78rem;
+}
+
+.nav-item-danger-soft {
+  color: var(--danger);
+}
+
+.nav-item-danger-soft.active,
+.nav-item-danger-soft:hover {
+  background: rgba(239,68,68,.10) !important;
+  color: var(--danger) !important;
+}
+
+@media (max-width: 768px) {
+  .mobile-menu-btn {
+    top: calc(env(safe-area-inset-top, 0px) + 1.05rem);
+    left: 1.05rem;
+    min-width: 48px;
+    min-height: 48px;
+    padding: .55rem .8rem;
+    border-radius: 14px;
+    z-index: 350;
+    touch-action: manipulation;
+  }
+
+  body.rtl .mobile-menu-btn {
+    left: auto;
+    right: 1.05rem;
+  }
+
+  .main-content {
+    width: 100%;
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  .page-header,
+  .record-header,
+  .patient-row,
+  .admin-row,
+  .form-actions,
+  .search-bar {
+    max-width: 100%;
+  }
+
+  .stats-grid,
+  .info-grid,
+  .form-grid,
+  .portal-grid,
+  .meds-grid {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .record-card,
+  .card,
+  .stat-card,
+  .info-card,
+  .auth-register-info,
+  .alert-box {
+    width: 100%;
+  }
+
+  .modal-overlay {
+    padding-left: .75rem;
+    padding-right: .75rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .main-content {
+    padding-left: .85rem;
+    padding-right: .85rem;
+  }
+
+  .form-actions {
+    justify-content: stretch;
+  }
+
+  .form-actions .btn,
+  .search-bar .btn {
+    white-space: normal;
+  }
+}
+
+/* =====================================================
+   Correctifs anti-débordement horizontal (renforcés)
+   Cause traitée : des grilles à minmax(230–260px) et des
+   largeurs fixes forcent une colonne plus large que l'écran
+   sur les petits téléphones → débordement latéral.
+   ===================================================== */
+
+/* Garde-fou racine renforcé : rien ne peut pousser la page
+   au-delà de la largeur de l'écran. */
+html, body {
+  overflow-x: hidden !important;
+  max-width: 100vw;
+}
+
+/* Toute image/média/tableau/pre reste dans son conteneur. */
+img, video, canvas, svg, table, pre, iframe {
+  max-width: 100%;
+  height: auto;
+}
+pre { overflow-x: auto; white-space: pre-wrap; word-break: break-word; }
+
+/* Les mots/URLs très longs ne débordent plus. */
+.card, .record-card, .stat-card, .info-card,
+.record-body, .auth-register-info, .alert-box,
+.hospital-stat-card, #modal-body {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+@media (max-width: 600px) {
+  /* Les grilles rigides (minmax en px) passent en UNE colonne :
+     c'est la principale source de débordement sur petit écran. */
+  .stat-grid, .stats-grid, .hospital-stats-grid,
+  .portal-grid, .info-grid, .form-grid,
+  .cards-grid, .dashboard-grid, .beds-grid, .ha-role-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Tableaux larges : défilement interne au lieu de pousser la page. */
+  .table-wrap, .data-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .data-table { min-width: 0; }
+
+  /* Barres d'onglets / actions : passent à la ligne au lieu de déborder. */
+  .hospital-auth-tabs, .form-actions, .search-bar,
+  .record-header, .hospital-page-header {
+    flex-wrap: wrap;
+  }
+}
+
+/* Le shell desktop plein écran ne doit jamais apparaître sur mobile :
+   il est conçu pour un grand écran. S'il s'ouvre par erreur, on le
+   rend au moins non-débordant. */
+@media (max-width: 600px) {
+  #hospital-desktop-root { max-width: 100vw; overflow-x: hidden; }
+  #hospital-desktop-root .hospital-content { padding: .8rem; }
+}

@@ -13,6 +13,7 @@ on:
       - 'sw.js'
       - 'manifest.json'
       - 'config/**'
+      - 'assets/**'
       - 'package.json'
       - 'package-lock.json'
       - 'tests/**'
@@ -67,6 +68,22 @@ jobs:
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: '8.2'
+
+      - name: Sync web assets into Android app
+        # android/app/src/main/assets/ était une copie figée à la main
+        # (via sync-assets.ps1, un script Windows jamais lancé en CI) :
+        # l'APK a longtemps été construit avec une version de l'app web
+        # potentiellement périmée (constaté : tout le module desktop
+        # hôpital et config/app-version.json manquaient). On resynchronise
+        # ici depuis la racine du dépôt à chaque build, pour que l'APK
+        # reflète toujours exactement ce qui est déployé sur le web.
+        run: |
+          ASSETS=android/app/src/main/assets
+          rm -rf "$ASSETS/css" "$ASSETS/js" "$ASSETS/assets" "$ASSETS/config" "$ASSETS/netlify.toml"
+          cp index.html manifest.json sw.js "$ASSETS/"
+          cp -r css js assets config "$ASSETS/"
+          echo "Fichiers synchronisés :"
+          diff -rq css "$ASSETS/css" && diff -rq js "$ASSETS/js" && echo "OK : identiques à la racine"
 
       - name: Validate signing secrets
         env:

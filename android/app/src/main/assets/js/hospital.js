@@ -30,10 +30,23 @@ const HospitalPortal = (() => {
     const user = Auth.getUser() || {};
     if (user.role === 'admin') return true;
     const h = window.HospitalsRegistry?.getCurrentHospital?.();
-    return patientIds.has(item.patient_id) ||
-      item.created_by === user.uid ||
-      item.doctor_uid === user.uid ||
-      (h && (item.establishmentId === h.establishmentId || item.hospital_id === h.establishmentId));
+    const uid = user.uid;
+    // Identité du créateur : elle peut être stockée sous plusieurs
+    // noms selon le chemin de création (consultation, ordonnance
+    // directe, import). On les couvre tous — sinon une ordonnance
+    // bien créée par l'utilisateur restait invisible faute de matcher
+    // le seul champ testé auparavant (created_by).
+    const mine = uid && (
+      item.created_by === uid || item.createdByUid === uid ||
+      item.doctor_uid === uid || item.doctorUid === uid);
+    return mine ||
+      patientIds.has(item.patient_id) ||
+      (h && (item.establishmentId === h.establishmentId || item.hospital_id === h.establishmentId)) ||
+      // Consentement patient (mc_consents) : une infirmière ou un
+      // médecin validé par le patient voit ses documents même hors
+      // de son établissement courant — c'était vérifié à l'ouverture
+      // (printRx, canUsePatient) mais jamais dans les LISTES.
+      (item.patient_id && window.ACL?.canAccessPatient?.(user, item.patient_id));
   }
 
   function consultationsForContext() {
@@ -275,6 +288,7 @@ const HospitalPortal = (() => {
         <button class="btn btn-ghost btn-sm" onclick="App.closeModal();LabModule.openNew('${id}')">🧪 Analyse</button>
         <button class="btn btn-ghost btn-sm" onclick="App.closeModal();AppointmentsModule.openNew('${id}')">📅 RDV</button>
         <button class="btn btn-ghost btn-sm" onclick="PatientPortal.printRecord('${id}')">🖨️ ${t('btn_print')}</button>
+        <button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="App.closeModal();HospitalPortal.openEmergencyTransfer('${id}')">🚑 Transférer le patient</button>
       </div>`);
   }
 
@@ -314,8 +328,12 @@ const HospitalPortal = (() => {
 
   function saveNewPatient(e) {
     e.preventDefault();
+    if (!window.HospitalCapabilities?.guardHospitalAction?.('create_patient')) return;
     const user = Auth.getUser() || {};
     const isNurse = user.role === 'nurse';
+    // Traçabilité + statut de complétion médicale. Une fiche créée par
+    // une infirmière est « en attente de médecin » ; une fiche créée
+    // par un médecin est directement complète côté médical.
     const completionFields = isNurse
       ? {
           created_by: user.uid || '',
@@ -386,7 +404,9 @@ const HospitalPortal = (() => {
           <button type="submit" class="btn btn-primary">${t('btn_save')}</button>
         </div>
       </form>`);
-    // Première ligne médicament affichée automatiquement à l'ouverture.
+    // Affiche automatiquement une première ligne de médicament dès
+    // l'ouverture, pour que la section Ordonnance soit visible et
+    // utilisable sans avoir à cliquer d'abord sur « + Ajouter ».
     addRxItem();
   }
 
@@ -409,6 +429,8 @@ const HospitalPortal = (() => {
     _refreshRxRemoveButtons();
   }
 
+  /* Masque le bouton « Retirer » quand il ne reste qu'une seule ligne
+     (on garde toujours au moins une ligne de médicament visible). */
   function _refreshRxRemoveButtons() {
     const items = [...document.querySelectorAll('#rx-list .rx-item')];
     items.forEach(it => {
@@ -428,6 +450,10 @@ const HospitalPortal = (() => {
 
   function saveConsult(e, patientId) {
     e.preventDefault();
+    // Garde de capacité (desktop hôpital) : créer une consultation +
+    // prescrire est réservé au médecin. Un infirmier/labo/réception en
+    // session hôpital ne peut pas exécuter cette action.
+    if (!window.HospitalCapabilities?.guardHospitalAction?.('create_consultation')) return;
     const user = Auth.getUser() || {};
     const hosp = window.HospitalsRegistry?.getCurrentHospital?.();
 
@@ -439,6 +465,11 @@ const HospitalPortal = (() => {
       App.toast("Impossible de créer l'ordonnance : aucun établissement actif. Sélectionnez un établissement.", 'error'); return;
     }
 
+    // ── Capture de TOUTES les valeurs du formulaire AVANT toute
+    //    fermeture de modale. Bug corrigé : la modale était fermée
+    //    avant la lecture de c-date/c-doc pour l'ordonnance ; les
+    //    éléments n'existaient plus (null.value → erreur), donc la
+    //    création de l'ordonnance ne s'exécutait jamais.
     const fDate    = document.getElementById('c-date').value;
     const fDoctor  = document.getElementById('c-doc').value;
     const fReason  = document.getElementById('c-reason').value;
@@ -463,8 +494,9 @@ const HospitalPortal = (() => {
       ...est,
     });
 
-    // Parcours infirmière → médecin : la 1ère consultation médicale
-    // marque la fiche complétée (traçabilité conservée).
+    // Parcours infirmière → médecin : si la fiche était « en attente de
+    // médecin », la première consultation médicale la marque complétée.
+    // On CONSERVE created_by / nurse_uid pour la traçabilité.
     if (user.role === 'doctor') {
       const pat = DB.getPatientById(patientId);
       if (pat && pat.medical_completion_status === 'pending') {
@@ -529,7 +561,7 @@ const HospitalPortal = (() => {
     }
 
     // Fermeture APRÈS création complète (consultation + ordonnance +
-    // documents) : plus aucune lecture du formulaire ensuite.
+    // documents) : plus aucune lecture du formulaire après ce point.
     App.closeModal();
 
     if (rxId) { openPrescriptionTarget(rxId); return; }
@@ -602,23 +634,216 @@ const HospitalPortal = (() => {
       ${!list.length ? `<div class="card empty-state"><p>${t('no_data')}</p></div>` : ''}
       <div class="records-list">
         ${list.map(rx => {
-          const p = DB.getPatientById(rx.patient_id);
+          const pid = rx.patient_id || rx.patientId;
+          const p = DB.getPatientById(pid);
           return `<div class="record-card presc-card">
             <div class="record-header">
-              <span class="record-date">📅 ${rx.date}</span>
-              ${p?`<span class="id-tag">${p.id}</span><strong>${esc(p.firstname)} ${esc(p.lastname)}</strong>`:''}
+              <span class="record-date">📅 ${rx.date || '—'}</span>
+              ${p ? `<span class="id-tag">${p.id}</span><strong>${esc(p.firstname)} ${esc(p.lastname)}</strong>`
+                  : `<span class="id-tag">${esc(pid || '—')}</span>`}
               <span class="record-doctor">👨‍⚕️ ${esc(rx.doctor)||'—'}</span>
               ${window.HospitalCapabilities?.can?.(Auth.getUser()?.role, 'prescribe')
-                ? `<button class="btn btn-ghost btn-xs" onclick="Network.sendPrescriptionToPharmacy('${rx.pid}','Pharmacie')">📤 Pharmacie</button>` : ''}
+                ? `<button class="btn btn-ghost btn-xs" onclick="HospitalPortal.openPrescriptionTarget('${rx.pid}')">📤 Pharmacie</button>` : ''}
               <button class="btn btn-ghost btn-xs" onclick="PatientPortal.printRx('${rx.pid}')">🖨️</button>
             </div>
-            <p><strong>Diagnostic :</strong> ${esc(rx.diagnosis)}</p>
+            <p><strong>Diagnostic :</strong> ${esc(rx.diagnosis || rx.diagnostic || '—')}</p>
+            ${rx.establishmentName ? `<p>🏥 ${esc(rx.establishmentName)} · Matricule ${esc(rx.establishmentId || rx.hospital_id || '—')}</p>` : ''}
             <ul style="padding-left:1.2rem;margin-top:.4rem">
-              ${(rx.medicines||[]).map(m=>`<li>💊 ${esc(m.name)} — ${esc(m.dosage)}</li>`).join('')}
+              ${(rx.medicines||rx.items||[]).map(m=>`<li>💊 ${esc(m.name||m.nom)} — ${esc(m.dosage||m.traitement||'')}</li>`).join('')}
             </ul>
           </div>`;
         }).join('')}
       </div>`;
+  }
+
+  /* ── TRANSFERT D'URGENCE INTER-HÔPITAUX ─────────────
+     Intégration du module EmergencyTransferModule (voir
+     js/emergency-transfer.js). Adapté par rapport au snippet fourni :
+     sélection de l'hôpital destinataire dans la liste des
+     établissements MedConnect enregistrés (HospitalsRegistry),
+     au lieu d'un champ ID libre — évite les fautes de frappe et les
+     transferts vers un hôpital inexistant. */
+  function openEmergencyTransfer(patientId) {
+    const p = DB.getPatientById(patientId);
+    if (!p) { App.toast('Patient introuvable.', 'error'); return; }
+
+    const currentH = window.HospitalsRegistry?.getCurrentHospital?.();
+    const options  = (window.HospitalsRegistry?.getHospitals?.() || [])
+      .filter(h => h.establishmentId !== currentH?.establishmentId);
+
+    App.openModal(`🚑 Transfert d'urgence — ${esc(p.firstname)} ${esc(p.lastname)}`, `
+      <div class="id-badge-large">${p.id}</div>
+
+      <div class="form-group">
+        <label>Hôpital de destination *</label>
+        <select id="et-to-hospital">
+          <option value="">— Choisir un établissement —</option>
+          ${options.map(h => `<option value="${h.establishmentId}" data-name="${esc(h.name)}">${esc(h.name)}${h.city?' — '+esc(h.city):''}</option>`).join('')}
+        </select>
+        ${!options.length ? `<small style="color:var(--accent)">Aucun autre établissement enregistré dans MedConnect pour le moment.</small>` : ''}
+      </div>
+
+      <div class="form-group">
+        <label>Niveau d'urgence</label>
+        <select id="et-priority">
+          <option value="critical">Critique</option>
+          <option value="very_urgent">Très urgent</option>
+          <option value="urgent" selected>Urgent</option>
+          <option value="normal">Normal</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Service destinataire</label>
+        <input type="text" id="et-service" placeholder="Urgences, chirurgie, réanimation…">
+      </div>
+
+      <div class="form-group">
+        <label>Transport</label>
+        <select id="et-transport">
+          <option value="ambulance">Ambulance</option>
+          <option value="medical_ambulance">Ambulance médicalisée</option>
+          <option value="helicopter">Hélicoptère</option>
+          <option value="other">Autre</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>Heure estimée d'arrivée</label>
+        <input type="datetime-local" id="et-arrival">
+      </div>
+
+      <div class="form-group full-width">
+        <label>Motif du transfert *</label>
+        <textarea id="et-reason" rows="3" placeholder="Ex : urgence neurologique, traumatisme grave…"></textarea>
+      </div>
+
+      <div class="alert-box">
+        ⚠️ Un paquet médical d'urgence sera partagé temporairement avec l'hôpital destinataire.
+      </div>
+
+      <div id="et-err" class="auth-error" style="display:none"></div>
+
+      <div class="form-actions">
+        <button type="button" class="btn btn-ghost" onclick="App.closeModal()">Annuler</button>
+        <button type="button" class="btn btn-ghost btn-sm" style="color:var(--danger)"
+          onclick="HospitalPortal.confirmEmergencyTransfer('${patientId}', true)">
+          🚨 Urgence vitale — ignorer l'abonnement
+        </button>
+        <button type="button" class="btn btn-primary" onclick="HospitalPortal.confirmEmergencyTransfer('${patientId}', false)">
+          🚑 Lancer le transfert
+        </button>
+      </div>`);
+  }
+
+  async function confirmEmergencyTransfer(patientId, emergencyOverride = false) {
+    const select = document.getElementById('et-to-hospital');
+    const toHospitalId   = select?.value || '';
+    const toHospitalName = select?.selectedOptions?.[0]?.dataset?.name || '';
+    const errEl = document.getElementById('et-err');
+    const showErr = msg => { if (errEl) { errEl.textContent = msg; errEl.style.display = 'block'; } };
+
+    if (!toHospitalId) { showErr("Hôpital de destination obligatoire."); return null; }
+    const reason = document.getElementById('et-reason')?.value?.trim() || '';
+    if (!reason) { showErr("Motif du transfert obligatoire."); return null; }
+
+    try {
+      const transfer = await EmergencyTransferModule.createEmergencyTransfer({
+        patientId,
+        toHospitalId,
+        toHospitalName,
+        receivingService: document.getElementById('et-service')?.value?.trim() || '',
+        priority: document.getElementById('et-priority')?.value || 'urgent',
+        transportType: document.getElementById('et-transport')?.value || 'ambulance',
+        estimatedArrival: document.getElementById('et-arrival')?.value || '',
+        reason,
+        emergencyOverride,
+      });
+
+      App.closeModal();
+      App.toast(emergencyOverride
+        ? '🚨 Transfert d\'urgence créé (abonnement ignoré — journalisé).'
+        : '🚑 Transfert d\'urgence créé.');
+      App.navigateTo('dashboard');
+      return transfer;
+    } catch (e) {
+      showErr(e?.message || 'Impossible de créer le transfert.');
+      return null;
+    }
+  }
+
+  /* ── ÉCRAN TRANSFERTS & PARTAGES ENTRANTS ──────────
+     Les modules EmergencyTransferModule et
+     MedicalRecordSharing créaient des transferts/partages
+     mais RIEN ne les recevait côté UI : cet écran comble le trou
+     (transferts entrants actionnables + dossiers partagés actifs). */
+  function renderTransfers(main) {
+    const h = window.HospitalsRegistry?.getCurrentHospital?.();
+    if (!h) { main.innerHTML = `<div class="card empty-state"><p>Sélectionnez un établissement actif.</p></div>`; return; }
+    const hid = h.establishmentId || h.hid;
+
+    let incoming = [], shares = [];
+    try { incoming = EmergencyTransferModule.getIncomingTransfers(hid) || []; } catch (_) {}
+    try { shares   = MedicalRecordSharing.getActiveSharesForHospital(hid) || []; } catch (_) {}
+
+    const STL = { requested:'📨 Demandé', accepted:'✅ Accepté', in_transit:'🚑 En route', arrived:'🏥 Arrivé' };
+
+    main.innerHTML = `
+      <div class="page-header"><h2>🚑 Transferts & partages</h2></div>
+
+      <div class="card">
+        <h3>Transferts entrants</h3>
+        ${!incoming.length ? `<p class="muted">Aucun transfert entrant.</p>` :
+          incoming.sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||''))).map(tr => `
+          <div class="record-card">
+            <p><strong>${esc(tr.patientName || tr.patientId || '—')}</strong> · ${STL[tr.status] || esc(tr.status)}</p>
+            <p class="muted">Depuis : ${esc(tr.fromHospitalName || tr.fromHospitalId || '—')} · Priorité : ${esc(tr.priority || '—')}</p>
+            ${tr.reason ? `<p>Motif : ${esc(tr.reason)}</p>` : ''}
+            <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.4rem">
+              ${tr.status === 'requested' ? `<button class="btn btn-primary btn-sm" onclick="HospitalPortal.acceptIncomingTransfer('${esc(tr.transferId || tr.id)}')">Accepter</button>` : ''}
+              ${tr.status === 'accepted' || tr.status === 'in_transit' ? `<button class="btn btn-ghost btn-sm" onclick="HospitalPortal.acceptIncomingTransfer('${esc(tr.transferId || tr.id)}','arrived')">Marquer arrivé</button>` : ''}
+              ${tr.status === 'arrived' ? `<button class="btn btn-ghost btn-sm" style="color:var(--secondary)" onclick="HospitalPortal.acceptIncomingTransfer('${esc(tr.transferId || tr.id)}','completed')">Finaliser</button>` : ''}
+            </div>
+          </div>`).join('')}
+      </div>
+
+      <div class="card">
+        <h3>Dossiers partagés avec nous</h3>
+        ${!shares.length ? `<p class="muted">Aucun dossier partagé actif.</p>` :
+          shares.map(s => `
+          <div class="record-card">
+            <p><strong>${esc(s.patientName || s.patientId || '—')}</strong></p>
+            <p class="muted">De : ${esc(s.fromHospitalName || s.fromHospitalId || '—')} · Expire le ${esc(String(s.expiresAt||'').slice(0,10))}</p>
+            <p class="muted">Sections : ${esc((s.allowedSections||[]).join(', ') || '—')}</p>
+          </div>`).join('')}
+      </div>
+    `;
+  }
+
+  async function acceptIncomingTransfer(transferId, action = 'accept') {
+    try {
+      const user = Auth.getUser() || {};
+      if (action === 'arrived')        await EmergencyTransferModule.markArrived(transferId);
+      else if (action === 'completed') await EmergencyTransferModule.completeTransfer(transferId);
+      else                             await EmergencyTransferModule.acceptTransfer(transferId, user.uid || '');
+      App.toast('✅ Transfert mis à jour.');
+      App.navigateTo('transfers');
+    } catch (e) {
+      console.error('[Transfers] acceptIncomingTransfer :', e);
+      App.toast(e.message || 'Erreur sur le transfert.', 'error');
+    }
+  }
+
+  async function approveIncomingShare(shareId) {
+    try {
+      const user = Auth.getUser() || {};
+      await MedicalRecordSharing.approveShare(shareId, user.uid || '');
+      App.toast('✅ Partage approuvé.');
+      App.navigateTo('transfers');
+    } catch (e) {
+      console.error('[Transfers] approveIncomingShare :', e);
+      App.toast(e.message || 'Erreur sur le partage.', 'error');
+    }
   }
 
   return {
@@ -627,6 +852,9 @@ const HospitalPortal = (() => {
     openConsult, addRxItem, removeRxItem, runSmartCheck, saveConsult, delConsult,
     openPrescriptionTarget, confirmPrescriptionTarget,
     renderConsultations, renderPrescriptions,
+    openEmergencyTransfer, confirmEmergencyTransfer,
+    currentEstablishmentFields,
+    renderTransfers, acceptIncomingTransfer, approveIncomingShare,
   };
 })();
 

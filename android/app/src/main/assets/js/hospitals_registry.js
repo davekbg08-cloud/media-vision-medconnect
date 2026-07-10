@@ -91,7 +91,16 @@ const HospitalsRegistry = (() => {
     const requesterRole = raw.requesterRole || raw.role || account.role || 'doctor';
     const professionalNumber = raw.professionalNumber || raw.order_num || raw.matricule ||
       account.order_num || account.matricule || account.username || '';
-    const requestId = raw.requestId || raw.afid || DB.makeId('AFF');
+    // requestId STABLE : ne JAMAIS régénérer un ID aléatoire à la
+    // lecture — sinon l'ID affiché sur le bouton diffère de l'ID
+    // retrouvé au clic, et respondAffiliation ne trouve pas la
+    // demande (bouton sans effet). Si l'ID manque, on le dérive de
+    // façon DÉTERMINISTE de l'identité de la demande, pour que la
+    // même demande produise toujours le même ID.
+    const requestId = raw.requestId || raw.afid ||
+      ((requesterUid && establishmentId)
+        ? `AFF_${requesterUid}_${establishmentId}`
+        : DB.makeId('AFF'));
     const createdAt = raw.createdAt || raw.requested_at || raw.created_at || now();
     const updatedAt = raw.updatedAt || raw.decided_at || raw.updated_at || createdAt;
     const requesterName = raw.requesterName || raw.doctor_name || account.name || '';
@@ -196,8 +205,10 @@ const HospitalsRegistry = (() => {
   function requestAffiliation(requesterUid, requesterName, establishmentId, options = {}) {
     const user = Auth.getUser() || {};
     const account = DB.getAccounts().find(a => a.uid === requesterUid) || user;
-    const requesterRole = options.requesterRole || account.role || user.role || 'doctor';
-    if (!['doctor','nurse'].includes(requesterRole)) return false;
+    const requesterRole = options.role || options.requesterRole || account.role || user.role || 'doctor';
+    // Tous les rôles hospitaliers peuvent demander une affiliation
+    // (médecin, infirmier, pharmacie, laboratoire, réception).
+    if (!['doctor','nurse','pharmacist','lab','reception'].includes(requesterRole)) return false;
 
     const h = getHospitalById(establishmentId);
     if (!h) return false;
@@ -211,7 +222,9 @@ const HospitalsRegistry = (() => {
     if (existing) return false;
 
     const a = normalizeRequest({
-      requestId: DB.makeId('AFF'),
+      // ID déterministe (cohérent avec normalizeRequest) : évite les
+      // doublons et garantit que les boutons admin retrouvent la demande.
+      requestId: `AFF_${requesterUid}_${establishmentId}`,
       requesterUid,
       requesterName,
       requesterRole,
@@ -307,12 +320,22 @@ const HospitalsRegistry = (() => {
 
   function respondAffiliation(requestId, approved) {
     const affs = getAffiliations();
-    const idx = affs.findIndex(a => a.requestId === requestId || a.afid === requestId);
-    if (idx === -1) return;
+    let idx = affs.findIndex(a => a.requestId === requestId || a.afid === requestId);
+    // Repli : l'ID déterministe encode uid+établissement.
+    if (idx === -1 && String(requestId).startsWith('AFF_')) {
+      const parts = String(requestId).slice(4).split('_');
+      const estId = parts.pop();
+      const uid = parts.join('_');
+      idx = affs.findIndex(a => a.requesterUid === uid && a.establishmentId === estId);
+    }
+    if (idx === -1) {
+      App?.toast?.('Demande introuvable (elle a peut-être déjà été traitée).', 'error');
+      return;
+    }
 
     const req = normalizeRequest(affs[idx]);
     const h = getHospitalById(req.establishmentId);
-    if (!h) return;
+    if (!h) { App?.toast?.('Établissement introuvable pour cette demande.', 'error'); return; }
 
     affs[idx] = normalizeRequest({
       ...req,
@@ -326,6 +349,7 @@ const HospitalsRegistry = (() => {
       upsertStaffMember(h, affs[idx]);
       updateUserAffiliation(affs[idx], h, true);
     }
+    App?.toast?.(approved ? '✅ Affiliation approuvée.' : '❌ Affiliation refusée.');
 
     if (window.Network?.notify) {
       Network.notify({
@@ -371,7 +395,28 @@ const HospitalsRegistry = (() => {
   }
 
   function getPendingAffiliations(establishmentId) {
-    return getAffiliations().filter(a => a.establishmentId === establishmentId && a.status === 'pending');
+    const h = getHospitalById(establishmentId);
+    const activeStaffUids = new Set(
+      (h?.staff || []).filter(s => s.status === 'active' || s.status === 'approved').map(s => s.uid));
+    // Une demande dont l'agent est DÉJÀ membre actif n'est plus « en
+    // attente » : c'est l'incohérence observée (personne active ET
+    // demande pending). On l'exclut de la file, et on réconcilie son
+    // statut en base pour ne plus la revoir.
+    const stillPending = [];
+    const toReconcile = [];
+    getAffiliations().forEach(a => {
+      if (a.establishmentId !== establishmentId || a.status !== 'pending') return;
+      if (activeStaffUids.has(a.requesterUid)) toReconcile.push(a);
+      else stillPending.push(a);
+    });
+    if (toReconcile.length) {
+      const all = getAffiliations().map(a =>
+        toReconcile.find(t => t.requestId === a.requestId)
+          ? { ...a, status: 'approved', decided_at: a.decided_at || now(), updatedAt: now() }
+          : a);
+      saveAffiliations(all);
+    }
+    return stillPending;
   }
 
   /* ── CONTEXTE ACTIF ─────────────────────────────── */
@@ -384,8 +429,18 @@ const HospitalsRegistry = (() => {
     sessionStorage.setItem('mc_current_hospital', establishmentId);
     const h = getHospitalById(establishmentId);
     App.toast(`🏥 Établissement : ${h?.name || '—'}`);
-    if (window.App?.buildNav) App.buildNav(Auth.getUser());
+
+    // Session hôpital desktop (connexion par matricule) : il n'y a pas
+    // d'utilisateur mobile ni de shell mobile à rafraîchir — on s'arrête
+    // là pour ne pas déclencher un rendu mobile parasite.
+    const user = Auth.getUser();
+    if (!user) return;
+
+    if (window.App?.buildNav) App.buildNav(user);
     if (window.App?.navigateTo) App.navigateTo('dashboard');
+    // Les listeners du contrat d'échange filtrent sur l'hôpital actif :
+    // ils doivent être relancés quand il change.
+    if (window.App?.startExchangeSync) App.startExchangeSync(user);
   }
 
   function clearCurrentHospital() {
@@ -408,9 +463,14 @@ const HospitalsRegistry = (() => {
 
   function getPatientsForContext(uid) {
     const h = getCurrentHospital();
+    // Hors établissement (praticien solo) : seulement ses propres
+    // patients. DANS un établissement : TOUT le personnel partage les
+    // patients de l'hôpital — un patient créé par un collègue ne doit
+    // pas être invisible (c'était la cause des ordonnances non
+    // affichées : la liste de patients servant de base au filtre était
+    // amputée des patients créés par d'autres membres du même hôpital).
     if (!h) return DB.getPatients().filter(p => !p.created_by || p.created_by === uid);
-    return getPatientsForEstablishment(h.establishmentId)
-      .filter(p => !p.created_by || p.created_by === uid);
+    return getPatientsForEstablishment(h.establishmentId);
   }
 
   function getAppointmentsForContext(uid) {
@@ -548,10 +608,17 @@ const HospitalsRegistry = (() => {
     });
 
     if (['doctor','nurse'].includes(user.role)) {
-      const a = requestAffiliation(user.uid, user.name, h.establishmentId, { silent: true });
-      if (a) respondAffiliation(a.requestId, true);
+      // DEMANDE pending uniquement — JAMAIS d'auto-approbation. Le
+      // professionnel ne devient membre qu'après validation par
+      // l'admin. (L'ancien code appelait respondAffiliation(...,true)
+      // ici, ce qui transformait la demande en enregistrement validé
+      // et court-circuitait l'administrateur.)
+      const a = requestAffiliation(user.uid, user.name, h.establishmentId);
       App.closeModal();
-      setCurrentHospital(h.establishmentId);
+      App.toast(a
+        ? '📤 Établissement créé. Demande d’affiliation envoyée à l’administrateur.'
+        : '⚠️ Établissement créé, mais une demande existe déjà ou le rôle n’est pas autorisé.',
+        a ? 'success' : 'error');
     } else {
       App.closeModal();
       App.toast(`✅ Établissement enregistré — ${h.name}`);
@@ -590,7 +657,10 @@ const HospitalsRegistry = (() => {
     const hospitals = getHospitals();
     if (!hospitals.length) return `<div class="card empty-state"><p>Aucun établissement enregistré</p></div>`;
     return `<div class="records-list">
-      ${hospitals.map(h => `
+      ${hospitals.map(h => {
+        const st = String(h.status || '').toLowerCase();
+        const isPending = st === 'pending' || (h.registeredFrom === 'desktop' && !['active','approved'].includes(st));
+        return `
         <div class="record-card">
           <div class="record-header">
             <span style="font-size:1.25rem">${TYPE_ICONS[h.type] || '🏥'}</span>
@@ -601,17 +671,57 @@ const HospitalsRegistry = (() => {
           <p style="font-size:.83rem;color:var(--text-muted)">
             <span style="font-family:monospace">${esc(h.officialId || 'Identifiant non renseigné')}</span>
             ${h.city ? ` · ${esc(h.city)}` : ''}${h.phone ? ` · 📞 ${esc(h.phone)}` : ''}
+            ${h.registeredFrom === 'desktop' ? ' · 🖥️ inscrit desktop' : ''}
           </p>
           <p style="font-size:.8rem;color:var(--text-dim)">
             GPS : ${h.latitude !== '' && h.longitude !== '' ? `${h.latitude}, ${h.longitude}` : 'Non renseignée'}
           </p>
+          ${isPending ? `
+          <div style="display:flex;gap:.5rem;margin-top:.5rem;flex-wrap:wrap">
+            <button class="btn btn-primary btn-sm" onclick="HospitalsRegistry.validateEstablishment('${esc(h.establishmentId)}',true)">✅ Valider</button>
+            <button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="HospitalsRegistry.validateEstablishment('${esc(h.establishmentId)}',false)">❌ Refuser</button>
+          </div>` : ''}
         </div>
-      `).join('')}
+      `;}).join('')}
     </div>`;
   }
 
+  /* Valide (approved/active) ou refuse (rejected) un établissement en
+     attente — typiquement inscrit depuis le desktop. Met à jour le
+     document établissement (propagé aux collections miroir par
+     updateHospital → saveHospitals → pushCloud establishments +
+     mc_hospitals) ET le compte users/{authUid} pour autoriser la
+     connexion desktop. */
+  async function validateEstablishment(establishmentId, approve) {
+    const h = getHospitalById(establishmentId);
+    if (!h) { App?.toast?.('Établissement introuvable.', 'error'); return; }
+    if (!confirm(approve
+      ? `Valider l'établissement « ${h.name} » ? Il pourra se connecter.`
+      : `Refuser l'établissement « ${h.name} » ?`)) return;
+
+    updateHospital(establishmentId, { status: approve ? 'active' : 'rejected' });
+
+    // Compte Firebase de l'établissement (rôle 'hospital') : actif si
+    // validé, pour que la connexion desktop soit autorisée.
+    try {
+      if (h.authUid && typeof firebaseDB !== 'undefined' && firebaseDB) {
+        await firebaseDB.collection('users').doc(h.authUid).set({
+          status: approve ? 'active' : 'rejected', role: 'hospital',
+        }, { merge: true });
+      }
+    } catch (e) { console.warn('[Registry] MAJ compte établissement :', e?.message || e); }
+
+    App?.toast?.(approve ? '✅ Établissement validé.' : 'Établissement refusé.');
+    if (window.App?.navigateTo) App.navigateTo('dashboard');
+    else if (document.getElementById('main-content')) renderAdminPage(document.getElementById('main-content'), 'list');
+  }
+
   function renderAdminRequests() {
-    const pending = getAffiliations().filter(a => a.status === 'pending');
+    // Passe par getPendingAffiliations (qui exclut et réconcilie les
+    // demandes dont l'agent est déjà membre actif) pour CHAQUE
+    // établissement — évite d'afficher les doublons 'active + pending'.
+    const pending = getHospitals()
+      .flatMap(h => getPendingAffiliations(h.establishmentId));
     const history = getAffiliations().filter(a => a.status !== 'pending').slice().reverse().slice(0, 8);
     return `
       ${pending.length ? `<div class="records-list">
@@ -785,7 +895,9 @@ const HospitalsRegistry = (() => {
 
   function renderAdminPage(main, tab = 'list') {
     const hospitals = getHospitals();
-    const pending = getAffiliations().filter(a => a.status === 'pending');
+    // Compteur cohérent avec la liste : demandes réellement en attente
+    // (hors agents déjà membres actifs), via getPendingAffiliations.
+    const pending = hospitals.flatMap(h => getPendingAffiliations(h.establishmentId));
     const content = {
       list: renderAdminList,
       add: () => `<div class="card">${renderEstablishmentForm()}</div>`,
@@ -859,7 +971,7 @@ const HospitalsRegistry = (() => {
 
   return {
     getHospitals, saveHospitals, addHospital, updateHospital, getHospitalById,
-    getAffiliations, saveAffiliations, requestAffiliation, respondAffiliation, removeStaff,
+    getAffiliations, saveAffiliations, requestAffiliation, respondAffiliation, removeStaff, validateEstablishment,
     getDoctorHospitals, getPendingAffiliations,
     getCurrentHospital, setCurrentHospital, clearCurrentHospital,
     getPatientsForContext, getAppointmentsForContext, getPatientsForEstablishment,

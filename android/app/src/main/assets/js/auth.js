@@ -3,8 +3,8 @@
    ===================================================== */
 const Auth = (() => {
 
-  const ICONS  = { patient:'🩺', doctor:'👨‍⚕️', pharmacist:'💊', nurse:'🩹', admin:'⚙️' };
-  const LABELS = { patient:'Patient', doctor:'Médecin', pharmacist:'Pharmacien', nurse:'Infirmier(e)', admin:'Administrateur' };
+  const ICONS  = { patient:'🩺', doctor:'👨‍⚕️', pharmacist:'💊', nurse:'🩹', lab:'🧪', reception:'🛎️', admin:'⚙️' };
+  const LABELS = { patient:'Patient', doctor:'Médecin', pharmacist:'Pharmacien', nurse:'Infirmier(e)', lab:'Laboratoire', reception:'Réception', admin:'Administrateur' };
   const ADMIN  = { uid:'admin_root', role:'admin', name:'Administrateur' };
   const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
@@ -72,7 +72,7 @@ const Auth = (() => {
     </div>
     <p style="font-size:.8rem;color:var(--text-muted);margin:.75rem 0 .5rem">Choisissez votre rôle :</p>
     <div class="role-selector" id="register-roles">
-      ${['doctor','pharmacist','nurse'].map(r=>`
+      ${['doctor','pharmacist','nurse','lab','reception'].map(r=>`
         <button class="role-btn" data-role="${r}" onclick="Auth._registerRole('${r}')">
           <span>${ICONS[r]}</span><span>${LABELS[r]}</span>
         </button>`).join('')}
@@ -163,10 +163,12 @@ const Auth = (() => {
       doctor:     `👨‍⚕️ Votre <strong>N° d'Ordre Médical</strong> doit être enregistré par l'administrateur. Entrez-le ci-dessous.`,
       pharmacist: `💊 Votre <strong>N° Matricule RCCM</strong> doit être enregistré par l'administrateur.`,
       nurse:      `🩹 Votre <strong>N° Matricule infirmier</strong> doit être enregistré par l'administrateur.`,
+      lab:        `🧪 Votre <strong>N° Matricule de laboratoire</strong> doit être enregistré par l'administrateur.`,
+      reception:  `🛎️ Votre <strong>N° Matricule d'agent d'accueil</strong> doit être enregistré par l'administrateur.`,
     };
-    const labels = { doctor:'N° Ordre Médical *', pharmacist:'N° Matricule / RCCM *', nurse:'N° Matricule Infirmier *' };
-    const ids = { doctor:'rd-num', pharmacist:'rph-num', nurse:'rn-num' };
-    const actions = { doctor:`Auth._regDoctor()`, pharmacist:`Auth._regPharmacist()`, nurse:`Auth._regNurse()` };
+    const labels = { doctor:'N° Ordre Médical *', pharmacist:'N° Matricule / RCCM *', nurse:'N° Matricule Infirmier *', lab:'N° Matricule Laboratoire *', reception:'N° Matricule Réception *' };
+    const ids = { doctor:'rd-num', pharmacist:'rph-num', nurse:'rn-num', lab:'rl-num', reception:'rc-num' };
+    const actions = { doctor:`Auth._regDoctor()`, pharmacist:`Auth._regPharmacist()`, nurse:`Auth._regNurse()`, lab:`Auth._regLab()`, reception:`Auth._regReception()` };
 
     document.getElementById('register-form').innerHTML = `
       <div class="auth-register-info">${infos[role]}</div>
@@ -561,13 +563,34 @@ const Auth = (() => {
       return false;
     }
 
-    const verified = role === 'doctor' ? ACL.isDoctorVerified(num) : role === 'pharmacist' ? ACL.isPharmacistVerified(num) : ACL.isNurseVerified(num);
+    // Laboratoire / réception : aucun registre officiel équivalent à
+    // celui des médecins/pharmaciens/infirmiers n'existe pour ces deux
+    // rôles. Ne JAMAIS les faire passer par ACL.isNurseVerified() (leurs
+    // numéros ne s'y trouvent jamais, ce qui bloquait systématiquement
+    // l'inscription) : la demande est acceptée et reste 'pending'
+    // jusqu'à validation manuelle par l'administrateur, comme pour une
+    // demande dont le registre ne trouve pas de correspondance ailleurs.
+    let verified, info;
+    if (role === 'doctor') {
+      verified = ACL.isDoctorVerified(num);
+      info = ACL.getVerifiedDoctors().find(d => d.order_num === num);
+    } else if (role === 'pharmacist') {
+      verified = ACL.isPharmacistVerified(num);
+      info = ACL.getVerifiedPharmacists().find(p => p.matricule === num);
+    } else if (role === 'nurse') {
+      verified = ACL.isNurseVerified(num);
+      info = ACL.getVerifiedNurses().find(n => n.matricule === num);
+    } else if (role === 'lab' || role === 'reception') {
+      verified = true;
+      info = null;
+    } else {
+      verified = false;
+      info = null;
+    }
     if (!verified) {
       _err('reg-err', `❌ Numéro non reconnu dans le registre.\nContactez l'administrateur : +243 856 373 707\nou hallo.mediavision.tech@gmail.com`);
       return false;
     }
-
-    const info = role === 'doctor' ? ACL.getVerifiedDoctors().find(d => d.order_num === num) : role === 'pharmacist' ? ACL.getVerifiedPharmacists().find(p => p.matricule === num) : ACL.getVerifiedNurses().find(n => n.matricule === num);
     const acc = { uid:`${role.slice(0,3).toUpperCase()}_${num}_${Date.now()}`, username:num, role, name:info?.name || `${LABELS[role]} (${num})`, email, status:'pending', created_at:new Date().toISOString(), ...extraField };
     if (info?.specialty) acc.specialty = info.specialty;
     if (info?.country)   acc.country   = info.country;
@@ -639,6 +662,26 @@ const Auth = (() => {
     _showPending();
   }
 
+  async function _regLab() {
+    const num   = (document.getElementById('rl-num')?.value || '').trim().toUpperCase();
+    const email = (document.getElementById('rl-num-email')?.value || '').trim();
+    const pass  = (document.getElementById('rl-num-pass')?.value || '').trim();
+    const pass2 = (document.getElementById('rl-num-pass2')?.value || '').trim();
+    const result = await _reg(num, pass, pass2, 'lab', { matricule:num, email });
+    if (result !== true) return;
+    _showPending();
+  }
+
+  async function _regReception() {
+    const num   = (document.getElementById('rc-num')?.value || '').trim().toUpperCase();
+    const email = (document.getElementById('rc-num-email')?.value || '').trim();
+    const pass  = (document.getElementById('rc-num-pass')?.value || '').trim();
+    const pass2 = (document.getElementById('rc-num-pass2')?.value || '').trim();
+    const result = await _reg(num, pass, pass2, 'reception', { matricule:num, email });
+    if (result !== true) return;
+    _showPending();
+  }
+
   function _showPending() {
     document.getElementById('register-form').innerHTML = `
       <div style="text-align:center;padding:1.5rem 1rem">
@@ -693,6 +736,11 @@ const Auth = (() => {
     if (!_hasFirebaseAuth() || !_hasFirebaseDB()) { showAdminError('❌ Firebase indisponible. Vérifiez la connexion internet puis réessayez.'); return; }
 
     try {
+      // Nettoie une éventuelle session Firebase résiduelle (ex. un agent
+      // hôpital connecté juste avant sur le même navigateur) pour éviter
+      // que les règles Firestore voient la mauvaise identité.
+      if (firebaseAuth.currentUser) { try { await firebaseAuth.signOut(); } catch (_) {} }
+
       const credential = await firebaseAuth.signInWithEmailAndPassword(email, pass);
       const uid = credential?.user?.uid;
       if (!uid) throw new Error('admin_uid_missing');
@@ -744,11 +792,49 @@ const Auth = (() => {
   function getRoleIcon(r)  { return ICONS[r]  || '👤'; }
   function getRoleLabel(r) { return LABELS[r] || r; }
 
+  /* Authentifie un professionnel SANS démarrer le shell mobile.
+     Utilisé par la connexion agent desktop : retourne le compte
+     (avec uid Firebase réel) ou null. Gère aussi lab/reception,
+     qui n'ont pas de registre dédié : on résout alors via users/
+     mc_accounts par matricule + rôle. */
+  async function loginProfessionalSilently(role, num, pass) {
+    try {
+      // doctor/nurse/pharmacist : chemin existant (registres + auth).
+      if (['doctor', 'nurse', 'pharmacist'].includes(role)) {
+        return await _restoreProfessional(role, num, pass);
+      }
+      // lab/reception : résolution directe par users/mc_accounts.
+      if (!_hasFirebaseDB()) return null;
+      const N = String(num || '').toUpperCase();
+      let data = null;
+      for (const col of ['users', 'mc_accounts']) {
+        for (const field of ['matricule', 'order_num', 'username']) {
+          const snap = await firebaseDB.collection(col)
+            .where('role', '==', role).where(field, '==', N).limit(1).get();
+          if (!snap.empty) { data = { id: snap.docs[0].id, ...snap.docs[0].data() }; break; }
+        }
+        if (data) break;
+      }
+      if (!data) return null;
+      if (data.email && _hasFirebaseAuth()) {
+        const cred = await firebaseAuth.signInWithEmailAndPassword(data.email, pass);
+        data.uid = cred?.user?.uid || data.uid;
+        data.authUid = data.uid;
+      } else if (data.password && data.password !== pass) {
+        return null;
+      }
+      return _upsertAccount(data);
+    } catch (e) {
+      console.warn('[MedConnect] loginProfessionalSilently :', e?.code || e?.message);
+      return null;
+    }
+  }
+
   return {
-    getUser, isLogged, logout, showLogin,
+    getUser, isLogged, logout, showLogin, loginProfessionalSilently,
     _tab, _loginRole, _registerRole,
     _doPatient, _createPatientPin, _doDoctor, _doPharmacist, _doNurse,
-    _regDoctor, _regPharmacist, _regNurse,
+    _regDoctor, _regPharmacist, _regNurse, _regLab, _regReception,
     _setupAdmin, _doAdmin,
     getRoleIcon, getRoleLabel,
   };
