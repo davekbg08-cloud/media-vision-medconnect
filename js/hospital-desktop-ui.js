@@ -36,7 +36,7 @@ const HospitalDesktopUI = (() => {
     patients:     (c) => renderPatientsByYear(c),
     records:      (c) => window.MedicalRecordDesktop?.render(c),
     reception:    (c) => HospitalReceptionModule.render(c),
-    emergency:    (c) => renderComingSoon(c, '🚑 Urgences', 'Prise en charge des urgences et transferts entrants prioritaires.'),
+    emergency:    (c) => HospitalEmergencyModule.render(c),
     maternity:    (c) => renderComingSoon(c, '🤰 Maternité', 'Suivi des grossesses, accouchements et nouveau-nés.'),
   };
   // Routes encore déléguées à l'app mobile SI elle coexiste (cas d'un

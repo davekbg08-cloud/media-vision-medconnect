@@ -593,6 +593,18 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    match /emergencyCases/{docId} {
+      // Urgences : lecture par le personnel clinique vérifié. Création
+      // d'une arrivée = accueil (canRegisterPatient) ; la mise à jour
+      // (prise en charge, clôture) suit la même habilitation, avec
+      // gating device/abonnement comme les autres écritures hôpital.
+      allow read: if isAdmin() || currentRoleIs('doctor') || currentRoleIs('nurse') ||
+        canReadMedicalData(resource.data);
+      allow create, update: if isAdmin() ||
+        (canRegisterPatient() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
+      allow delete: if isAdmin();
+    }
+
     match /aiQueries/{docId} {
       // Historique des requêtes IA médicale : lecture réservée à
       // l'auteur et à l'admin (peut contenir du contexte clinique).

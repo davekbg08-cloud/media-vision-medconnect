@@ -1480,3 +1480,14 @@ body.rtl .tl-connector { left: auto; right: -1.1rem; }
   padding: .1rem .4rem;
   margin: .15rem 0;
 }
+
+/* Badge de triage (module Urgences) */
+.triage-badge {
+  display: inline-block;
+  color: #fff;
+  font-size: .72rem;
+  font-weight: 700;
+  border-radius: 6px;
+  padding: .12rem .5rem;
+  margin-right: .4rem;
+}
