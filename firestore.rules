@@ -14,17 +14,31 @@ service cloud.firestore {
       return signedIn() && exists(currentUserDoc());
     }
 
+    // NOTE — bug corrigé pendant ce chantier (découvert en écrivant les
+    // tests d'émulateur, tests/firestore-rules/) : un accès direct en
+    // notation pointée à un custom claim jamais explicitement posé
+    // (request.auth.token.role / .admin) lève une erreur d'évaluation
+    // ("Property X is undefined") plutôt que de retourner null, quand
+    // le token ne porte STRICTEMENT AUCUNE valeur pour cette clé — ce
+    // qui n'arrive jamais avec un vrai jeton Firebase Auth de
+    // production (toujours "complet"), mais arrive bel et bien avec un
+    // compte qui n'a reçu aucun custom claim (le cas courant : la
+    // plupart des comptes n'ont pas de claim 'role', le rôle vit dans
+    // users/{uid}). Le déni en résultait presque toujours (Firestore
+    // refuse par défaut sur exception), mais silencieusement et de
+    // façon fragile. .get(key, défaut) sur le token (une Map) est la
+    // façon robuste de lire un champ optionnel sans jamais lever.
     function currentRoleIs(role) {
       return signedIn() && (
-        request.auth.token.role == role ||
+        request.auth.token.get('role', null) == role ||
         (hasCurrentUserDoc() && get(currentUserDoc()).data.role == role)
       );
     }
 
     function isAdmin() {
       return signedIn() && (
-        request.auth.token.admin == true ||
-        request.auth.token.role == 'admin' ||
+        request.auth.token.get('admin', false) == true ||
+        request.auth.token.get('role', null) == 'admin' ||
         (hasCurrentUserDoc() && get(currentUserDoc()).data.role == 'admin')
       );
     }
@@ -38,7 +52,7 @@ service cloud.firestore {
        apparaissent ici pour le desktop. La source reste users/{uid}. */
     function hasRole(role) {
       return signedIn() && (
-        request.auth.token.role == role ||
+        request.auth.token.get('role', null) == role ||
         (hasCurrentUserDoc() && get(currentUserDoc()).data.role == role)
       );
     }
@@ -390,8 +404,16 @@ service cloud.firestore {
       // même abonnement expiré/suspendu (une ordonnance déjà envoyée
       // doit pouvoir être honorée) ; le médecin auteur reste soumis
       // à la même règle desktop/mobile que la création.
+      // PARTIE H — le pharmacien ne peut modifier QUE le statut et les
+      // métadonnées de traitement, jamais le contenu médical
+      // (patient_id, doctor_uid, diagnosis, medicines, establishmentId,
+      // pharmacyUid, date) : sans ça, un pharmacien pouvait réécrire
+      // n'importe quel champ, y compris falsifier l'auteur ou le
+      // diagnostic d'une ordonnance déjà envoyée.
       allow update: if isAdmin() ||
-        pharmacyCanReadPrescription(resource.data) ||
+        (pharmacyCanReadPrescription(resource.data) &&
+         request.resource.data.diff(resource.data).affectedKeys()
+           .hasOnly(['status', 'updatedAt', 'updatedByUid', 'updatedByRole', 'cancelReason'])) ||
         (doctorCanRead(resource.data) &&
          hospitalCanWriteFromDevice(resolveHospitalId(resource.data), request.resource.data.sourceDevice));
       allow delete: if isAdmin();
@@ -579,9 +601,14 @@ service cloud.firestore {
         belongsToSameEstablishment(resource.data) ||
         pharmacyCanReadPrescription(resource.data);
       allow create: if isAdmin() || currentRoleIs('doctor');
+      // PARTIE H — même restriction de champs que /prescriptions : le
+      // pharmacien ne modifie jamais le contenu médical, uniquement le
+      // statut et ses métadonnées de traitement.
       allow update: if isAdmin()
         || doctorCanRead(resource.data)
-        || pharmacyCanReadPrescription(resource.data);
+        || (pharmacyCanReadPrescription(resource.data) &&
+            request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['status', 'updatedAt', 'updatedByUid', 'updatedByRole', 'cancelReason']));
       allow delete: if isAdmin();
     }
 
@@ -774,7 +801,7 @@ service cloud.firestore {
       allow read: if isAdmin() ||
         isHospitalMember(resource.data.fromHospitalId) ||
         isHospitalMember(resource.data.toHospitalId) ||
-        (signedIn() && resource.data.patientId == request.auth.uid);
+        isConcernedPatient(resource.data.patientId);
       allow create: if isAdmin() ||
         (signedIn() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
       // Mise à jour de statut : l'hôpital source ou le destinataire
@@ -797,7 +824,7 @@ service cloud.firestore {
       allow read: if isAdmin() ||
         isHospitalMember(resource.data.fromHospitalId) ||
         isHospitalMember(resource.data.toHospitalId) ||
-        (signedIn() && resource.data.patientId == request.auth.uid);
+        isConcernedPatient(resource.data.patientId);
       allow create: if isAdmin() ||
         (signedIn() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
       // Seuls le statut/timestamps de révocation peuvent changer —

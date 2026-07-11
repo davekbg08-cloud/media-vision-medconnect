@@ -43,8 +43,27 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # PARTIE O — ordre imposé : secrets → tests unitaires → règles
+      # Firestore, avant tout build Android. Le build APK ne démarre
+      # que si tout ce job réussit (déjà garanti par "needs: test").
+      - name: Scan de secrets
+        run: npm run security:scan
+
       - name: Run test suite
         run: npm test
+
+      - name: Set up JDK (émulateur Firestore)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # continue-on-error volontaire dans un premier temps (voir
+      # tests.yml et le rapport de la PR) : à retirer une fois la
+      # fiabilité confirmée sur plusieurs runs GitHub Actions réels.
+      - name: Tests des règles Firestore (émulateur)
+        run: npm run test:rules
+        continue-on-error: true
 
   build-apk:
     name: Build signed APK v2.4
