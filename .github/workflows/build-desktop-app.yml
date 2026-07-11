@@ -1,0 +1,61 @@
+name: Build MedConnect Desktop App (Windows + Linux)
+
+# Déclenchement manuel uniquement pour l'instant, le temps de stabiliser
+# le packaging Electron — même prudence initiale que pour
+# build-medconnect-apk.yml, pour éviter un coût CI récurrent tant que ce
+# n'est pas validé. Aucun impact sur le pipeline Android existant :
+# workflow entièrement séparé, package.json séparé dans electron/.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Electron dependencies
+        working-directory: electron
+        run: npm install
+
+      - name: Build Windows installer
+        if: matrix.os == 'windows-latest'
+        working-directory: electron
+        run: npx electron-builder --win
+
+      - name: Build Linux packages
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: electron
+        run: npx electron-builder --linux
+
+      - name: Upload Windows artifact
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: medconnect-desktop-windows
+          path: electron/dist/*.exe
+          if-no-files-found: error
+
+      - name: Upload Linux artifacts
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: medconnect-desktop-linux
+          path: |
+            electron/dist/*.AppImage
+            electron/dist/*.deb
+          if-no-files-found: error

@@ -1,0 +1,41 @@
+{
+  "name": "medconnect-desktop",
+  "version": "1.0.0",
+  "description": "MedConnect — application de bureau (Windows + Linux)",
+  "main": "main.js",
+  "author": "Media Vision",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist:win": "electron-builder --win",
+    "dist:linux": "electron-builder --linux"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.mediavision.medconnect.desktop",
+    "productName": "MedConnect",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js"
+    ],
+    "win": {
+      "target": ["nsis"],
+      "icon": "resources/icon.png"
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "icon": "resources/icon.png",
+      "category": "Office"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}
