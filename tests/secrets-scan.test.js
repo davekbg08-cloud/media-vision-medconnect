@@ -36,26 +36,28 @@ test('scripts/check-secrets.mjs existe et est exécutable via node', () => {
   assert.ok(fs.existsSync(SCANNER));
 });
 
+// Les fixtures ci-dessous sont construites par concaténation plutôt
+// qu'en littéral direct : sinon ce fichier de test, une fois committé,
+// contiendrait lui-même des motifs correspondant aux patterns du
+// scanner et se ferait détecter par npm run security:scan.
 test('détecte un faux token GitHub codé en dur', () => {
-  const result = runScannerOnFixture(
-    "const token = 'ghp_abcdefghijklmnopqrstuvwxyz0123456789';\n"
-  );
+  const fakeToken = 'ghp_' + 'abcdefghijklmnopqrstuvwxyz0123456789';
+  const result = runScannerOnFixture(`const token = '${fakeToken}';\n`);
   assert.ok(result.failed, 'le scanner doit échouer sur un token GitHub');
   assert.match(result.output, /Token GitHub/);
 });
 
 test('détecte une clé privée PEM', () => {
-  const result = runScannerOnFixture(
-    '-----BEGIN PRIVATE KEY-----\nMIIExample\n-----END PRIVATE KEY-----\n'
-  );
+  const marker = '-----' + 'BEGIN PRIVATE KEY' + '-----';
+  const endMarker = '-----' + 'END PRIVATE KEY' + '-----';
+  const result = runScannerOnFixture(`${marker}\nMIIExample\n${endMarker}\n`);
   assert.ok(result.failed, 'le scanner doit échouer sur une clé privée PEM');
   assert.match(result.output, /Clé privée PEM/);
 });
 
 test("détecte une clé AIza qui n'est PAS la clé Firebase connue", () => {
-  const result = runScannerOnFixture(
-    "const other = 'AIzaSyDIFFERENTKEYNOTALLOWLISTEDVALUEXX';\n"
-  );
+  const fakeKey = 'AIza' + 'SyDIFFERENTKEYNOTALLOWLISTEDVALUEXX';
+  const result = runScannerOnFixture(`const other = '${fakeKey}';\n`);
   assert.ok(result.failed, 'une autre clé AIza doit être détectée, seule la clé connue est tolérée');
 });
 

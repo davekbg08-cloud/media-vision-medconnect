@@ -591,15 +591,37 @@ const DB = (() => {
     return p;
   }
 
-  function updatePrescription(pid, data) {
+  /** Applique la mise à jour au store local uniquement (pas d'écriture
+      cloud ici) et retourne l'objet fusionné, ou null si introuvable. */
+  function _updatePrescriptionLocal(pid, data) {
     const list = getPrescriptions();
     const idx  = list.findIndex(p => p.pid === pid);
     if (idx === -1) return null;
     list[idx] = { ...list[idx], ...data, pid, updatedAt: new Date().toISOString() };
     store('mc_prescriptions', list);
-    _push('mc_prescriptions', pid, list[idx]);
-    _push('prescriptions', pid, list[idx]);
     return list[idx];
+  }
+
+  function updatePrescription(pid, data) {
+    const updated = _updatePrescriptionLocal(pid, data);
+    if (!updated) return null;
+    _push('mc_prescriptions', pid, updated);
+    _push('prescriptions', pid, updated);
+    return updated;
+  }
+
+  /** Comme updatePrescription, mais attend la confirmation Firestore
+      réelle avant de résoudre — utilisé quand l'appelant doit savoir
+      si le cloud a réellement accepté l'écriture (ex : avant d'afficher
+      "Ordonnance envoyée" à l'utilisateur) plutôt que de l'afficher de
+      façon optimiste sur une écriture fire-and-forget. */
+  async function updatePrescriptionAndConfirm(pid, data) {
+    const updated = _updatePrescriptionLocal(pid, data);
+    if (!updated) return false;
+    return pushAndReport([
+      ['mc_prescriptions', pid, updated],
+      ['prescriptions', pid, updated],
+    ]);
   }
 
   function getPatientPrescriptions(pid) {
@@ -825,11 +847,18 @@ const DB = (() => {
 
   return {
     init, syncFromFirebase, syncFromFirebaseInBackground, setupUserScopedListeners, generatePatientId, makeId, pushAndReport, flushOutbox, outboxCount, getLastSyncAt,
+    // pushCloud/deleteCloud : wrappers publics sur _push/_delete, à
+    // utiliser par tout module (access_control.js, hospitals_registry.js,
+    // affiliation-cleanup.js...) au lieu de réimplémenter un mini-push
+    // Firestore local avec .catch(() => {}) qui avale les échecs en
+    // silence. Ici, tout échec est loggé ET mis en file d'attente pour
+    // rejeu automatique (voir _push ci-dessus).
+    pushCloud: _push, deleteCloud: _delete,
     getAccounts, saveAccounts, getUsers, saveUsers, upsertUserProfile,
     getRegistrationRequests, saveRegistrationRequests, createRegistrationRequest,
     getPatients, savePatients, addPatient, updatePatient, deletePatient, getPatientById, searchPatients,
     getConsultations, addConsultation, getPatientConsultations, deleteConsultation,
-    getPrescriptions, addPrescription, updatePrescription, getPatientPrescriptions,
+    getPrescriptions, addPrescription, updatePrescription, updatePrescriptionAndConfirm, getPatientPrescriptions,
     getEstablishmentDocuments, addEstablishmentDocument, getPatientEstablishmentDocuments,
     getAppointments, addAppointment, updateAppointment, deleteAppointment, getPatientAppointments,
     getVaccinations, addVaccination, getPatientVaccinations, deleteVaccination,

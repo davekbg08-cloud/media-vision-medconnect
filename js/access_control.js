@@ -9,21 +9,20 @@ const ACL = (() => {
   };
   const saveLocal = (k,v) => localStorage.setItem(k, JSON.stringify(v));
 
-  function canSyncCloud() {
-    return typeof firebaseReady !== 'undefined' &&
-      firebaseReady &&
-      typeof firebaseDB !== 'undefined' &&
-      firebaseDB;
-  }
-
+  /* PARTIE K — pushCloud/deleteCloud délèguent maintenant à
+     DB.pushCloud/DB.deleteCloud (js/db.js) au lieu de réimplémenter un
+     mini-push Firestore local avec .catch(() => {}) : tout échec (y
+     compris pour mc_consents, le cas le plus sensible) est désormais
+     loggé ET mis en file d'attente pour rejeu automatique, plutôt que
+     silencieusement perdu quand le cloud est indisponible. */
   function pushCloud(collection, docId, data) {
-    if (!canSyncCloud() || !docId) return;
-    firebaseDB.collection(collection).doc(String(docId)).set(data).catch(() => {});
+    if (!docId) return;
+    DB.pushCloud(collection, docId, data);
   }
 
   function deleteCloud(collection, docId) {
-    if (!canSyncCloud() || !docId) return;
-    firebaseDB.collection(collection).doc(String(docId)).delete().catch(() => {});
+    if (!docId) return;
+    DB.deleteCloud(collection, docId);
   }
 
   function getVerifiedDoctors()    { return load('mc_verified_doctors'); }

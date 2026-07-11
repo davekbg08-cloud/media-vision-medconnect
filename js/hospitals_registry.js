@@ -37,14 +37,11 @@ const HospitalsRegistry = (() => {
     localStorage.setItem(key, JSON.stringify(value));
   }
 
-  function cloudReady() {
-    return typeof firebaseReady !== 'undefined' && firebaseReady &&
-      typeof firebaseDB !== 'undefined' && firebaseDB;
-  }
-
+  /* PARTIE K — délègue à DB.pushCloud (js/db.js) au lieu d'un mini-push
+     Firestore local avec .catch(() => {}) : tout échec est loggé et mis
+     en file d'attente pour rejeu automatique, jamais perdu en silence. */
   function pushCloud(collection, docId, data) {
-    if (!cloudReady()) return;
-    firebaseDB.collection(collection).doc(String(docId)).set(data).catch(() => {});
+    DB.pushCloud(collection, docId, data);
   }
 
   function normalizeType(type) {
@@ -259,6 +256,26 @@ const HospitalsRegistry = (() => {
     });
   }
 
+  /* PARTIE E — hospitalMembers/{establishmentId}_{uid} : document plat
+     miroir de establishments.staff[], nécessaire car une règle
+     Firestore ne peut pas tester efficacement l'appartenance à un
+     tableau d'objets. C'est la vraie source que firestore.rules
+     consulte (isHospitalMember/belongsToSameEstablishment) pour
+     l'isolation par établissement. Écrit ici à chaque
+     approbation/retrait, ET par ensureHospitalMembership (auto-
+     guérison à la connexion) pour les comptes déjà affiliés
+     avant l'introduction de cette collection. */
+  function writeHospitalMemberDoc(establishmentId, uid, role, status) {
+    if (!establishmentId || !uid) return;
+    pushCloud('hospitalMembers', `${establishmentId}_${uid}`, {
+      hospitalId: establishmentId,
+      uid,
+      role: role || '',
+      status,
+      updatedAt: now(),
+    });
+  }
+
   function upsertStaffMember(establishment, request) {
     const staff = Array.isArray(establishment.staff) ? establishment.staff : [];
     const idx = staff.findIndex(s => s.uid === request.requesterUid);
@@ -276,6 +293,23 @@ const HospitalsRegistry = (() => {
     if (idx === -1) staff.push(member);
     else staff[idx] = { ...staff[idx], ...member };
     updateHospital(establishment.establishmentId, { staff });
+    writeHospitalMemberDoc(establishment.establishmentId, request.requesterUid, request.requesterRole, 'active');
+  }
+
+  // Auto-guérison : comptes affiliés avant l'introduction de
+  // hospitalMembers (ou dont l'écriture aurait échoué) convergent au
+  // fil des connexions, sans script de migration à lancer contre la
+  // prod. Chacun n'écrit QUE son propre document ({hospitalId}_{son
+  // uid}), jamais celui d'un tiers — aucune élévation de privilège
+  // possible même si cette fonction est appelée pour n'importe quel uid.
+  const _healedThisSession = new Set();
+  function ensureHospitalMembership(uid) {
+    if (!uid || _healedThisSession.has(uid)) return;
+    _healedThisSession.add(uid);
+    const account = DB.getAccounts().find(a => a.uid === uid);
+    getAffiliations()
+      .filter(a => a.requesterUid === uid && a.status === 'approved')
+      .forEach(a => writeHospitalMemberDoc(a.establishmentId, uid, a.requesterRole || account?.role, 'active'));
   }
 
   function updateUserAffiliation(request, establishment, attach) {
@@ -376,6 +410,7 @@ const HospitalsRegistry = (() => {
       member.uid === uid ? { ...member, status: 'removed', removedAt: now(), updatedAt: now() } : member
     );
     updateHospital(establishmentId, { staff });
+    writeHospitalMemberDoc(establishmentId, uid, staff.find(s => s.uid === uid)?.role, 'removed');
 
     const reqs = getAffiliations().map(req => {
       if (req.requesterUid === uid && req.establishmentId === establishmentId && req.status === 'approved') {
@@ -390,6 +425,7 @@ const HospitalsRegistry = (() => {
   }
 
   function getDoctorHospitals(uid) {
+    ensureHospitalMembership(uid);
     const affs = getAffiliations().filter(a => a.requesterUid === uid && a.status === 'approved');
     return affs.map(a => getHospitalById(a.establishmentId)).filter(Boolean);
   }
@@ -972,7 +1008,7 @@ const HospitalsRegistry = (() => {
   return {
     getHospitals, saveHospitals, addHospital, updateHospital, getHospitalById,
     getAffiliations, saveAffiliations, requestAffiliation, respondAffiliation, removeStaff, validateEstablishment,
-    getDoctorHospitals, getPendingAffiliations,
+    getDoctorHospitals, getPendingAffiliations, ensureHospitalMembership,
     getCurrentHospital, setCurrentHospital, clearCurrentHospital,
     getPatientsForContext, getAppointmentsForContext, getPatientsForEstablishment,
     renderHospitalSwitcher, openRequestAffiliation, submitAffiliation,
