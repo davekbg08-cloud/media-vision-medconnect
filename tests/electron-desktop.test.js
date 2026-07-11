@@ -52,3 +52,13 @@ test('le workflow desktop est séparé du pipeline Android (aucune modification 
   const apkWorkflowSrc = fs.readFileSync(apkWorkflowPath, 'utf8');
   assert.doesNotMatch(apkWorkflowSrc, /electron/i, 'le workflow APK ne doit rien connaître d\'Electron');
 });
+
+test('electron/package.json contient homepage + author.email (requis par electron-builder pour le paquet .deb)', () => {
+  const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', 'electron/package.json'), 'utf8'));
+  assert.ok(pkg.homepage, 'homepage manquant : le build .deb échoue sans ça');
+  assert.ok(pkg.author && pkg.author.email, 'author.email manquant : le build .deb échoue sans ça (maintainer requis)');
+});
+
+test('le workflow desktop utilise fail-fast:false (un échec Linux ne doit pas annuler le job Windows en cours, et inversement)', () => {
+  assert.match(workflowSrc, /fail-fast:\s*false/);
+});

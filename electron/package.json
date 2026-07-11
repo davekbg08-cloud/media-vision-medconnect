@@ -3,7 +3,11 @@
   "version": "1.0.0",
   "description": "MedConnect — application de bureau (Windows + Linux)",
   "main": "main.js",
-  "author": "Media Vision",
+  "homepage": "https://davekbg08-cloud.github.io/media-vision-medconnect/",
+  "author": {
+    "name": "Media Vision",
+    "email": "contact@mediavision.app"
+  },
   "license": "UNLICENSED",
   "private": true,
   "scripts": {
