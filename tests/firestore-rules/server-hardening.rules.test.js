@@ -50,6 +50,44 @@ test("accountStatusOk : un compte sans champ status (rétro-compatibilité) gard
   }));
 });
 
+// Correctif (revue Codex) : accountStatusOk() n'était pas propagé à
+// isHospitalMember() — le chemin d'accès de la quasi-totalité des
+// collections médicales (belongsToSameEstablishment). Un compte
+// suspendu dont le document hospitalMembers restait "active" gardait
+// donc tout son accès établissement, vidant la protection de
+// suspension de l'essentiel de sa substance. Vérifié ici sur
+// medical_record_shares.update (durci dans cette même PR), exactement
+// le cas cité par la revue.
+test("isHospitalMember : un membre d'établissement SUSPENDU perd l'accès belongsToSameEstablishment", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await seedDoc(env, 'users', 'staff-susp-1', { uid: 'staff-susp-1', role: 'nurse', status: 'suspended' });
+  await seedDoc(env, 'hospitalMembers', 'HOSP-2_staff-susp-1', { hospitalId: 'HOSP-2', uid: 'staff-susp-1', status: 'active' });
+  await seedDoc(env, 'medical_record_shares', 'S3', {
+    fromHospitalId: 'HOSP-9', toHospitalId: 'HOSP-2', patientId: 'MC-S3',
+    allowedSections: ['summary'], status: 'pending_patient_consent', approvedByUid: null,
+  });
+  const staff = env.authenticatedContext('staff-susp-1').firestore();
+  await assertFails(updateDoc(doc(staff, 'medical_record_shares', 'S3'), {
+    status: 'active', approvedByUid: 'staff-susp-1',
+  }));
+});
+
+test("isHospitalMember : un membre d'établissement au compte ACTIF garde l'accès belongsToSameEstablishment", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await seedDoc(env, 'users', 'staff-ok-1', { uid: 'staff-ok-1', role: 'nurse', status: 'active' });
+  await seedDoc(env, 'hospitalMembers', 'HOSP-2_staff-ok-1', { hospitalId: 'HOSP-2', uid: 'staff-ok-1', status: 'active' });
+  await seedDoc(env, 'medical_record_shares', 'S4', {
+    fromHospitalId: 'HOSP-9', toHospitalId: 'HOSP-2', patientId: 'MC-S4',
+    allowedSections: ['summary'], status: 'pending_patient_consent', approvedByUid: null,
+  });
+  const staff = env.authenticatedContext('staff-ok-1').firestore();
+  await assertSucceeds(updateDoc(doc(staff, 'medical_record_shares', 'S4'), {
+    status: 'active', approvedByUid: 'staff-ok-1',
+  }));
+});
+
 // auditLogs.create : mitigation atteignable sans Cloud Function —
 // empêche de forger une entrée AU NOM d'un tiers (userId doit
 // correspondre à l'auteur réel de la requête, quand ce champ est

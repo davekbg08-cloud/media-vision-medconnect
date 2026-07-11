@@ -193,8 +193,16 @@ service cloud.firestore {
     function hospitalMemberDoc(hospitalId, uid) {
       return /databases/$(database)/documents/hospitalMembers/$(hospitalId + '_' + uid);
     }
+    // Correctif (revue Codex sur PR "durcissement sans Cloud
+    // Functions") : accountStatusOk() n'était injecté que dans
+    // hasRole()/currentRoleIs()/isAdmin() — pas ici. Or isHospitalMember()
+    // est le chemin d'accès de la quasi-totalité des collections
+    // médicales (belongsToSameEstablishment) : un compte suspendu
+    // (users/{uid}.status) dont le document hospitalMembers restait
+    // "active" gardait donc tout son accès établissement, vidant la
+    // protection de suspension de l'essentiel de sa substance.
     function isHospitalMember(hospitalId) {
-      return signedIn() && hospitalId != null &&
+      return signedIn() && accountStatusOk() && hospitalId != null &&
         exists(hospitalMemberDoc(hospitalId, request.auth.uid)) &&
         get(hospitalMemberDoc(hospitalId, request.auth.uid)).data.status == 'active';
     }
