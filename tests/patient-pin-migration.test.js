@@ -89,6 +89,20 @@ function seedPatient(win) {
   return p.id;
 }
 
+// Code d'accès hôpital (chantier séparé) : requis désormais par
+// Auth._createPatientPin, vérifié côté serveur (firestore.rules) contre
+// mc_patients/{id}.firstAccessCode — voir js/db.js addPatient.
+function accessCodeFor(win, id) {
+  return win.DB.getPatientById(id)?.firstAccessCode || '';
+}
+
+// Mock minimal de firebaseDB : suffisant pour que DB.pushAndReport
+// (confirmation cloud réelle avant d'annoncer un succès, même principe
+// que _reg) résolve à un succès dans ces tests.
+function fakeFirebaseDB() {
+  return { collection: () => ({ doc: () => ({ set: async () => {} }) }) };
+}
+
 test("Auth._createPatientPin n'écrit jamais password/pin en clair dans mc_accounts (Firebase Auth dispo)", async () => {
   let createdWith = null;
   const firebaseAuthImpl = {
@@ -97,10 +111,11 @@ test("Auth._createPatientPin n'écrit jamais password/pin en clair dans mc_accou
       return { user: { uid: 'firebase-uid-abc' } };
     },
   };
-  const { win, setField, toasts } = setup({ firebaseAuthImpl });
+  const { win, setField, toasts } = setup({ firebaseAuthImpl, firebaseDB: fakeFirebaseDB() });
   const id = seedPatient(win);
   setField('lp-id', id);
   setField('lp-pin', '123456');
+  setField('lp-access-code', accessCodeFor(win, id));
 
   await win.Auth._createPatientPin();
 
@@ -120,10 +135,11 @@ test('Auth._createPatientPin complète un PIN de 4 chiffres à 6 caractères pou
   const firebaseAuthImpl = {
     createUserWithEmailAndPassword: async (email, pass) => { createdWith = { email, pass }; return { user: { uid: 'uid1' } }; },
   };
-  const { win, setField } = setup({ firebaseAuthImpl });
+  const { win, setField } = setup({ firebaseAuthImpl, firebaseDB: fakeFirebaseDB() });
   const id = seedPatient(win);
   setField('lp-id', id);
   setField('lp-pin', '123456'); // >= 6 chiffres requis à la création désormais
+  setField('lp-access-code', accessCodeFor(win, id));
   await win.Auth._createPatientPin();
   assert.strictEqual(createdWith.pass, '123456');
 });
@@ -136,6 +152,38 @@ test('Auth._createPatientPin refuse un PIN de moins de 6 chiffres', async () => 
   await win.Auth._createPatientPin();
   assert.match(errorText(), /trop court/);
   assert.strictEqual(win.DB.getAccounts().length, 0, 'aucun compte ne doit être créé');
+});
+
+// Chantier "code d'accès hôpital" (suite à la revue de sécurité de la
+// PR #1) : ferme la préemption de compte par un tiers connaissant
+// seulement le numéro de fiche — le code, donné par le personnel à la
+// création de la fiche (js/db.js addPatient), est désormais requis au
+// premier accès, en plus du PIN.
+test("Auth._createPatientPin refuse la création sans code d'accès (client), même avec un PIN valide", async () => {
+  const firebaseAuthImpl = { createUserWithEmailAndPassword: async () => ({ user: { uid: 'should-not-be-called' } }) };
+  const { win, setField, errorText } = setup({ firebaseAuthImpl, firebaseDB: fakeFirebaseDB() });
+  const id = seedPatient(win);
+  setField('lp-id', id);
+  setField('lp-pin', '123456');
+  // lp-access-code volontairement laissé vide.
+  await win.Auth._createPatientPin();
+  assert.match(errorText(), /Code d'accès requis/);
+  assert.strictEqual(win.DB.getAccounts().length, 0, 'aucun compte ne doit être créé sans code');
+});
+
+test("Auth._createPatientPin transmet le code d'accès saisi à l'écriture mc_accounts (vérifié côté serveur par firestore.rules)", async () => {
+  const firebaseAuthImpl = { createUserWithEmailAndPassword: async () => ({ user: { uid: 'uid-access-code-test' } }) };
+  const { win, setField } = setup({ firebaseAuthImpl, firebaseDB: fakeFirebaseDB() });
+  const id = seedPatient(win);
+  const code = accessCodeFor(win, id);
+  assert.ok(code, 'la fiche doit porter un code d\'accès généré à sa création');
+  setField('lp-id', id);
+  setField('lp-pin', '123456');
+  setField('lp-access-code', code.toLowerCase()); // saisie insensible à la casse
+  await win.Auth._createPatientPin();
+  const acc = win.DB.getAccounts().find(a => a.patient_id === id);
+  assert.ok(acc, 'le compte doit être créé avec le bon code');
+  assert.strictEqual(acc.firstAccessCode, code, 'le code transmis correspond à celui de la fiche (comparé côté règles, pas ici)');
 });
 
 // Correctif (revue de sécurité) : créer quand même le compte sans
@@ -151,6 +199,7 @@ test("Auth._createPatientPin sans Firebase Auth disponible (hors-ligne) : refuse
   const id = seedPatient(win);
   setField('lp-id', id);
   setField('lp-pin', '123456');
+  setField('lp-access-code', accessCodeFor(win, id));
   await win.Auth._createPatientPin();
   const acc = win.DB.getAccounts().find(a => a.patient_id === id);
   assert.strictEqual(acc, undefined, 'aucun compte fantôme ne doit être créé sans authUid');

@@ -114,6 +114,12 @@ const Auth = (() => {
           <label class="inp-lbl">PIN (4-6 chiffres) *</label>
           <input type="password" id="lp-pin" class="inp" maxlength="6" placeholder="••••" inputmode="numeric">
         </div>
+        <div class="form-group">
+          <label class="inp-lbl">Code d'accès hôpital (uniquement pour le premier accès)</label>
+          <input type="text" id="lp-access-code" class="inp" maxlength="6" placeholder="Donné par l'hôpital à la création de votre fiche"
+            style="letter-spacing:2px;text-transform:uppercase;font-family:monospace"
+            oninput="this.value=this.value.toUpperCase()">
+        </div>
         <button class="btn-p" onclick="Auth._doPatient()">🔐 Se connecter à mon dossier existant</button>
         <button class="btn btn-ghost" style="width:100%;margin-top:.6rem" onclick="Auth._createPatientPin()">🆕 Premier accès : créer mon PIN</button>`,
 
@@ -550,9 +556,11 @@ const Auth = (() => {
   async function _createPatientPin() {
     const id  = (document.getElementById('lp-id')?.value  || '').trim().toUpperCase();
     const pin = (document.getElementById('lp-pin')?.value || '').trim();
+    const accessCode = (document.getElementById('lp-access-code')?.value || '').trim().toUpperCase();
     if (!id || !pin) { _err('auth-err', 'Veuillez remplir le numéro de fiche et le PIN.'); return; }
     if (!id.startsWith('MC-')) { _err('auth-err', '❌ Format invalide. Ex : MC-2026-CD-A3B7X9Q2'); return; }
     if (pin.length < 6) { _err('auth-err', '❌ PIN trop court — minimum 6 chiffres.'); return; }
+    if (!accessCode) { _err('auth-err', "❌ Code d'accès requis — donné par l'hôpital à la création de votre fiche. Contactez votre médecin si vous ne l'avez pas."); return; }
     await _syncBeforeAuth('premier accès patient');
     const patient = DB.getPatientById(id);
     if (!patient) { _err('auth-err', '❌ Numéro de fiche introuvable. Contactez votre médecin.'); return; }
@@ -567,8 +575,15 @@ const Auth = (() => {
     // mot de passe côté serveur, exactement comme pour les
     // professionnels (voir _createFirebaseUser). mc_accounts ne reçoit
     // que l'email synthétique et l'authUid Firebase.
+    // firstAccessCode : vérifié côté serveur (firestore.rules) contre
+    // mc_patients/{id}.firstAccessCode — ferme la préemption de compte
+    // par un tiers connaissant seulement le numéro de fiche (voir
+    // rapport de sécurité). Reste ensuite tel quel sur ce document
+    // (mc_accounts est public) : sans conséquence, la création est de
+    // toute façon bloquée pour cette fiche une fois le compte créé
+    // (!exists sur mc_accounts), donc le code redevient inutilisable.
     const email = _syntheticPatientEmail(id);
-    const baseAcc = { uid:`PAT_${id}`, username:id, role:'patient', status:'approved', name:`${patient.firstname} ${patient.lastname}`, patient_id:id, email, created_at:new Date().toISOString() };
+    const baseAcc = { uid:`PAT_${id}`, username:id, role:'patient', status:'approved', name:`${patient.firstname} ${patient.lastname}`, patient_id:id, email, firstAccessCode: accessCode, created_at:new Date().toISOString() };
     const acc = await _createPatientFirebaseAuth(email, _toFirebasePassword(pin), baseAcc);
     if (!acc.authUid) {
       // Correctif (revue de sécurité) : sans authUid, ce compte n'a
@@ -580,6 +595,17 @@ const Auth = (() => {
       return;
     }
     accounts.push(acc); DB.saveAccounts(accounts);
+    // Confirmation cloud réelle (même principe qu'à l'inscription
+    // professionnelle, voir _reg) : un code d'accès incorrect est
+    // rejeté par la règle mc_accounts.create — indiscernable côté
+    // client d'une simple coupure réseau, d'où le message couvrant les
+    // deux cas plutôt que d'affirmer un diagnostic qu'on ne peut pas
+    // établir ici.
+    const criticalOk = DB.pushAndReport ? await DB.pushAndReport([['mc_accounts', acc.uid, acc]]) : false;
+    if (!criticalOk) {
+      _err('auth-err', "❌ Création refusée — vérifiez le code d'accès (donné par l'hôpital) et votre connexion internet.");
+      return;
+    }
     localStorage.setItem('mc_my_patient_id', id);
     _save(acc); _launch(acc);
     App.toast(`✅ Bienvenue ${patient.firstname} ! PIN créé.`);

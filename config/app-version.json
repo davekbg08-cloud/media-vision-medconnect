@@ -1,8 +1,15 @@
 {
-  "version": "2.5.0",
-  "build": "2026.07.11.01",
+  "version": "2.6.0",
+  "build": "2026.07.11.02",
   "buildDate": "2026-07-11",
   "changelog": [
+    {
+      "version": "2.6.0",
+      "date": "2026-07-11",
+      "notes": [
+        "Code d'accès hôpital à usage unique pour le premier accès patient : ferme la préemption d'une fiche par un tiers connaissant seulement le numéro MC-xxx"
+      ]
+    },
     {
       "version": "2.5.0",
       "date": "2026-07-11",
