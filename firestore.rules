@@ -137,10 +137,18 @@ service cloud.firestore {
     // Le code applicatif écrit establishmentId (parfois hospital_id
     // en repli historique) — jamais un champ "hospitalId" littéral.
     // Ce helper évite de répéter ce repli dans chaque règle.
+    // NOTE — bug réel corrigé pendant ce chantier (découvert en testant
+    // hospitalMembers avec l'émulateur) : accès direct en notation
+    // pointée à un champ que le document ne porte PAS du tout (ex :
+    // hospitalMembers écrit hospitalId mais pas establishmentId) lève
+    // une erreur d'évaluation ("Property X is undefined") au lieu de
+    // retourner null — même famille que le bug déjà corrigé sur
+    // request.auth.token. .get(clé, défaut) sur une map lit un champ
+    // optionnel sans jamais lever.
     function resolveHospitalId(data) {
-      return data.establishmentId != null ? data.establishmentId
-        : (data.hospital_id != null ? data.hospital_id
-        : (data.hospitalId != null ? data.hospitalId : data.fromHospitalId));
+      return data.get('establishmentId', null) != null ? data.get('establishmentId', null)
+        : (data.get('hospital_id', null) != null ? data.get('hospital_id', null)
+        : (data.get('hospitalId', null) != null ? data.get('hospitalId', null) : data.get('fromHospitalId', null)));
     }
 
     /* ── PARTIE E — isolation par établissement (serveur) ──
@@ -177,12 +185,17 @@ service cloud.firestore {
       return signedIn() && listValue is list && request.auth.uid in listValue;
     }
 
+    // NOTE — même correctif que resolveHospitalId/currentRoleIs :
+    // .get(clé, défaut) plutôt que l'accès pointé direct, qui lève une
+    // erreur d'évaluation quand le document ne porte pas du tout ce
+    // champ (constaté avec l'émulateur sur plusieurs collections où
+    // tous les documents n'ont pas tous les mêmes champs optionnels).
     function ownsPatientData(data) {
       return signedIn() && (
-        data.uid == request.auth.uid ||
-        data.patientUid == request.auth.uid ||
-        data.patient_uid == request.auth.uid ||
-        data.ownerUid == request.auth.uid ||
+        data.get('uid', null) == request.auth.uid ||
+        data.get('patientUid', null) == request.auth.uid ||
+        data.get('patient_uid', null) == request.auth.uid ||
+        data.get('ownerUid', null) == request.auth.uid ||
         // PARTIE B — patient authentifié via Firebase Auth (PIN migré,
         // voir js/auth.js _createPatientFirebaseAuth/_signInPatientFirebaseAuth).
         // Le compte garde un uid stable 'PAT_'+id (adressage mc_accounts) ;
@@ -191,35 +204,35 @@ service cloud.firestore {
         // elle-même dans cette PR (nécessiterait un mécanisme de
         // revendication dédié, hors scope) — sans effet tant qu'absent,
         // prête pour une future écriture contrôlée.
-        data.patientAuthUid == request.auth.uid
+        data.get('patientAuthUid', null) == request.auth.uid
       );
     }
 
     function doctorCanRead(data) {
       return currentRoleIs('doctor') && (
-        data.created_by == request.auth.uid ||
-        data.doctorUid == request.auth.uid ||
-        data.doctor_uid == request.auth.uid ||
-        uidIn(data.doctorUids) ||
-        uidIn(data.authorizedDoctorUids)
+        data.get('created_by', null) == request.auth.uid ||
+        data.get('doctorUid', null) == request.auth.uid ||
+        data.get('doctor_uid', null) == request.auth.uid ||
+        uidIn(data.get('doctorUids', [])) ||
+        uidIn(data.get('authorizedDoctorUids', []))
       );
     }
 
     function nurseCanRead(data) {
       return currentRoleIs('nurse') && (
-        data.nurseUid == request.auth.uid ||
-        data.nurse_uid == request.auth.uid ||
-        uidIn(data.nurseUids) ||
-        uidIn(data.authorizedNurseUids)
+        data.get('nurseUid', null) == request.auth.uid ||
+        data.get('nurse_uid', null) == request.auth.uid ||
+        uidIn(data.get('nurseUids', [])) ||
+        uidIn(data.get('authorizedNurseUids', []))
       );
     }
 
     function pharmacyCanReadPrescription(data) {
       return currentRoleIs('pharmacist') && (
-        data.pharmacyUid == request.auth.uid ||
-        data.pharmacy_uid == request.auth.uid ||
-        data.receivedByPharmacyUid == request.auth.uid ||
-        uidIn(data.pharmacyUids)
+        data.get('pharmacyUid', null) == request.auth.uid ||
+        data.get('pharmacy_uid', null) == request.auth.uid ||
+        data.get('receivedByPharmacyUid', null) == request.auth.uid ||
+        uidIn(data.get('pharmacyUids', []))
       );
     }
 

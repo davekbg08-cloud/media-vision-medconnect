@@ -58,12 +58,8 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # continue-on-error volontaire dans un premier temps (voir
-      # tests.yml et le rapport de la PR) : à retirer une fois la
-      # fiabilité confirmée sur plusieurs runs GitHub Actions réels.
       - name: Tests des règles Firestore (émulateur)
         run: npm run test:rules
-        continue-on-error: true
 
   build-apk:
     name: Build signed APK v2.4

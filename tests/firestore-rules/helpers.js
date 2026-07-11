@@ -20,11 +20,28 @@ const { initializeTestEnvironment } = require('@firebase/rules-unit-testing');
 // une fois `node --test` terminé — pas besoin de cleanup() explicite ici.
 let envPromise = null;
 
+// Bug réel identifié (hangs de plusieurs minutes à plusieurs heures,
+// reproduit à l'identique en sandbox de dev ET sur GitHub Actions) :
+// initializeTestEnvironment tente TOUJOURS de découvrir les émulateurs
+// via l'Emulator Hub (FIREBASE_EMULATOR_HUB, port 4400) avant de lire
+// FIRESTORE_EMULATOR_HOST — et cet environnement a un problème de
+// résolution IPv6 sur la boucle locale (déjà visible au démarrage de
+// l'émulateur : "Port 4400 is available on 127.0.0.1 but not ::1").
+// La requête HTTP de découverte vers le hub reste bloquée très
+// longtemps avant d'abandonner. En supprimant FIREBASE_EMULATOR_HUB de
+// l'environnement AVANT le premier appel, on force la bibliothèque à
+// utiliser directement FIRESTORE_EMULATOR_HOST (déjà fourni par
+// `firebase emulators:exec`, qui pointe correctement sur 127.0.0.1),
+// sans jamais tenter cette découverte.
+delete process.env.FIREBASE_EMULATOR_HUB;
+
 function getTestEnv() {
   if (!envPromise) {
     envPromise = initializeTestEnvironment({
       projectId: 'demo-medconnect',
       firestore: {
+        host: '127.0.0.1',
+        port: 8080,
         rules: fs.readFileSync(path.resolve(__dirname, '../../firestore.rules'), 'utf8'),
       },
     });

@@ -52,12 +52,5 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # continue-on-error volontaire dans un premier temps : validé en
-      # développement (émulateur Java + réseau), pas encore confirmé
-      # stable plusieurs fois sur l'infrastructure GitHub Actions réelle
-      # — à retirer une fois cette fiabilité constatée en CI (voir
-      # rapport de la PR). Ne bloque jamais silencieusement : le
-      # résultat reste visible dans les logs du run.
       - name: Tests des règles Firestore (émulateur)
         run: npm run test:rules
-        continue-on-error: true
