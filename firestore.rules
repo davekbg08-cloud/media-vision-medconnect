@@ -698,7 +698,14 @@ service cloud.firestore {
        (emergencyPacket reste figé après création — non modifiable
        par update, seul le statut/timestamps changent). */
     match /emergencyTransfers/{transferId} {
-      allow read: if isAdmin() || signedIn();
+      // PARTIE I : remplace le "signedIn()" trop large (tout utilisateur
+      // connecté, y compris hors du transfert) par une vérification
+      // réelle d'appartenance à l'hôpital source OU destinataire (ou
+      // patient concerné), en plus de l'admin.
+      allow read: if isAdmin() ||
+        isHospitalMember(resource.data.fromHospitalId) ||
+        isHospitalMember(resource.data.toHospitalId) ||
+        (signedIn() && resource.data.patientId == request.auth.uid);
       allow create: if isAdmin() ||
         (signedIn() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
       // Mise à jour de statut : l'hôpital source ou le destinataire
@@ -714,9 +721,14 @@ service cloud.firestore {
     }
 
     match /medical_record_shares/{shareId} {
-      // Lecture : hôpital source, hôpital destinataire, ou admin —
-      // jamais un tiers hors du partage.
-      allow read: if isAdmin() || signedIn();
+      // PARTIE I : lecture réellement réservée à l'hôpital source,
+      // l'hôpital destinataire, le patient concerné, ou l'admin — le
+      // "signedIn()" précédent laissait n'importe quel utilisateur
+      // connecté lire n'importe quel partage, tiers inclus.
+      allow read: if isAdmin() ||
+        isHospitalMember(resource.data.fromHospitalId) ||
+        isHospitalMember(resource.data.toHospitalId) ||
+        (signedIn() && resource.data.patientId == request.auth.uid);
       allow create: if isAdmin() ||
         (signedIn() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
       // Seuls le statut/timestamps de révocation peuvent changer —
