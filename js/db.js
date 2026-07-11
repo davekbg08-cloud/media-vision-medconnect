@@ -614,14 +614,20 @@ const DB = (() => {
       réelle avant de résoudre — utilisé quand l'appelant doit savoir
       si le cloud a réellement accepté l'écriture (ex : avant d'afficher
       "Ordonnance envoyée" à l'utilisateur) plutôt que de l'afficher de
-      façon optimiste sur une écriture fire-and-forget. */
+      façon optimiste sur une écriture fire-and-forget. Retourne
+      { ok, reason } plutôt qu'un simple booléen, pour que l'appelant
+      distingue "hors ligne, en file d'attente" de "refusé par le
+      serveur" (PARTIE H/K) — reason vaut 'offline' ou 'denied' quand
+      ok est false, sinon null. */
   async function updatePrescriptionAndConfirm(pid, data) {
     const updated = _updatePrescriptionLocal(pid, data);
-    if (!updated) return false;
-    return pushAndReport([
+    if (!updated) return { ok: false, reason: 'not_found' };
+    const wasOffline = !firebaseReady || !firebaseDB;
+    const ok = await pushAndReport([
       ['mc_prescriptions', pid, updated],
       ['prescriptions', pid, updated],
     ]);
+    return { ok, reason: ok ? null : (wasOffline ? 'offline' : 'denied') };
   }
 
   function getPatientPrescriptions(pid) {
