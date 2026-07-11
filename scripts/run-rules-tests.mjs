@@ -44,6 +44,18 @@
    qui perturbe la connexion suivante. Solution : un court délai de
    chauffe avant le premier fichier, et un court délai avant chaque
    nouvelle tentative après un faux départ.
+
+   Bug réel n°5 (corrigé) : reproduit une fois sur GitHub Actions — un
+   faux départ (bug n°4) suivi d'une nouvelle tentative peut laisser le
+   tout premier appel `clearFirestore()` de cette nouvelle tentative
+   échouer avec une erreur gRPC transitoire très reconnaissable
+   ("call already cancelled", statut CANCELLED, code 499) : l'émulateur
+   n'avait pas fini d'encaisser la déconnexion brutale de la tentative
+   précédente. Ce n'est pas un vrai bug de règles (qui se manifesterait
+   par un écart d'assertion permission-denied/succeeded, pas par un
+   appel annulé). Solution : reconnaître cette signature d'erreur
+   connue et retenter le fichier entier dans ce cas précis aussi, pas
+   seulement sur un 0/0.
    ===================================================== */
 import { spawn } from 'node:child_process';
 import { readdirSync, openSync, closeSync, readFileSync, unlinkSync, statSync } from 'node:fs';
@@ -56,7 +68,8 @@ const STABLE_MS = 1500;
 const MAX_MS = 90000;
 const MAX_ATTEMPTS = 3;
 const WARMUP_MS = 4000;
-const RETRY_DELAY_MS = 2500;
+const RETRY_DELAY_MS = 4000;
+const TRANSIENT_INFRA_FLAKE = /call already cancelled|"status":"CANCELLED"|UNAVAILABLE: No connection established|ECONNREFUSED/i;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -130,10 +143,15 @@ async function main() {
     // 0 pass + 0 fail n'est jamais un résultat légitime (chaque fichier a
     // au moins un test) : c'est le signe d'un faux départ (latence de
     // démarrage de l'émulateur juste après "ready"), pas d'une suite
-    // vide. On retente avant d'abandonner.
-    while (result.pass === 0 && result.fail === 0 && attempts < MAX_ATTEMPTS) {
+    // vide. Une erreur gRPC "annulée" connue est un autre symptôme du
+    // même genre de flake d'infrastructure transitoire (bug n°5). Dans
+    // les deux cas on retente avant d'abandonner.
+    const isRetryable = (r) =>
+      (r.pass === 0 && r.fail === 0) ||
+      (r.fail > 0 && TRANSIENT_INFRA_FLAKE.test(r.output));
+    while (isRetryable(result) && attempts < MAX_ATTEMPTS) {
       attempts += 1;
-      process.stdout.write(`${name} : 0 test détecté (faux départ probable), nouvelle tentative (${attempts}/${MAX_ATTEMPTS})...\n`);
+      process.stdout.write(`${name} : résultat suspect (faux départ ou flake d'infrastructure connu), nouvelle tentative (${attempts}/${MAX_ATTEMPTS})...\n`);
       await sleep(RETRY_DELAY_MS);
       result = await runFile(file);
     }
