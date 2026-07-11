@@ -209,6 +209,27 @@ service cloud.firestore {
       );
     }
 
+    /* ── PARTIE D — consentements (mc_consents) ──
+       js/access_control.js identifie un patient par patient_id (le
+       numéro de fiche, ex "MC-2026-..."), pas par un uid Firebase —
+       impossible à comparer directement à request.auth.uid. On résout
+       donc l'uid Firebase réel du patient via mc_accounts/PAT_{patient_id}
+       .authUid, posé de façon fiable à la création du compte (règle
+       "create" de mc_accounts, non restreinte par auth — voir plus bas)
+       une fois le PIN migré vers Firebase Authentication (PARTIE B).
+       Limite assumée : un compte patient hérité pas encore migré
+       (authUid absent) ne peut pas encore être vérifié ainsi côté
+       règles — documenté dans le rapport final. */
+    function patientAccountAuthUid(patientId) {
+      return patientId != null &&
+        exists(/databases/$(database)/documents/mc_accounts/$('PAT_' + patientId))
+        ? get(/databases/$(database)/documents/mc_accounts/$('PAT_' + patientId)).data.authUid
+        : null;
+    }
+    function isConcernedPatient(patientId) {
+      return signedIn() && patientAccountAuthUid(patientId) == request.auth.uid;
+    }
+
     function canReadMedicalData(data) {
       return isAdmin() ||
         ownsPatientData(data) ||
@@ -505,9 +526,35 @@ service cloud.firestore {
       allow write: if isAdmin() || currentRoleIs('pharmacist');
     }
 
+    /* PARTIE D — un utilisateur connecté quelconque pouvait auparavant
+       créer/lire/modifier N'IMPORTE QUEL consentement (allow read/write:
+       if signedIn()). Resserré : seul le médecin demandeur peut créer
+       SA demande (statut initial 'pending' imposé) ; lecture réservée
+       au patient concerné, au médecin demandeur, ou à l'admin ; seul
+       le patient concerné peut approuver/refuser/révoquer (champs
+       limités à status/decided_at/expires_at/updated_at) ; le médecin
+       demandeur peut uniquement révoquer sa propre demande, jamais
+       l'approuver lui-même. RAPPEL (clarification client) : ce
+       mécanisme ne sert JAMAIS à l'accès de l'établissement créateur
+       de la fiche (voir belongsToSameEstablishment) — uniquement aux
+       accès externes explicitement demandés par un médecin. */
     match /mc_consents/{docId} {
-      allow read: if signedIn();
-      allow write: if signedIn();
+      allow read: if isAdmin() ||
+        isConcernedPatient(resource.data.patient_id) ||
+        (signedIn() && resource.data.doctor_id == request.auth.uid);
+      allow create: if isAdmin() ||
+        (signedIn() &&
+         request.resource.data.doctor_id == request.auth.uid &&
+         request.resource.data.status == 'pending' &&
+         request.resource.data.patient_id is string &&
+         request.resource.data.patient_id != '');
+      allow update: if isAdmin() ||
+        (isConcernedPatient(resource.data.patient_id) &&
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'decided_at', 'expires_at', 'updated_at'])) ||
+        (signedIn() && resource.data.doctor_id == request.auth.uid &&
+         request.resource.data.status == 'revoked' &&
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'decided_at', 'updated_at']));
+      allow delete: if isAdmin();
     }
 
     match /mc_patients/{docId} {

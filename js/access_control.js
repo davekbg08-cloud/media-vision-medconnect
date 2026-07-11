@@ -107,8 +107,10 @@ const ACL = (() => {
   function requestConsent(patientId, doctorId, doctorName) {
     const list = getConsents();
     if (list.find(c => c.patient_id===patientId && c.doctor_id===doctorId && c.status==='approved')) return;
+    const now = new Date().toISOString();
     const c = { cid:DB.makeId('CON'), patient_id:patientId, doctor_id:doctorId,
-                doctor_name:doctorName, status:'pending', requested_at:new Date().toISOString() };
+                doctor_name:doctorName, status:'pending', requested_at:now,
+                created_at:now, updated_at:now };
     list.push(c); saveConsents(list);
     const msgs = DB.getMessages();
     msgs.push({ mid:DB.makeId('N'), to_role:'patient', to_id:patientId, type:'consent_request',
@@ -125,6 +127,7 @@ const ACL = (() => {
     if (idx === -1) return;
     list[idx].status     = approved ? 'approved' : 'denied';
     list[idx].decided_at = new Date().toISOString();
+    list[idx].updated_at = list[idx].decided_at;
     if (approved) list[idx].expires_at = new Date(Date.now()+30*86400000).toISOString().slice(0,10);
     saveConsents(list);
   }
@@ -132,7 +135,12 @@ const ACL = (() => {
   function revokeConsent(cid) {
     const list = getConsents();
     const idx  = list.findIndex(c => c.cid === cid);
-    if (idx !== -1) { list[idx].status = 'revoked'; saveConsents(list); }
+    if (idx !== -1) {
+      list[idx].status = 'revoked';
+      list[idx].decided_at = new Date().toISOString();
+      list[idx].updated_at = list[idx].decided_at;
+      saveConsents(list);
+    }
   }
 
   function hasConsent(patientId, doctorId) {

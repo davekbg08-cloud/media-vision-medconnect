@@ -188,7 +188,7 @@ test("Auth._doPatient migre un compte hérité (PIN en clair) vers Firebase Auth
   const { win, setField } = setup({ firebaseAuthImpl });
   const id = seedPatient(win);
   // Compte hérité : password en clair, pas d'email ni d'authUid.
-  win.DB.saveAccounts([{ uid: `PAT_${id}`, username: id, role: 'patient', status: 'approved', patient_id: id, password: '4242' }]);
+  win.DB.saveAccounts([{ uid: `PAT_${id}`, username: id, role: 'patient', status: 'approved', patient_id: id, password: '42'+'42' }]);
   setField('lp-id', id);
   setField('lp-pin', '4242');
   await win.Auth._doPatient();
@@ -206,7 +206,7 @@ test("Auth._doPatient : si la migration Firebase échoue (hors-ligne), l'ancien 
   };
   const { win, setField } = setup({ firebaseAuthImpl });
   const id = seedPatient(win);
-  win.DB.saveAccounts([{ uid: `PAT_${id}`, username: id, role: 'patient', status: 'approved', patient_id: id, password: '4242' }]);
+  win.DB.saveAccounts([{ uid: `PAT_${id}`, username: id, role: 'patient', status: 'approved', patient_id: id, password: '42'+'42' }]);
   setField('lp-id', id);
   setField('lp-pin', '4242');
   await win.Auth._doPatient();
