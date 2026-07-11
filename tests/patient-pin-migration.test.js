@@ -138,17 +138,23 @@ test('Auth._createPatientPin refuse un PIN de moins de 6 chiffres', async () => 
   assert.strictEqual(win.DB.getAccounts().length, 0, 'aucun compte ne doit être créé');
 });
 
-test("Auth._createPatientPin sans Firebase Auth disponible (hors-ligne) : aucun secret stocké, pas d'authUid", async () => {
-  const { win, setField } = setup({ firebaseAuthImpl: null });
+// Correctif (revue de sécurité) : créer quand même le compte sans
+// authUid produisait un compte fantôme — aucun secret Firebase Auth
+// réel, et plus aucun password/pin local (PARTIE B) : la prochaine
+// tentative de connexion tente un signInWithEmailAndPassword contre un
+// utilisateur Firebase qui n'existe pas, et il n'y a plus rien à quoi
+// se rattraper. Le patient reste verrouillé hors de son propre dossier
+// après une simple panne réseau transitoire. On refuse maintenant la
+// création plutôt que de produire ce compte inutilisable.
+test("Auth._createPatientPin sans Firebase Auth disponible (hors-ligne) : refuse la création plutôt qu'un compte fantôme sans secret", async () => {
+  const { win, setField, errorText } = setup({ firebaseAuthImpl: null });
   const id = seedPatient(win);
   setField('lp-id', id);
   setField('lp-pin', '123456');
   await win.Auth._createPatientPin();
   const acc = win.DB.getAccounts().find(a => a.patient_id === id);
-  assert.ok(acc);
-  assert.strictEqual(acc.password, undefined);
-  assert.strictEqual(acc.authUid, undefined);
-  assert.strictEqual(acc.email, `patient-${id.toLowerCase().replace(/[^a-z0-9]/g,'')}@patients.medconnect.internal`);
+  assert.strictEqual(acc, undefined, 'aucun compte fantôme ne doit être créé sans authUid');
+  assert.match(errorText(), /connexion internet/);
 });
 
 test('Auth._doPatient (compte déjà migré) : vérifie via Firebase Auth, jamais de comparaison en clair', async () => {

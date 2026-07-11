@@ -107,18 +107,40 @@ test("admissions : personnel d'un autre établissement refusé", async () => {
   await assertFails(getDoc(doc(outsider, 'admissions', 'ADM2')));
 });
 
-test("hospitalMembers : un utilisateur ne peut écrire QUE son propre document (auto-guérison)", async () => {
+test("hospitalMembers : un utilisateur ne peut écrire QUE son propre document (auto-guérison), avec affiliation déjà approuvée", async () => {
   const env = await getTestEnv();
   await clearAll(env);
+  await seedDoc(env, 'affiliation_requests', 'AFF_self-heal-uid-1_HOSP-A', {
+    requesterUid: 'self-heal-uid-1', establishmentId: 'HOSP-A', status: 'approved',
+  });
   const user = env.authenticatedContext('self-heal-uid-1').firestore();
   await assertSucceeds(setDoc(doc(user, 'hospitalMembers', 'HOSP-A_self-heal-uid-1'), {
     hospitalId: 'HOSP-A', uid: 'self-heal-uid-1', status: 'active',
   }));
 });
 
+// Correctif (revue de sécurité) : avant ce correctif, un compte connecté
+// pouvait s'auto-écrire un statut "active" dans hospitalMembers pour
+// N'IMPORTE QUEL hospitalId connu, sans qu'aucune affiliation n'ait
+// jamais été approuvée par un admin — obtenant ainsi tout l'accès
+// belongsToSameEstablishment de cet établissement. hasApprovedAffiliation()
+// exige désormais un affiliation_requests/AFF_{uid}_{hospitalId} au
+// statut "approved" (que seul un admin peut poser).
+test("hospitalMembers : auto-guérison REFUSÉE sans affiliation approuvée au préalable (anti-élévation)", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  const user = env.authenticatedContext('no-approval-uid').firestore();
+  await assertFails(setDoc(doc(user, 'hospitalMembers', 'HOSP-A_no-approval-uid'), {
+    hospitalId: 'HOSP-A', uid: 'no-approval-uid', status: 'active',
+  }));
+});
+
 test("hospitalMembers : un utilisateur ne peut PAS écrire le document d'appartenance d'un autre (anti-usurpation)", async () => {
   const env = await getTestEnv();
   await clearAll(env);
+  await seedDoc(env, 'affiliation_requests', 'AFF_attacker-uid_HOSP-A', {
+    requesterUid: 'attacker-uid', establishmentId: 'HOSP-A', status: 'approved',
+  });
   const attacker = env.authenticatedContext('attacker-uid').firestore();
   await assertFails(setDoc(doc(attacker, 'hospitalMembers', 'HOSP-A_victim-uid'), {
     hospitalId: 'HOSP-A', uid: 'victim-uid', status: 'active',

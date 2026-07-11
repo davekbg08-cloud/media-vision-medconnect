@@ -570,6 +570,15 @@ const Auth = (() => {
     const email = _syntheticPatientEmail(id);
     const baseAcc = { uid:`PAT_${id}`, username:id, role:'patient', status:'approved', name:`${patient.firstname} ${patient.lastname}`, patient_id:id, email, created_at:new Date().toISOString() };
     const acc = await _createPatientFirebaseAuth(email, _toFirebasePassword(pin), baseAcc);
+    if (!acc.authUid) {
+      // Correctif (revue de sécurité) : sans authUid, ce compte n'a
+      // aucun secret nulle part (ni Firebase Auth réel, ni password/pin
+      // local — PARTIE B) : le sauvegarder quand même le rendrait
+      // inaccessible dès la prochaine tentative de connexion. On refuse
+      // la création plutôt que de produire un compte fantôme.
+      _err('auth-err', '❌ Création du compte impossible sans connexion internet. Réessayez plus tard.');
+      return;
+    }
     accounts.push(acc); DB.saveAccounts(accounts);
     localStorage.setItem('mc_my_patient_id', id);
     _save(acc); _launch(acc);
