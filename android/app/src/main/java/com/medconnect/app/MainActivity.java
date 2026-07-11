@@ -18,7 +18,7 @@ import java.util.Arrays;
 
 public class MainActivity extends AppCompatActivity {
 
-    private static final String MEDCONNECT_PWA_URL = "https://davekbg08-cloud.github.io/media-vision-medconnect/?apk=v2.4.0";
+    private static final String MEDCONNECT_PWA_URL = "https://davekbg08-cloud.github.io/media-vision-medconnect/?apk=v2.6.0";
 
     private WebView myWebView;
     private static final int LOCATION_PERMISSION_REQUEST_CODE = 100;
