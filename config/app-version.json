@@ -1,8 +1,19 @@
 {
-  "version": "2.4.0",
-  "build": "2026.07.09.01",
-  "buildDate": "2026-07-09",
+  "version": "2.5.0",
+  "build": "2026.07.11.01",
+  "buildDate": "2026-07-11",
   "changelog": [
+    {
+      "version": "2.5.0",
+      "date": "2026-07-11",
+      "notes": [
+        "Sécurisation : PIN patient migré vers Firebase Authentication (plus de PIN en clair)",
+        "Isolation par établissement appliquée côté serveur (Firestore Rules) pour les dossiers, consultations, ordonnances, laboratoire et admissions",
+        "Consentements patients sécurisés (seul le patient concerné peut approuver)",
+        "Ordonnances : pharmacien restreint au statut, transitions de statut validées, confirmation cloud avant message de succès",
+        "Scanner de secrets automatique (npm run security:scan) et tests de règles Firestore (npm run test:rules)"
+      ]
+    },
     {
       "version": "2.4.0",
       "date": "2026-07-09",
