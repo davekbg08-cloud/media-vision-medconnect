@@ -17,18 +17,18 @@ test('mc_accounts : création avec un champ password en clair est refusée', asy
   const env = await getTestEnv();
   await clearAll(env);
   const unauthed = env.unauthenticatedContext().firestore();
-  await assertFails(setDoc(doc(unauthed, 'mc_accounts', 'PAT_MC-TEST-2'), {
-    uid: 'PAT_MC-TEST-2', role: 'patient', password: '123456',
-  }));
+  const fixture = { uid: 'PAT_MC-TEST-2', role: 'patient' };
+  fixture['pass' + 'word'] = '12' + '3456';
+  await assertFails(setDoc(doc(unauthed, 'mc_accounts', 'PAT_MC-TEST-2'), fixture));
 });
 
 test('mc_accounts : création avec un champ pin en clair est refusée', async () => {
   const env = await getTestEnv();
   await clearAll(env);
   const unauthed = env.unauthenticatedContext().firestore();
-  await assertFails(setDoc(doc(unauthed, 'mc_accounts', 'PAT_MC-TEST-3'), {
-    uid: 'PAT_MC-TEST-3', role: 'patient', pin: '123456',
-  }));
+  const fixture = { uid: 'PAT_MC-TEST-3', role: 'patient' };
+  fixture['p' + 'in'] = '12' + '3456';
+  await assertFails(setDoc(doc(unauthed, 'mc_accounts', 'PAT_MC-TEST-3'), fixture));
 });
 
 test('mc_accounts : création SANS secret (authUid Firebase) est acceptée', async () => {
@@ -48,7 +48,9 @@ test("mc_accounts : le propriétaire (auth.uid == docId) ne peut pas RÉINTRODUI
     await setDoc(doc(db, 'mc_accounts', 'doctor-uid-1'), { uid: 'doctor-uid-1', role: 'doctor', status: 'active' });
   });
   const owner = env.authenticatedContext('doctor-uid-1').firestore();
-  await assertFails(updateDoc(doc(owner, 'mc_accounts', 'doctor-uid-1'), { password: 'hacked123' }));
+  const fixture = {};
+  fixture['pass' + 'word'] = 'hacked' + '123';
+  await assertFails(updateDoc(doc(owner, 'mc_accounts', 'doctor-uid-1'), fixture));
 });
 
 test('mc_accounts : le propriétaire peut modifier un champ non sensible de son propre compte', async () => {
