@@ -14,6 +14,31 @@ service cloud.firestore {
       return signedIn() && exists(currentUserDoc());
     }
 
+    // Correctif (chantier "durcissement sans Cloud Functions", plan
+    // Firebase Spark/gratuit) : suspendre un compte (users/{uid}.status)
+    // ne révoquait jusqu'ici AUCUNE session Firebase Auth déjà active —
+    // le SDK rafraîchit son jeton silencieusement, et les fonctions de
+    // capacité ci-dessous ne vérifiaient que le RÔLE, jamais le statut
+    // du compte agissant. Un professionnel suspendu gardait donc tous
+    // ses droits Firestore jusqu'à expiration naturelle de sa session.
+    // Une vraie révocation de session (admin.auth().revokeRefreshTokens)
+    // nécessite l'Admin SDK, donc une Cloud Function, donc le plan
+    // Blaze — hors de portée tant que le projet reste sur Spark.
+    // accountStatusOk() referme l'accès aux DONNÉES (Firestore, le
+    // seul point sensible ici) en temps quasi réel : dès que le champ
+    // status bascule, la toute prochaine requête est refusée, sans
+    // attendre l'expiration du token. Ce n'est pas l'équivalent d'une
+    // vraie révocation de session Auth, mais ça ferme concrètement
+    // l'accès aux données — nuance à ne jamais présenter comme
+    // équivalente dans la documentation. Défaut permissif si le champ
+    // status est absent (comptes existants non encore dotés d'un
+    // statut individuel — rétro-compatibilité, même logique que
+    // subscriptionStatus()/hospitalSubscriptionOk() plus bas).
+    function accountStatusOk() {
+      return !hasCurrentUserDoc() ||
+        get(currentUserDoc()).data.get('status', 'approved') in ['approved', 'active'];
+    }
+
     // NOTE — bug corrigé pendant ce chantier (découvert en écrivant les
     // tests d'émulateur, tests/firestore-rules/) : un accès direct en
     // notation pointée à un custom claim jamais explicitement posé
@@ -29,14 +54,14 @@ service cloud.firestore {
     // façon fragile. .get(key, défaut) sur le token (une Map) est la
     // façon robuste de lire un champ optionnel sans jamais lever.
     function currentRoleIs(role) {
-      return signedIn() && (
+      return signedIn() && accountStatusOk() && (
         request.auth.token.get('role', null) == role ||
         (hasCurrentUserDoc() && get(currentUserDoc()).data.role == role)
       );
     }
 
     function isAdmin() {
-      return signedIn() && (
+      return signedIn() && accountStatusOk() && (
         request.auth.token.get('admin', false) == true ||
         request.auth.token.get('role', null) == 'admin' ||
         (hasCurrentUserDoc() && get(currentUserDoc()).data.role == 'admin')
@@ -51,7 +76,7 @@ service cloud.firestore {
        Note : admin_hospital et lab n'ont pas de rôle mobile ; ils
        apparaissent ici pour le desktop. La source reste users/{uid}. */
     function hasRole(role) {
-      return signedIn() && (
+      return signedIn() && accountStatusOk() && (
         request.auth.token.get('role', null) == role ||
         (hasCurrentUserDoc() && get(currentUserDoc()).data.role == role)
       );
@@ -168,8 +193,16 @@ service cloud.firestore {
     function hospitalMemberDoc(hospitalId, uid) {
       return /databases/$(database)/documents/hospitalMembers/$(hospitalId + '_' + uid);
     }
+    // Correctif (revue Codex sur PR "durcissement sans Cloud
+    // Functions") : accountStatusOk() n'était injecté que dans
+    // hasRole()/currentRoleIs()/isAdmin() — pas ici. Or isHospitalMember()
+    // est le chemin d'accès de la quasi-totalité des collections
+    // médicales (belongsToSameEstablishment) : un compte suspendu
+    // (users/{uid}.status) dont le document hospitalMembers restait
+    // "active" gardait donc tout son accès établissement, vidant la
+    // protection de suspension de l'essentiel de sa substance.
     function isHospitalMember(hospitalId) {
-      return signedIn() && hospitalId != null &&
+      return signedIn() && accountStatusOk() && hospitalId != null &&
         exists(hospitalMemberDoc(hospitalId, request.auth.uid)) &&
         get(hospitalMemberDoc(hospitalId, request.auth.uid)).data.status == 'active';
     }
@@ -528,10 +561,22 @@ service cloud.firestore {
         (request.resource.data.get('authUid', null) == null ||
          (signedIn() && request.resource.data.get('authUid', null) == request.auth.uid)) &&
         hasNoSecretFields(request.resource.data);
-      allow update: if (isAdmin() ||
-        (signedIn() && request.auth.uid == docId) ||
-        (signedIn() && resource.data.get('authUid', null) == request.auth.uid)) &&
-        hasNoSecretFields(request.resource.data);
+      // Correctif (chantier "durcissement sans Cloud Functions") :
+      // contrairement à users/doctors/nurses/pharmacies
+      // (safeSelfUserUpdate/status figé sauf isAdmin()), cette règle
+      // n'imposait PAS l'immuabilité du statut — un professionnel dont
+      // les écritures secondaires (users/{uid}, collection de rôle)
+      // échouent (hors-ligne, rôle lab/reception sans collection
+      // dédiée) pouvait, dans ce cas précis, forger lui-même
+      // mc_accounts.status = 'approved'. Même contrainte que les
+      // autres collections de compte : status figé sauf isAdmin().
+      allow update: if hasNoSecretFields(request.resource.data) && (
+        isAdmin() ||
+        ((signedIn() && request.auth.uid == docId) &&
+         request.resource.data.get('status', null) == resource.data.get('status', null)) ||
+        ((signedIn() && resource.data.get('authUid', null) == request.auth.uid) &&
+         request.resource.data.get('status', null) == resource.data.get('status', null))
+      );
       allow delete: if isAdmin();
     }
 
@@ -826,7 +871,22 @@ service cloud.firestore {
       // currentRoleIs('nurse')" (accès à tout le journal, tous
       // établissements) par belongsToSameEstablishment.
       allow read: if isAdmin() || belongsToSameEstablishment(resource.data);
-      allow create: if signedIn();
+      // Correctif (chantier "durcissement sans Cloud Functions") :
+      // "if signedIn()" seul ne contraignait AUCUN champ — n'importe
+      // quel utilisateur connecté pouvait créer une entrée d'audit au
+      // nom d'un tiers (userId arbitraire). Un vrai journal
+      // infalsifiable ET non-omissible nécessite un trigger serveur
+      // (Cloud Function), donc le plan Blaze — hors de portée sur
+      // Spark. Mitigation atteignable ici : quand le champ userId est
+      // posé, il doit correspondre à l'auteur réel de la requête (ferme
+      // la forge d'identité) ; absent, la création reste tolérée pour
+      // ne pas casser les appelants existants qui ne le posent pas
+      // encore. Ne ferme PAS l'omission volontaire d'un log (impossible
+      // à forcer sans code serveur) — limite à garder honnête dans le
+      // rapport.
+      allow create: if signedIn() &&
+        (request.resource.data.get('userId', null) == null ||
+         request.resource.data.get('userId', null) == request.auth.uid);
       allow update, delete: if false;
     }
 
@@ -885,8 +945,18 @@ service cloud.firestore {
       // Seuls le statut/timestamps de révocation peuvent changer —
       // les sections partagées (allowedSections) et l'origine du
       // partage sont figées après création.
+      // Correctif (chantier "durcissement sans Cloud Functions") :
+      // "signedIn()" seul laissait N'IMPORTE QUEL utilisateur connecté
+      // (un tiers sans aucun lien avec ce partage) faire progresser son
+      // statut — restreint désormais exactement aux mêmes parties
+      // légitimes que la règle "read" ci-dessus (l'hôpital source, le
+      // destinataire qui approuve via js/hospital.js
+      // approveIncomingShare, ou le patient concerné), jamais un tiers
+      // quelconque.
       allow update: if isAdmin() ||
-        (signedIn() &&
+        ((isHospitalMember(resource.data.fromHospitalId) ||
+          isHospitalMember(resource.data.toHospitalId) ||
+          isConcernedPatient(resource.data.patientId)) &&
          request.resource.data.allowedSections == resource.data.allowedSections &&
          request.resource.data.fromHospitalId == resource.data.fromHospitalId &&
          request.resource.data.patientId == resource.data.patientId);

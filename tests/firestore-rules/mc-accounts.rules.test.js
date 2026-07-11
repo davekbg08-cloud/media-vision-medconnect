@@ -128,3 +128,21 @@ test("mc_accounts : un patient migré (authUid Firebase ≠ docId PAT_xxx) peut 
   const patient = env.authenticatedContext('patient-real-firebase-uid').firestore();
   await assertSucceeds(updateDoc(doc(patient, 'mc_accounts', 'PAT_MC-TEST-7'), { phone: '+243800000001' }));
 });
+
+// Correctif (chantier "durcissement sans Cloud Functions") :
+// contrairement à users/doctors/nurses/pharmacies (status figé sauf
+// isAdmin()), mc_accounts n'imposait PAS cette contrainte — un
+// professionnel pouvait forger lui-même son propre passage à
+// status:'approved'/'active'. Même immuabilité que les autres
+// collections de compte désormais.
+test("mc_accounts : le propriétaire ne peut PAS s'auto-approuver en changeant son propre statut", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, 'mc_accounts', 'lab-uid-1'), { uid: 'lab-uid-1', role: 'lab', status: 'pending' });
+  });
+  const owner = env.authenticatedContext('lab-uid-1').firestore();
+  await assertFails(updateDoc(doc(owner, 'mc_accounts', 'lab-uid-1'), { status: 'approved' }));
+  await assertSucceeds(updateDoc(doc(owner, 'mc_accounts', 'lab-uid-1'), { phone: '+243800000002' }));
+});

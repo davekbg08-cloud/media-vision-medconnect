@@ -52,7 +52,7 @@ const MedicalRecordSharing = (() => {
 
     saveLocal(request);
     pushCloud(request);
-    audit('share_request_created', request);
+    audit('share_request_created', request, requestedByUid);
 
     return request;
   }
@@ -72,7 +72,7 @@ const MedicalRecordSharing = (() => {
 
     storeShares(shares);
     pushCloud(shares[index]);
-    audit('share_request_approved', shares[index]);
+    audit('share_request_approved', shares[index], approvedByUid);
 
     return shares[index];
   }
@@ -92,7 +92,7 @@ const MedicalRecordSharing = (() => {
 
     storeShares(shares);
     pushCloud(shares[index]);
-    audit('share_revoked', shares[index]);
+    audit('share_revoked', shares[index], revokedByUid);
 
     return shares[index];
   }
@@ -160,12 +160,16 @@ const MedicalRecordSharing = (() => {
     return true;
   }
 
-  function audit(action, share) {
+  function audit(action, share, actingUid) {
     try {
       const entry = {
         auditId: `AUDIT_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         hospitalId: share.fromHospitalId || share.toHospitalId || '',
         patientId: share.patientId,
+        // userId : requis par firestore.rules (auditLogs.create) pour
+        // empêcher qu'une entrée soit forgée au nom d'un tiers — voir
+        // chantier "Durcissement sans Cloud Functions" (plan Spark).
+        userId: actingUid || null,
         action,
         targetType: 'medical_record_share',
         targetId: share.shareId,

@@ -83,3 +83,30 @@ test("medical_record_shares : hôpital source et destinataire autorisés, tiers 
   await assertSucceeds(getDoc(doc(dst, 'medical_record_shares', 'S1')));
   await assertFails(getDoc(doc(tiers, 'medical_record_shares', 'S1')));
 });
+
+// Correctif (chantier "durcissement sans Cloud Functions") : avant ce
+// correctif, "signedIn()" seul suffisait à faire progresser le statut
+// d'un partage — un utilisateur connecté SANS AUCUN lien avec ce
+// partage (ni hôpital source/destinataire, ni patient concerné)
+// pouvait l'approuver/le modifier à la place de l'hôpital destinataire
+// légitime (js/hospital.js approveIncomingShare).
+test("medical_record_shares : l'hôpital DESTINATAIRE peut approuver (statut), un tiers sans lien est refusé", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await seedMember(env, 'HOSP-SRC3', 'staff-src-4');
+  await seedMember(env, 'HOSP-DST3', 'staff-dst-4');
+  await seedMember(env, 'HOSP-TIERS3', 'staff-tiers-3');
+  await seedShare(env, 'S2', {
+    fromHospitalId: 'HOSP-SRC3', toHospitalId: 'HOSP-DST3', patientId: 'MC-S2',
+    allowedSections: ['summary'], status: 'pending_patient_consent', approvedByUid: null,
+  });
+  const dst = env.authenticatedContext('staff-dst-4').firestore();
+  const tiers = env.authenticatedContext('staff-tiers-3').firestore();
+  const { updateDoc } = require('firebase/firestore');
+  await assertFails(updateDoc(doc(tiers, 'medical_record_shares', 'S2'), {
+    status: 'active', approvedByUid: 'staff-tiers-3',
+  }));
+  await assertSucceeds(updateDoc(doc(dst, 'medical_record_shares', 'S2'), {
+    status: 'active', approvedByUid: 'staff-dst-4',
+  }));
+});
