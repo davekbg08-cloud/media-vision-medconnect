@@ -365,6 +365,23 @@ const HospitalPortal = (() => {
       ...completionFields,
     });
     App.closeModal(); App.toast(`✅ ${t('msg_saved')} — ${p.id}`); App.navigateTo('patients');
+    showFirstAccessCodeModal(p);
+  }
+
+  // Affiché une seule fois à la création de la fiche : le code n'est
+  // jamais réaffiché ensuite (non stocké en clair côté interface après
+  // cet instant, seulement dans mc_patients côté serveur pour
+  // vérification). À communiquer au patient (papier, oralement) — il
+  // le saisira avec son PIN au premier accès (voir js/auth.js
+  // _createPatientPin). Ferme la préemption de compte par un tiers
+  // connaissant seulement le numéro de fiche (voir rapport de sécurité).
+  function showFirstAccessCodeModal(p) {
+    App.openModal("🔑 Code d'accès patient", `
+      <p>Communiquez ce code au patient (ou à la personne qui l'accompagne) — il devra le saisir avec son PIN lors de son premier accès à l'application. Il ne sera plus jamais réaffiché.</p>
+      <div class="id-badge-large" style="font-size:1.6rem;letter-spacing:3px;text-align:center;margin:1rem 0">${esc(p.firstAccessCode || '')}</div>
+      <p class="muted">Fiche : ${esc(p.id)}</p>
+      <button class="btn-p" onclick="App.closeModal()">J'ai noté le code</button>
+    `);
   }
 
   function deletePatient(id) {

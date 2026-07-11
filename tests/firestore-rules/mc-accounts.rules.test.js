@@ -146,3 +146,75 @@ test("mc_accounts : le propriétaire ne peut PAS s'auto-approuver en changeant s
   await assertFails(updateDoc(doc(owner, 'mc_accounts', 'lab-uid-1'), { status: 'approved' }));
   await assertSucceeds(updateDoc(doc(owner, 'mc_accounts', 'lab-uid-1'), { phone: '+243800000002' }));
 });
+
+/* ── Correctif (chantier "code d'accès hôpital") : patientFirstAccessOk() ──
+   Avant ce correctif, connaître le numéro de fiche MC-xxx suffisait pour
+   préempter mc_accounts/PAT_{id} avec sa propre identité Firebase
+   (isConcernedPatient() satisfait à la place du vrai patient). Le premier
+   accès patient doit désormais fournir le code communiqué hors ligne par
+   l'hôpital à la création de la fiche (mc_patients/{id}.firstAccessCode). */
+
+test("mc_accounts : création d'un compte patient avec le bon code d'accès est acceptée", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, 'mc_patients', 'MC-TEST-CODE-1'), { id: 'MC-TEST-CODE-1', firstAccessCode: 'ABCD23' });
+  });
+  const patient = env.authenticatedContext('patient-code-ok').firestore();
+  await assertSucceeds(setDoc(doc(patient, 'mc_accounts', 'PAT_MC-TEST-CODE-1'), {
+    uid: 'PAT_MC-TEST-CODE-1', role: 'patient', authUid: 'patient-code-ok', status: 'approved',
+    patient_id: 'MC-TEST-CODE-1', firstAccessCode: 'ABCD23',
+  }));
+});
+
+test("mc_accounts : création d'un compte patient avec un code d'accès erroné est refusée (anti-préemption)", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, 'mc_patients', 'MC-TEST-CODE-2'), { id: 'MC-TEST-CODE-2', firstAccessCode: 'ABCD23' });
+  });
+  const attacker = env.authenticatedContext('attacker-code').firestore();
+  await assertFails(setDoc(doc(attacker, 'mc_accounts', 'PAT_MC-TEST-CODE-2'), {
+    uid: 'PAT_MC-TEST-CODE-2', role: 'patient', authUid: 'attacker-code', status: 'approved',
+    patient_id: 'MC-TEST-CODE-2', firstAccessCode: 'WRONG1',
+  }));
+});
+
+test("mc_accounts : création d'un compte patient SANS code alors qu'un code est requis est refusée", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, 'mc_patients', 'MC-TEST-CODE-3'), { id: 'MC-TEST-CODE-3', firstAccessCode: 'ABCD23' });
+  });
+  const attacker = env.authenticatedContext('attacker-code-2').firestore();
+  await assertFails(setDoc(doc(attacker, 'mc_accounts', 'PAT_MC-TEST-CODE-3'), {
+    uid: 'PAT_MC-TEST-CODE-3', role: 'patient', authUid: 'attacker-code-2', status: 'approved',
+    patient_id: 'MC-TEST-CODE-3',
+  }));
+});
+
+test("mc_accounts : création d'un compte patient pour une fiche héritée SANS firstAccessCode reste acceptée (rétro-compatibilité)", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, 'mc_patients', 'MC-TEST-CODE-4'), { id: 'MC-TEST-CODE-4' });
+  });
+  const patient = env.authenticatedContext('patient-legacy').firestore();
+  await assertSucceeds(setDoc(doc(patient, 'mc_accounts', 'PAT_MC-TEST-CODE-4'), {
+    uid: 'PAT_MC-TEST-CODE-4', role: 'patient', authUid: 'patient-legacy', status: 'approved',
+    patient_id: 'MC-TEST-CODE-4',
+  }));
+});
+
+test("mc_accounts : la création d'un compte professionnel (sans patient_id) n'est pas affectée par le code d'accès", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  const unauthed = env.unauthenticatedContext().firestore();
+  await assertSucceeds(setDoc(doc(unauthed, 'mc_accounts', 'DOC_MC-TEST-CODE-5'), {
+    uid: 'DOC_MC-TEST-CODE-5', role: 'doctor', status: 'pending',
+  }));
+});

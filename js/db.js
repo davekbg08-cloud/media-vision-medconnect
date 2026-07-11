@@ -85,6 +85,21 @@ const DB = (() => {
     return `MC-${yr}-${cc}-${rnd}`;
   }
 
+  /* ── CODE D'ACCÈS PATIENT (premier accès) ──────────
+     Donné par l'hôpital au patient à la création de sa fiche, saisi
+     avec le PIN au premier accès (js/auth.js _createPatientPin) —
+     vérifié côté serveur (firestore.rules) contre
+     mc_patients/{id}.firstAccessCode. Empêche un tiers connaissant
+     seulement le numéro de fiche de préempter le compte du patient
+     avant lui (voir rapport de sécurité). Alphabet sans caractères
+     ambigus à l'oral/à l'écrit (pas de O/0, I/1/L). */
+  function generateFirstAccessCode() {
+    const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+    let code = '';
+    for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+    return code;
+  }
+
   /* ── SYNC FIREBASE ───────────────────────────────────
      Écrit dans localStorage ET dans Firestore si dispo.
      Lit toujours depuis localStorage (cache local).
@@ -422,7 +437,7 @@ const DB = (() => {
 
   function addPatient(data) {
     const list = getPatients();
-    const p = { ...data, id: generatePatientId(data.country_code), created_at: new Date().toISOString() };
+    const p = { ...data, id: generatePatientId(data.country_code), firstAccessCode: generateFirstAccessCode(), created_at: new Date().toISOString() };
     list.push(p); store('mc_patients', list);
     _push('mc_patients', p.id, p);
     _push('patients', p.id, p);

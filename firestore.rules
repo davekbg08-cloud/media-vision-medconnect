@@ -290,6 +290,31 @@ service cloud.firestore {
       return signedIn() && patientAccountAuthUid(patientId) == request.auth.uid;
     }
 
+    /* ── Code d'accès hôpital (chantier séparé, suite à la revue de
+       sécurité de la PR #1) ──
+       Avant ce correctif, n'importe qui connaissant le numéro de fiche
+       d'un patient pouvait créer mc_accounts/PAT_{id} avec SA PROPRE
+       identité Firebase avant que le vrai patient ne s'inscrive,
+       satisfaisant ensuite isConcernedPatient() à sa place (accès aux
+       décisions de consentement/partage en tant que ce patient, et
+       verrouillage définitif du vrai patient hors de son propre
+       compte — mc_accounts.create refuse un doc déjà existant).
+       mc_patients/{id}.firstAccessCode est généré par le personnel à
+       la création de la fiche (js/db.js addPatient) et communiqué au
+       patient hors ligne (papier, oralement) — jamais exposé par une
+       règle de lecture. Le premier accès doit désormais fournir ce
+       code, comparé ici au moment de la création du compte.
+       Rétro-compatible : les fiches créées avant ce chantier n'ont pas
+       ce champ, donc aucun code n'est exigé pour elles (défaut
+       permissif, même logique que accountStatusOk()/
+       hospitalSubscriptionOk()). */
+    function patientFirstAccessOk(patientMcId, submittedCode) {
+      return patientMcId == null ||
+        !exists(/databases/$(database)/documents/mc_patients/$(patientMcId)) ||
+        get(/databases/$(database)/documents/mc_patients/$(patientMcId)).data.get('firstAccessCode', null) == null ||
+        get(/databases/$(database)/documents/mc_patients/$(patientMcId)).data.get('firstAccessCode', null) == submittedCode;
+    }
+
     function canReadMedicalData(data) {
       return isAdmin() ||
         ownsPatientData(data) ||
@@ -548,18 +573,19 @@ service cloud.firestore {
     // dégradé (Firebase Auth indisponible, cf. js/auth.js
     // _createFirebaseUser) écrit encore mc_accounts SANS authUid, et ce
     // repli existant ne doit pas casser.
-    // Limite qui reste ouverte, documentée dans le rapport de PR : rien
-    // ne garantit encore que le compte connecté qui crée ce document en
-    // premier est réellement le patient concerné — la préemption avec
-    // sa PROPRE identité Firebase, elle, reste possible. Une
-    // vérification de possession du dossier (OTP hôpital, code fourni
-    // au patient, etc.) serait nécessaire pour la fermer complètement ;
-    // hors périmètre des règles Firestore seules.
+    // Correctif (chantier "code d'accès hôpital") : la limite ci-dessus
+    // (préemption d'une fiche patient avec sa PROPRE identité Firebase)
+    // est désormais fermée pour les comptes patient par
+    // patientFirstAccessOk() — la création exige le code communiqué
+    // hors ligne par l'hôpital à la création de la fiche (voir
+    // js/db.js addPatient / js/hospital.js showFirstAccessCodeModal),
+    // pas seulement la connaissance du numéro MC-xxx.
     match /mc_accounts/{docId} {
       allow read: if true;
       allow create: if !exists(/databases/$(database)/documents/mc_accounts/$(docId)) &&
         (request.resource.data.get('authUid', null) == null ||
          (signedIn() && request.resource.data.get('authUid', null) == request.auth.uid)) &&
+        patientFirstAccessOk(request.resource.data.get('patient_id', null), request.resource.data.get('firstAccessCode', null)) &&
         hasNoSecretFields(request.resource.data);
       // Correctif (chantier "durcissement sans Cloud Functions") :
       // contrairement à users/doctors/nurses/pharmacies
