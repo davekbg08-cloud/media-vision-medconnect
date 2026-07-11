@@ -14,17 +14,31 @@ service cloud.firestore {
       return signedIn() && exists(currentUserDoc());
     }
 
+    // NOTE — bug corrigé pendant ce chantier (découvert en écrivant les
+    // tests d'émulateur, tests/firestore-rules/) : un accès direct en
+    // notation pointée à un custom claim jamais explicitement posé
+    // (request.auth.token.role / .admin) lève une erreur d'évaluation
+    // ("Property X is undefined") plutôt que de retourner null, quand
+    // le token ne porte STRICTEMENT AUCUNE valeur pour cette clé — ce
+    // qui n'arrive jamais avec un vrai jeton Firebase Auth de
+    // production (toujours "complet"), mais arrive bel et bien avec un
+    // compte qui n'a reçu aucun custom claim (le cas courant : la
+    // plupart des comptes n'ont pas de claim 'role', le rôle vit dans
+    // users/{uid}). Le déni en résultait presque toujours (Firestore
+    // refuse par défaut sur exception), mais silencieusement et de
+    // façon fragile. .get(key, défaut) sur le token (une Map) est la
+    // façon robuste de lire un champ optionnel sans jamais lever.
     function currentRoleIs(role) {
       return signedIn() && (
-        request.auth.token.role == role ||
+        request.auth.token.get('role', null) == role ||
         (hasCurrentUserDoc() && get(currentUserDoc()).data.role == role)
       );
     }
 
     function isAdmin() {
       return signedIn() && (
-        request.auth.token.admin == true ||
-        request.auth.token.role == 'admin' ||
+        request.auth.token.get('admin', false) == true ||
+        request.auth.token.get('role', null) == 'admin' ||
         (hasCurrentUserDoc() && get(currentUserDoc()).data.role == 'admin')
       );
     }
@@ -38,7 +52,7 @@ service cloud.firestore {
        apparaissent ici pour le desktop. La source reste users/{uid}. */
     function hasRole(role) {
       return signedIn() && (
-        request.auth.token.role == role ||
+        request.auth.token.get('role', null) == role ||
         (hasCurrentUserDoc() && get(currentUserDoc()).data.role == role)
       );
     }
@@ -123,10 +137,44 @@ service cloud.firestore {
     // Le code applicatif écrit establishmentId (parfois hospital_id
     // en repli historique) — jamais un champ "hospitalId" littéral.
     // Ce helper évite de répéter ce repli dans chaque règle.
+    // NOTE — bug réel corrigé pendant ce chantier (découvert en testant
+    // hospitalMembers avec l'émulateur) : accès direct en notation
+    // pointée à un champ que le document ne porte PAS du tout (ex :
+    // hospitalMembers écrit hospitalId mais pas establishmentId) lève
+    // une erreur d'évaluation ("Property X is undefined") au lieu de
+    // retourner null — même famille que le bug déjà corrigé sur
+    // request.auth.token. .get(clé, défaut) sur une map lit un champ
+    // optionnel sans jamais lever.
     function resolveHospitalId(data) {
-      return data.establishmentId != null ? data.establishmentId
-        : (data.hospital_id != null ? data.hospital_id
-        : (data.hospitalId != null ? data.hospitalId : data.fromHospitalId));
+      return data.get('establishmentId', null) != null ? data.get('establishmentId', null)
+        : (data.get('hospital_id', null) != null ? data.get('hospital_id', null)
+        : (data.get('hospitalId', null) != null ? data.get('hospitalId', null) : data.get('fromHospitalId', null)));
+    }
+
+    /* ── PARTIE E — isolation par établissement (serveur) ──
+       hospitalMembers/{hospitalId}_{uid} est un document PLAT écrit par
+       l'application (js/hospitals_registry.js) en miroir de
+       establishments.staff[] — une règle Firestore ne peut pas tester
+       efficacement l'appartenance à un tableau d'objets, d'où ce doc
+       à clé déterministe. isHospitalMember/belongsToSameEstablishment
+       s'ajoutent en OR aux vérifications existantes (auteur direct via
+       doctorCanRead/nurseCanRead/ownsPatientData) — jamais en
+       remplacement : un médecin auteur direct garde toujours accès même
+       sans document hospitalMembers (compte créé avant ce chantier).
+       IMPORTANT (clarification client) : ce mécanisme ne dépend JAMAIS
+       de mc_consents — l'accès de l'établissement CRÉATEUR de la fiche
+       ne requiert aucun consentement patient ; le consentement ne sert
+       qu'aux accès EXTERNES (voir mc_consents plus bas). */
+    function hospitalMemberDoc(hospitalId, uid) {
+      return /databases/$(database)/documents/hospitalMembers/$(hospitalId + '_' + uid);
+    }
+    function isHospitalMember(hospitalId) {
+      return signedIn() && hospitalId != null &&
+        exists(hospitalMemberDoc(hospitalId, request.auth.uid)) &&
+        get(hospitalMemberDoc(hospitalId, request.auth.uid)).data.status == 'active';
+    }
+    function belongsToSameEstablishment(data) {
+      return isHospitalMember(resolveHospitalId(data));
     }
 
     function ownsUid(uid) {
@@ -137,41 +185,76 @@ service cloud.firestore {
       return signedIn() && listValue is list && request.auth.uid in listValue;
     }
 
+    // NOTE — même correctif que resolveHospitalId/currentRoleIs :
+    // .get(clé, défaut) plutôt que l'accès pointé direct, qui lève une
+    // erreur d'évaluation quand le document ne porte pas du tout ce
+    // champ (constaté avec l'émulateur sur plusieurs collections où
+    // tous les documents n'ont pas tous les mêmes champs optionnels).
     function ownsPatientData(data) {
       return signedIn() && (
-        data.uid == request.auth.uid ||
-        data.patientUid == request.auth.uid ||
-        data.patient_uid == request.auth.uid ||
-        data.ownerUid == request.auth.uid
+        data.get('uid', null) == request.auth.uid ||
+        data.get('patientUid', null) == request.auth.uid ||
+        data.get('patient_uid', null) == request.auth.uid ||
+        data.get('ownerUid', null) == request.auth.uid ||
+        // PARTIE B — patient authentifié via Firebase Auth (PIN migré,
+        // voir js/auth.js _createPatientFirebaseAuth/_signInPatientFirebaseAuth).
+        // Le compte garde un uid stable 'PAT_'+id (adressage mc_accounts) ;
+        // patientAuthUid porte l'uid Firebase réel. Clause tolérante :
+        // aucun code client n'écrit encore ce champ sur la fiche patient
+        // elle-même dans cette PR (nécessiterait un mécanisme de
+        // revendication dédié, hors scope) — sans effet tant qu'absent,
+        // prête pour une future écriture contrôlée.
+        data.get('patientAuthUid', null) == request.auth.uid
       );
     }
 
     function doctorCanRead(data) {
       return currentRoleIs('doctor') && (
-        data.created_by == request.auth.uid ||
-        data.doctorUid == request.auth.uid ||
-        data.doctor_uid == request.auth.uid ||
-        uidIn(data.doctorUids) ||
-        uidIn(data.authorizedDoctorUids)
+        data.get('created_by', null) == request.auth.uid ||
+        data.get('doctorUid', null) == request.auth.uid ||
+        data.get('doctor_uid', null) == request.auth.uid ||
+        uidIn(data.get('doctorUids', [])) ||
+        uidIn(data.get('authorizedDoctorUids', []))
       );
     }
 
     function nurseCanRead(data) {
       return currentRoleIs('nurse') && (
-        data.nurseUid == request.auth.uid ||
-        data.nurse_uid == request.auth.uid ||
-        uidIn(data.nurseUids) ||
-        uidIn(data.authorizedNurseUids)
+        data.get('nurseUid', null) == request.auth.uid ||
+        data.get('nurse_uid', null) == request.auth.uid ||
+        uidIn(data.get('nurseUids', [])) ||
+        uidIn(data.get('authorizedNurseUids', []))
       );
     }
 
     function pharmacyCanReadPrescription(data) {
       return currentRoleIs('pharmacist') && (
-        data.pharmacyUid == request.auth.uid ||
-        data.pharmacy_uid == request.auth.uid ||
-        data.receivedByPharmacyUid == request.auth.uid ||
-        uidIn(data.pharmacyUids)
+        data.get('pharmacyUid', null) == request.auth.uid ||
+        data.get('pharmacy_uid', null) == request.auth.uid ||
+        data.get('receivedByPharmacyUid', null) == request.auth.uid ||
+        uidIn(data.get('pharmacyUids', []))
       );
+    }
+
+    /* ── PARTIE D — consentements (mc_consents) ──
+       js/access_control.js identifie un patient par patient_id (le
+       numéro de fiche, ex "MC-2026-..."), pas par un uid Firebase —
+       impossible à comparer directement à request.auth.uid. On résout
+       donc l'uid Firebase réel du patient via mc_accounts/PAT_{patient_id}
+       .authUid, posé de façon fiable à la création du compte (règle
+       "create" de mc_accounts, non restreinte par auth — voir plus bas)
+       une fois le PIN migré vers Firebase Authentication (PARTIE B).
+       Limite assumée : un compte patient hérité pas encore migré
+       (authUid absent) ne peut pas encore être vérifié ainsi côté
+       règles — documenté dans le rapport final. */
+    function patientAccountAuthUid(patientId) {
+      return patientId != null &&
+        exists(/databases/$(database)/documents/mc_accounts/$('PAT_' + patientId))
+        ? get(/databases/$(database)/documents/mc_accounts/$('PAT_' + patientId)).data.authUid
+        : null;
+    }
+    function isConcernedPatient(patientId) {
+      return signedIn() && patientAccountAuthUid(patientId) == request.auth.uid;
     }
 
     function canReadMedicalData(data) {
@@ -189,8 +272,12 @@ service cloud.firestore {
       return role in ['patient', 'doctor', 'nurse', 'pharmacist', 'hospital', 'lab', 'reception'];
     }
 
+    // PARTIE B — 'pin' ajouté : garde-fou contre toute réintroduction
+    // future d'un PIN patient en clair (ou d'un hash local non salé/
+    // faible) dans un document — Firebase Auth est désormais la seule
+    // source de vérité pour le PIN (voir js/auth.js).
     function hasNoSecretFields(data) {
-      return !data.keys().hasAny(['admin', 'password', 'passwordHash']);
+      return !data.keys().hasAny(['admin', 'password', 'passwordHash', 'pin']);
     }
 
     function visiblePharmacyProfile(data) {
@@ -330,8 +417,16 @@ service cloud.firestore {
       // même abonnement expiré/suspendu (une ordonnance déjà envoyée
       // doit pouvoir être honorée) ; le médecin auteur reste soumis
       // à la même règle desktop/mobile que la création.
+      // PARTIE H — le pharmacien ne peut modifier QUE le statut et les
+      // métadonnées de traitement, jamais le contenu médical
+      // (patient_id, doctor_uid, diagnosis, medicines, establishmentId,
+      // pharmacyUid, date) : sans ça, un pharmacien pouvait réécrire
+      // n'importe quel champ, y compris falsifier l'auteur ou le
+      // diagnostic d'une ordonnance déjà envoyée.
       allow update: if isAdmin() ||
-        pharmacyCanReadPrescription(resource.data) ||
+        (pharmacyCanReadPrescription(resource.data) &&
+         request.resource.data.diff(resource.data).affectedKeys()
+           .hasOnly(['status', 'updatedAt', 'updatedByUid', 'updatedByRole', 'cancelReason'])) ||
         (doctorCanRead(resource.data) &&
          hospitalCanWriteFromDevice(resolveHospitalId(resource.data), request.resource.data.sourceDevice));
       allow delete: if isAdmin();
@@ -374,12 +469,16 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin();
     }
 
-    /* PARTIE G — trace/audit des documents médicaux par établissement.
-       Lecture : admin, médecin auteur, ou tout utilisateur signé
-       (cas réel : équipe de l'établissement) — l'écriture reste
-       réservée à l'auteur ou à l'admin, jamais modifiable après coup. */
+    /* PARTIE G/E — trace/audit des documents médicaux par établissement.
+       Lecture : admin, auteur, ou membre actif du même établissement
+       (PARTIE E — remplace l'ancien signedIn() trop large, qui donnait
+       accès à tout utilisateur connecté sans lien avec l'hôpital).
+       L'écriture reste réservée à l'auteur ou à l'admin, jamais
+       modifiable après coup. */
     match /establishment_documents/{documentId} {
-      allow read: if isAdmin() || signedIn();
+      allow read: if isAdmin() ||
+        (signedIn() && resource.data.doctorUid == request.auth.uid) ||
+        belongsToSameEstablishment(resource.data);
       allow create: if isAdmin() ||
         (signedIn() && request.resource.data.doctorUid == request.auth.uid);
       allow update, delete: if isAdmin();
@@ -395,13 +494,45 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    /* PARTIE B/C — mc_accounts reste en lecture publique (nécessaire
+       au lookup pré-authentification par numéro pro/patient : fermer
+       ça casserait la connexion de tout le personnel — voir
+       docs/FIREBASE_KEY_SECURITY.md). Le vrai correctif porte sur ce
+       qui PEUT y être écrit : hasNoSecretFields interdit désormais
+       tout champ password/pin/passwordHash, y compris ici (absent
+       jusqu'ici) — le PIN patient est géré exclusivement par Firebase
+       Authentication (js/auth.js), jamais stocké en clair ni haché
+       localement dans ce document public. */
+    // Correctif (revue de sécurité) : rien n'empêchait de poser un
+    // authUid arbitraire (potentiellement celui d'un tiers) sur un
+    // nouveau document — un attaquant connaissant un numéro de fiche
+    // patient pouvait ainsi préempter mc_accounts/PAT_{id} avec SON
+    // PROPRE authUid avant que le vrai patient ne crée son compte, et
+    // satisfaire ensuite isConcernedPatient() à sa place. On exige
+    // désormais que authUid, quand il est posé, corresponde à
+    // l'utilisateur réellement connecté qui écrit — pas de contrainte
+    // signedIn() globale ici : l'inscription professionnelle en mode
+    // dégradé (Firebase Auth indisponible, cf. js/auth.js
+    // _createFirebaseUser) écrit encore mc_accounts SANS authUid, et ce
+    // repli existant ne doit pas casser.
+    // Limite qui reste ouverte, documentée dans le rapport de PR : rien
+    // ne garantit encore que le compte connecté qui crée ce document en
+    // premier est réellement le patient concerné — la préemption avec
+    // sa PROPRE identité Firebase, elle, reste possible. Une
+    // vérification de possession du dossier (OTP hôpital, code fourni
+    // au patient, etc.) serait nécessaire pour la fermer complètement ;
+    // hors périmètre des règles Firestore seules.
     match /mc_accounts/{docId} {
-      // Lecture ouverte : indispensable pour retrouver son compte
-      // (numéro pro / ID patient) AVANT toute authentification.
-      // Ne contient aucune donnée médicale — uniquement profil/accès.
       allow read: if true;
-      allow create: if !exists(/databases/$(database)/documents/mc_accounts/$(docId));
-      allow update, delete: if isAdmin() || (signedIn() && request.auth.uid == docId);
+      allow create: if !exists(/databases/$(database)/documents/mc_accounts/$(docId)) &&
+        (request.resource.data.get('authUid', null) == null ||
+         (signedIn() && request.resource.data.get('authUid', null) == request.auth.uid)) &&
+        hasNoSecretFields(request.resource.data);
+      allow update: if (isAdmin() ||
+        (signedIn() && request.auth.uid == docId) ||
+        (signedIn() && resource.data.get('authUid', null) == request.auth.uid)) &&
+        hasNoSecretFields(request.resource.data);
+      allow delete: if isAdmin();
     }
 
     match /mc_verified_doctors/{docId} {
@@ -420,10 +551,13 @@ service cloud.firestore {
     }
 
     match /mc_consultations/{docId} {
-      // Lecture alignée sur l'écriture (déjà role-wide ci-dessous) :
-      // sans ça le listener global mc_consultations était rejeté en bloc.
-      allow read: if currentRoleIs('doctor') || currentRoleIs('nurse') ||
-        canReadMedicalData(resource.data);
+      // PARTIE E : l'ancien "currentRoleIs('doctor') || currentRoleIs('nurse')"
+      // sans filtre établissement laissait n'importe quel médecin/
+      // infirmier lire TOUTE la collection, y compris d'autres hôpitaux
+      // — remplacé par belongsToSameEstablishment (aucun consentement
+      // requis pour l'établissement créateur, clarification client).
+      allow read: if canReadMedicalData(resource.data) ||
+        belongsToSameEstablishment(resource.data);
       // Créer/valider une consultation = acte médical : médecin
       // uniquement (l'infirmier peut lire, pas créer). Verrouillage
       // serveur du contrôle de capacité côté client.
@@ -450,32 +584,67 @@ service cloud.firestore {
       allow write: if isAdmin() || currentRoleIs('pharmacist');
     }
 
+    /* PARTIE D — un utilisateur connecté quelconque pouvait auparavant
+       créer/lire/modifier N'IMPORTE QUEL consentement (allow read/write:
+       if signedIn()). Resserré : seul le médecin demandeur peut créer
+       SA demande (statut initial 'pending' imposé) ; lecture réservée
+       au patient concerné, au médecin demandeur, ou à l'admin ; seul
+       le patient concerné peut approuver/refuser/révoquer (champs
+       limités à status/decided_at/expires_at/updated_at) ; le médecin
+       demandeur peut uniquement révoquer sa propre demande, jamais
+       l'approuver lui-même. RAPPEL (clarification client) : ce
+       mécanisme ne sert JAMAIS à l'accès de l'établissement créateur
+       de la fiche (voir belongsToSameEstablishment) — uniquement aux
+       accès externes explicitement demandés par un médecin. */
     match /mc_consents/{docId} {
-      allow read: if signedIn();
-      allow write: if signedIn();
+      allow read: if isAdmin() ||
+        isConcernedPatient(resource.data.patient_id) ||
+        (signedIn() && resource.data.doctor_id == request.auth.uid);
+      allow create: if isAdmin() ||
+        (signedIn() &&
+         request.resource.data.doctor_id == request.auth.uid &&
+         request.resource.data.status == 'pending' &&
+         request.resource.data.patient_id is string &&
+         request.resource.data.patient_id != '');
+      allow update: if isAdmin() ||
+        (isConcernedPatient(resource.data.patient_id) &&
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'decided_at', 'expires_at', 'updated_at'])) ||
+        (signedIn() && resource.data.doctor_id == request.auth.uid &&
+         request.resource.data.status == 'revoked' &&
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'decided_at', 'updated_at']));
+      allow delete: if isAdmin();
     }
 
     match /mc_patients/{docId} {
-      // Personnel clinique vérifié : nécessaire au listener global
-      // mc_patients (fiches patient inaccessibles en bloc sinon).
-      allow read: if currentRoleIs('doctor') || currentRoleIs('nurse') ||
-        canReadMedicalData(resource.data);
+      // PARTIE E : remplace l'ancien "currentRoleIs('doctor') ||
+      // currentRoleIs('nurse')" (accès à TOUTE la collection, y compris
+      // d'autres établissements) par belongsToSameEstablishment — le
+      // cas central de la clarification client : le médecin/infirmier
+      // membre de l'établissement CRÉATEUR de la fiche y accède SANS
+      // consentement (mc_consents ne sert qu'aux accès externes).
+      allow read: if canReadMedicalData(resource.data) ||
+        belongsToSameEstablishment(resource.data);
       allow write: if isAdmin();
     }
 
     match /mc_prescriptions/{docId} {
-      // Lecture élargie au personnel clinique vérifié : les listeners
-      // globaux (et la vue établissement du médecin, et la vue
-      // consentement de l'infirmière) sont des requêtes collection
-      // entière, impossibles à satisfaire avec les seuls champs
-      // par-document. Même précédent currentRoleIs que /labRequests ;
-      // le consentement patient reste appliqué côté app (ACL).
-      allow read: if isAdmin() || currentRoleIs('doctor') || currentRoleIs('nurse') ||
-        ownsPatientData(resource.data) || pharmacyCanReadPrescription(resource.data);
+      // PARTIE E : remplace l'ancien "currentRoleIs('doctor') ||
+      // currentRoleIs('nurse')" (accès à TOUTE la collection, tous
+      // établissements confondus) par belongsToSameEstablishment —
+      // sans consentement pour l'établissement créateur (clarification
+      // client), plus l'auteur direct et le pharmacien ciblé.
+      allow read: if canReadMedicalData(resource.data) ||
+        belongsToSameEstablishment(resource.data) ||
+        pharmacyCanReadPrescription(resource.data);
       allow create: if isAdmin() || currentRoleIs('doctor');
+      // PARTIE H — même restriction de champs que /prescriptions : le
+      // pharmacien ne modifie jamais le contenu médical, uniquement le
+      // statut et ses métadonnées de traitement.
       allow update: if isAdmin()
         || doctorCanRead(resource.data)
-        || pharmacyCanReadPrescription(resource.data);
+        || (pharmacyCanReadPrescription(resource.data) &&
+            request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['status', 'updatedAt', 'updatedByUid', 'updatedByRole', 'cancelReason']));
       allow delete: if isAdmin();
     }
 
@@ -522,13 +691,10 @@ service cloud.firestore {
     }
 
     match /labRequests/{docId} {
-      // Lecture : personnel clinique vérifié — indispensable pour la
-      // liste établissement du desktop et pour le listener infirmier
-      // mobile d'ExchangeBridge (requête hôpital-entier, impossible à
-      // satisfaire avec canReadMedicalData seul). Même précédent
-      // currentRoleIs que /admissions.
-      allow read: if isAdmin() || currentRoleIs('doctor') || currentRoleIs('nurse') ||
-        canReadMedicalData(resource.data);
+      // PARTIE E : remplace le "currentRoleIs('doctor') ||
+      // currentRoleIs('nurse')" non filtré par belongsToSameEstablishment.
+      allow read: if canReadMedicalData(resource.data) ||
+        belongsToSameEstablishment(resource.data);
       allow create: if isAdmin() ||
         (signedIn() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
       allow update: if isAdmin() ||
@@ -557,10 +723,37 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    /* PARTIE E — un membre ne peut écrire QUE son propre document
+       ({hospitalId}_{son uid}, avec uid == son propre uid) : aucune
+       élévation de privilège possible même en auto-guérison côté
+       client (ensureHospitalMembership). L'admin garde la main pour
+       l'approbation/le retrait effectués depuis le tableau de bord
+       (l'acteur est alors l'admin, pas le membre lui-même).
+
+       Correctif (revue de sécurité) : la seule contrainte docId/uid
+       ci-dessus ne vérifiait PAS que l'affiliation était réellement
+       approuvée — n'importe quel compte connecté qui connaît un
+       hospitalId pouvait s'auto-écrire un statut "active" et obtenir
+       ainsi tout l'accès belongsToSameEstablishment de cet
+       établissement. hasApprovedAffiliation() exige la préexistence
+       d'un affiliation_requests/AFF_{uid}_{hospitalId} au statut
+       "approved" — document que seul un admin peut faire passer à ce
+       statut (voir la règle affiliation_requests). L'auto-écriture
+       reste donc un simple MIROIR d'un fait déjà approuvé côté
+       serveur, jamais une élévation indépendante. */
+    function hasApprovedAffiliation(hospitalId) {
+      return hospitalId != null &&
+        exists(/databases/$(database)/documents/affiliation_requests/$('AFF_' + request.auth.uid + '_' + hospitalId)) &&
+        get(/databases/$(database)/documents/affiliation_requests/$('AFF_' + request.auth.uid + '_' + hospitalId)).data.status == 'approved';
+    }
     match /hospitalMembers/{docId} {
       allow read: if isAdmin() || signedIn();
       allow create, update: if isAdmin() ||
-        (signedIn() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
+        (signedIn() &&
+         docId == (resolveHospitalId(request.resource.data) + '_' + request.auth.uid) &&
+         request.resource.data.uid == request.auth.uid &&
+         request.resource.data.status == 'active' &&
+         hasApprovedAffiliation(resolveHospitalId(request.resource.data)));
       allow delete: if isAdmin();
     }
 
@@ -573,44 +766,38 @@ service cloud.firestore {
     }
 
     match /admissions/{docId} {
-      // Lecture : personnel clinique vérifié (précédent du projet
-      // pour les données partagées au niveau établissement) +
-      // patient concerné via canReadMedicalData si uid présent.
-      allow read: if isAdmin() || currentRoleIs('doctor') || currentRoleIs('nurse') ||
-        canReadMedicalData(resource.data);
+      // PARTIE E : remplace le "currentRoleIs('doctor') ||
+      // currentRoleIs('nurse')" non filtré (accès inter-établissements)
+      // par belongsToSameEstablishment.
+      allow read: if canReadMedicalData(resource.data) ||
+        belongsToSameEstablishment(resource.data);
       allow create, update: if isAdmin() ||
         (canManageCare() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
       allow delete: if isAdmin();
     }
 
     match /receptionVisits/{docId} {
-      // File d'accueil : lecture par le personnel clinique vérifié
-      // (même précédent que admissions).
-      allow read: if isAdmin() || currentRoleIs('doctor') || currentRoleIs('nurse') ||
-        canReadMedicalData(resource.data);
+      // PARTIE E : même correctif que admissions.
+      allow read: if canReadMedicalData(resource.data) ||
+        belongsToSameEstablishment(resource.data);
       allow create, update: if isAdmin() ||
         (canRegisterPatient() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
       allow delete: if isAdmin();
     }
 
     match /emergencyCases/{docId} {
-      // Urgences : lecture par le personnel clinique vérifié. Création
-      // d'une arrivée = accueil (canRegisterPatient) ; la mise à jour
-      // (prise en charge, clôture) suit la même habilitation, avec
-      // gating device/abonnement comme les autres écritures hôpital.
-      allow read: if isAdmin() || currentRoleIs('doctor') || currentRoleIs('nurse') ||
-        canReadMedicalData(resource.data);
+      // PARTIE E : même correctif que admissions.
+      allow read: if canReadMedicalData(resource.data) ||
+        belongsToSameEstablishment(resource.data);
       allow create, update: if isAdmin() ||
         (canRegisterPatient() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
       allow delete: if isAdmin();
     }
 
     match /maternityCases/{docId} {
-      // Maternité : suivi grossesse/accouchement. Même modèle d'accès
-      // que les urgences (personnel clinique en lecture, écriture par
-      // personnel habilité avec gating device).
-      allow read: if isAdmin() || currentRoleIs('doctor') || currentRoleIs('nurse') ||
-        canReadMedicalData(resource.data);
+      // PARTIE E : même correctif que admissions.
+      allow read: if canReadMedicalData(resource.data) ||
+        belongsToSameEstablishment(resource.data);
       allow create, update: if isAdmin() ||
         (canRegisterPatient() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
       allow delete: if isAdmin();
@@ -635,7 +822,10 @@ service cloud.firestore {
       // via listByHospital). Nécessaire pour l'onglet "Historique des
       // accès" du dossier médical (MedicalRecordDesktop), réservé aux
       // rôles cliniques dans l'UI.
-      allow read: if isAdmin() || currentRoleIs('doctor') || currentRoleIs('nurse');
+      // PARTIE E : remplace le "currentRoleIs('doctor') ||
+      // currentRoleIs('nurse')" (accès à tout le journal, tous
+      // établissements) par belongsToSameEstablishment.
+      allow read: if isAdmin() || belongsToSameEstablishment(resource.data);
       allow create: if signedIn();
       allow update, delete: if false;
     }
@@ -659,7 +849,14 @@ service cloud.firestore {
        (emergencyPacket reste figé après création — non modifiable
        par update, seul le statut/timestamps changent). */
     match /emergencyTransfers/{transferId} {
-      allow read: if isAdmin() || signedIn();
+      // PARTIE I : remplace le "signedIn()" trop large (tout utilisateur
+      // connecté, y compris hors du transfert) par une vérification
+      // réelle d'appartenance à l'hôpital source OU destinataire (ou
+      // patient concerné), en plus de l'admin.
+      allow read: if isAdmin() ||
+        isHospitalMember(resource.data.fromHospitalId) ||
+        isHospitalMember(resource.data.toHospitalId) ||
+        isConcernedPatient(resource.data.patientId);
       allow create: if isAdmin() ||
         (signedIn() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
       // Mise à jour de statut : l'hôpital source ou le destinataire
@@ -675,9 +872,14 @@ service cloud.firestore {
     }
 
     match /medical_record_shares/{shareId} {
-      // Lecture : hôpital source, hôpital destinataire, ou admin —
-      // jamais un tiers hors du partage.
-      allow read: if isAdmin() || signedIn();
+      // PARTIE I : lecture réellement réservée à l'hôpital source,
+      // l'hôpital destinataire, le patient concerné, ou l'admin — le
+      // "signedIn()" précédent laissait n'importe quel utilisateur
+      // connecté lire n'importe quel partage, tiers inclus.
+      allow read: if isAdmin() ||
+        isHospitalMember(resource.data.fromHospitalId) ||
+        isHospitalMember(resource.data.toHospitalId) ||
+        isConcernedPatient(resource.data.patientId);
       allow create: if isAdmin() ||
         (signedIn() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
       // Seuls le statut/timestamps de révocation peuvent changer —

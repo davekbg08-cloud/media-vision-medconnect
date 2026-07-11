@@ -204,6 +204,60 @@ const Auth = (() => {
   function _hasFirebaseDB() { return typeof firebaseDB !== 'undefined' && !!firebaseDB; }
   const _professionalField = role => role === 'doctor' ? 'order_num' : 'matricule';
 
+  /* ── PARTIE B — PIN patient via Firebase Authentication ──
+     Le patient ne saisit jamais d'email (aucun champ dans l'UI) : on
+     dérive un email synthétique déterministe de son numéro de fiche
+     public, uniquement pour réutiliser _createFirebaseUser/
+     _signInFirebaseForAccount — exactement le même mécanisme déjà en
+     place pour médecin/infirmier/pharmacien (email + mot de passe
+     gérés par Firebase Auth, jamais stockés en clair dans
+     mc_accounts). Firebase Auth exige un mot de passe d'au moins 6
+     caractères ; un PIN plus court est complété par des zéros — ça ne
+     renforce pas l'entropie du PIN lui-même, seulement une contrainte
+     technique de l'API, à ne jamais présenter comme un renforcement
+     de sécurité. */
+  function _syntheticPatientEmail(patientId) {
+    return `patient-${String(patientId).toLowerCase().replace(/[^a-z0-9]/g, '')}@patients.medconnect.internal`;
+  }
+  function _toFirebasePassword(pin) {
+    return pin.length >= 6 ? pin : pin.padEnd(6, '0');
+  }
+
+  /* IMPORTANT : contrairement à _createFirebaseUser/_signInFirebaseForAccount
+     (utilisées pour médecin/infirmier/pharmacien, dont le uid EST déjà
+     l'uid Firebase généré à l'inscription), le compte patient garde un
+     uid stable 'PAT_'+id — clé de document mc_accounts et référence
+     utilisée partout dans l'app. Ces deux fonctions dédiées ne
+     touchent donc JAMAIS account.uid, uniquement account.authUid. */
+  async function _createPatientFirebaseAuth(email, pass, account) {
+    if (!email || !_hasFirebaseAuth()) return account;
+    try {
+      const credential = await firebaseAuth.createUserWithEmailAndPassword(email, pass);
+      return { ...account, authUid: credential?.user?.uid || null };
+    } catch (err) {
+      if (err?.code === 'auth/email-already-in-use') {
+        // Le compte Firebase Auth existe déjà (migration réussie sur un
+        // autre appareil, ou double-tentative sur celui-ci) : on se
+        // connecte simplement pour récupérer l'authUid, sans le recréer.
+        const signIn = await _signInPatientFirebaseAuth(email, pass);
+        return signIn.ok ? { ...account, authUid: signIn.authUid } : account;
+      }
+      console.warn('[MedConnect] Création Firebase Auth patient impossible, poursuite en mode dégradé :', err);
+      return account;
+    }
+  }
+
+  async function _signInPatientFirebaseAuth(email, pass) {
+    if (!_hasFirebaseAuth()) return { ok: false, authUid: null };
+    try {
+      const credential = await firebaseAuth.signInWithEmailAndPassword(email, pass);
+      return { ok: true, authUid: credential?.user?.uid || null };
+    } catch (e) {
+      console.warn('[MedConnect] Connexion Firebase Auth patient impossible :', e);
+      return { ok: false, authUid: null };
+    }
+  }
+
   /* ── Vérifie que le compte Firebase Auth a bien role:'admin'
      dans Firestore (users/{uid}). Sans ce document, isAdmin()
      refusera TOUTE écriture admin côté serveur — même connecté.
@@ -449,7 +503,46 @@ const Auth = (() => {
       _err('auth-err', '⚠️ Aucun compte trouvé pour cette fiche, ni localement ni dans le cloud.<br>Si c’est votre tout premier accès, utilisez “Premier accès : créer mon PIN”.');
       return;
     }
-    if (existing.password !== pin) { _err('auth-err', '❌ PIN incorrect.'); return; }
+
+    // PARTIE B — plus de comparaison en clair. Compte déjà migré vers
+    // Firebase Auth (email synthétique posé à la création ou lors
+    // d'une migration précédente) : vérification via Firebase Auth
+    // (_signInPatientFirebaseAuth, qui ne touche jamais uid — voir sa
+    // définition — contrairement à _signInFirebaseForAccount conçue
+    // pour des comptes dont uid EST déjà l'uid Firebase).
+    if (existing.email && _hasFirebaseAuth()) {
+      const { ok } = await _signInPatientFirebaseAuth(existing.email, _toFirebasePassword(pin));
+      if (!ok) { _err('auth-err', '❌ PIN incorrect.'); return; }
+    } else if (!existing.email && existing.password !== undefined) {
+      // Compte hérité (créé avant ce chantier), PIN encore en clair.
+      // Vérification UNE dernière fois avec l'ancien champ, puis
+      // migration immédiate vers Firebase Auth : le champ password
+      // n'est supprimé QUE si le compte Firebase Auth a bien été créé
+      // (jamais de suppression qui laisserait le compte inaccessible).
+      if (existing.password !== pin) { _err('auth-err', '❌ PIN incorrect.'); return; }
+      const email = _syntheticPatientEmail(id);
+      const migrated = await _createPatientFirebaseAuth(email, _toFirebasePassword(pin), { ...existing, email });
+      if (migrated.authUid) {
+        delete migrated.password;
+        existing = migrated;
+        // Remplacement (pas fusion) : _upsertAccount fait
+        // {...ancien, ...nouveau}, ce qui NE supprime PAS password
+        // (l'ancien objet le porte encore et le spread ne peut pas
+        // "effacer" une clé absente du second objet). Il faut donc
+        // remplacer l'entrée telle quelle dans le tableau de comptes.
+        const accounts = DB.getAccounts();
+        const idx = accounts.findIndex(a => a.uid === existing.uid);
+        if (idx === -1) accounts.push(existing); else accounts[idx] = existing;
+        DB.saveAccounts(accounts);
+      }
+      // Sinon (Firebase Auth injoignable maintenant) : le PIN vient
+      // d'être vérifié avec succès, la connexion continue normalement ;
+      // la migration réessaiera à la prochaine connexion réussie en ligne.
+    } else {
+      _err('auth-err', '❌ Connexion Firebase impossible. Réessayez avec une connexion internet.');
+      return;
+    }
+
     localStorage.setItem('mc_my_patient_id', id);
     _save(existing); _launch(existing);
   }
@@ -459,7 +552,7 @@ const Auth = (() => {
     const pin = (document.getElementById('lp-pin')?.value || '').trim();
     if (!id || !pin) { _err('auth-err', 'Veuillez remplir le numéro de fiche et le PIN.'); return; }
     if (!id.startsWith('MC-')) { _err('auth-err', '❌ Format invalide. Ex : MC-2026-CD-A3B7X9Q2'); return; }
-    if (pin.length < 4) { _err('auth-err', '❌ PIN trop court — minimum 4 chiffres.'); return; }
+    if (pin.length < 6) { _err('auth-err', '❌ PIN trop court — minimum 6 chiffres.'); return; }
     await _syncBeforeAuth('premier accès patient');
     const patient = DB.getPatientById(id);
     if (!patient) { _err('auth-err', '❌ Numéro de fiche introuvable. Contactez votre médecin.'); return; }
@@ -469,7 +562,23 @@ const Auth = (() => {
       _err('auth-err', '⚠️ Un compte existe déjà pour cette fiche. Utilisez “Se connecter à mon dossier existant”.');
       return;
     }
-    const acc = { uid:`PAT_${id}`, username:id, password:pin, role:'patient', status:'approved', name:`${patient.firstname} ${patient.lastname}`, patient_id:id, created_at:new Date().toISOString() };
+    // PARTIE B — jamais de PIN en clair (ni de hash) dans mc_accounts,
+    // collection en lecture publique : Firebase Auth gère le PIN comme
+    // mot de passe côté serveur, exactement comme pour les
+    // professionnels (voir _createFirebaseUser). mc_accounts ne reçoit
+    // que l'email synthétique et l'authUid Firebase.
+    const email = _syntheticPatientEmail(id);
+    const baseAcc = { uid:`PAT_${id}`, username:id, role:'patient', status:'approved', name:`${patient.firstname} ${patient.lastname}`, patient_id:id, email, created_at:new Date().toISOString() };
+    const acc = await _createPatientFirebaseAuth(email, _toFirebasePassword(pin), baseAcc);
+    if (!acc.authUid) {
+      // Correctif (revue de sécurité) : sans authUid, ce compte n'a
+      // aucun secret nulle part (ni Firebase Auth réel, ni password/pin
+      // local — PARTIE B) : le sauvegarder quand même le rendrait
+      // inaccessible dès la prochaine tentative de connexion. On refuse
+      // la création plutôt que de produire un compte fantôme.
+      _err('auth-err', '❌ Création du compte impossible sans connexion internet. Réessayez plus tard.');
+      return;
+    }
     accounts.push(acc); DB.saveAccounts(accounts);
     localStorage.setItem('mc_my_patient_id', id);
     _save(acc); _launch(acc);

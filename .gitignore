@@ -9,10 +9,17 @@ android/keys/
 *.keypass
 .env
 .env.*
+!.env.example
 .firebase/
 local.properties
 keystore.properties
 android/keystore.properties
+
+# Comptes de service / identifiants Google Cloud — jamais commités
+# (aucun présent actuellement, blacklist préventive)
+google-services.json
+*serviceAccountKey*.json
+*service-account*.json
 
 # Build outputs
 android/.gradle/
@@ -20,6 +27,7 @@ android/build/
 android/app/build/
 dist/
 build/
+electron/dist/
 
 # Dependencies and caches
 node_modules/
@@ -27,3 +35,4 @@ node_modules/
 .vscode/
 npm-debug.log*
 firebase-debug.log*
+firestore-debug.log*

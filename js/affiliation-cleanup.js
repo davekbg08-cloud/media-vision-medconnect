@@ -94,8 +94,11 @@
     return req?.cleanupReason === CLEANUP_REASON || req?.status === 'orphan_removed';
   }
 
+  // PARTIE K — délègue à DB.pushCloud (js/db.js) au lieu d'un mini-push
+  // Firestore local avec .catch(() => {}) : tout échec est loggé et mis
+  // en file d'attente pour rejeu automatique, jamais perdu en silence.
   function markCloudRemoved(req) {
-    if (!(typeof firebaseReady !== 'undefined' && firebaseReady && typeof firebaseDB !== 'undefined' && firebaseDB)) return;
+    if (!window.DB?.pushCloud) return;
     const r = normalizedRequest(req);
     const id = requestId(r);
     if (!id) return;
@@ -106,8 +109,8 @@
       updatedAt: new Date().toISOString(),
       decided_at: new Date().toISOString(),
     };
-    firebaseDB.collection('affiliation_requests').doc(id).set(cleaned, { merge: true }).catch(() => {});
-    firebaseDB.collection('mc_affiliations').doc(id).set(cleaned, { merge: true }).catch(() => {});
+    window.DB.pushCloud('affiliation_requests', id, cleaned);
+    window.DB.pushCloud('mc_affiliations', id, cleaned);
   }
 
   function cleanOrphanRequests() {

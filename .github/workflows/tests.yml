@@ -30,6 +30,27 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: 'npm'
+
+      # Nécessaire depuis l'ajout de @firebase/rules-unit-testing,
+      # firebase et firebase-tools (devDependencies) — la suite ne
+      # dépendait d'aucun paquet npm auparavant.
+      - name: Install dependencies
+        run: npm ci
+
+      # PARTIE O — ordre imposé : secrets → tests unitaires → règles
+      # Firestore, avant tout build.
+      - name: Scan de secrets
+        run: npm run security:scan
 
       - name: Run tests
         run: npm test
+
+      - name: Set up JDK (émulateur Firestore)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Tests des règles Firestore (émulateur)
+        run: npm run test:rules
