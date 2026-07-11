@@ -168,7 +168,16 @@ service cloud.firestore {
         data.uid == request.auth.uid ||
         data.patientUid == request.auth.uid ||
         data.patient_uid == request.auth.uid ||
-        data.ownerUid == request.auth.uid
+        data.ownerUid == request.auth.uid ||
+        // PARTIE B — patient authentifié via Firebase Auth (PIN migré,
+        // voir js/auth.js _createPatientFirebaseAuth/_signInPatientFirebaseAuth).
+        // Le compte garde un uid stable 'PAT_'+id (adressage mc_accounts) ;
+        // patientAuthUid porte l'uid Firebase réel. Clause tolérante :
+        // aucun code client n'écrit encore ce champ sur la fiche patient
+        // elle-même dans cette PR (nécessiterait un mécanisme de
+        // revendication dédié, hors scope) — sans effet tant qu'absent,
+        // prête pour une future écriture contrôlée.
+        data.patientAuthUid == request.auth.uid
       );
     }
 
@@ -215,8 +224,12 @@ service cloud.firestore {
       return role in ['patient', 'doctor', 'nurse', 'pharmacist', 'hospital', 'lab', 'reception'];
     }
 
+    // PARTIE B — 'pin' ajouté : garde-fou contre toute réintroduction
+    // future d'un PIN patient en clair (ou d'un hash local non salé/
+    // faible) dans un document — Firebase Auth est désormais la seule
+    // source de vérité pour le PIN (voir js/auth.js).
     function hasNoSecretFields(data) {
-      return !data.keys().hasAny(['admin', 'password', 'passwordHash']);
+      return !data.keys().hasAny(['admin', 'password', 'passwordHash', 'pin']);
     }
 
     function visiblePharmacyProfile(data) {
@@ -425,13 +438,22 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    /* PARTIE B/C — mc_accounts reste en lecture publique (nécessaire
+       au lookup pré-authentification par numéro pro/patient : fermer
+       ça casserait la connexion de tout le personnel — voir
+       docs/FIREBASE_KEY_SECURITY.md). Le vrai correctif porte sur ce
+       qui PEUT y être écrit : hasNoSecretFields interdit désormais
+       tout champ password/pin/passwordHash, y compris ici (absent
+       jusqu'ici) — le PIN patient est géré exclusivement par Firebase
+       Authentication (js/auth.js), jamais stocké en clair ni haché
+       localement dans ce document public. */
     match /mc_accounts/{docId} {
-      // Lecture ouverte : indispensable pour retrouver son compte
-      // (numéro pro / ID patient) AVANT toute authentification.
-      // Ne contient aucune donnée médicale — uniquement profil/accès.
       allow read: if true;
-      allow create: if !exists(/databases/$(database)/documents/mc_accounts/$(docId));
-      allow update, delete: if isAdmin() || (signedIn() && request.auth.uid == docId);
+      allow create: if !exists(/databases/$(database)/documents/mc_accounts/$(docId)) &&
+        hasNoSecretFields(request.resource.data);
+      allow update: if (isAdmin() || (signedIn() && request.auth.uid == docId)) &&
+        hasNoSecretFields(request.resource.data);
+      allow delete: if isAdmin();
     }
 
     match /mc_verified_doctors/{docId} {
