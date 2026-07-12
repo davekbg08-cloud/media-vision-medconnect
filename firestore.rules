@@ -713,7 +713,22 @@ service cloud.firestore {
       // consentement (mc_consents ne sert qu'aux accès externes).
       allow read: if canReadMedicalData(resource.data) ||
         belongsToSameEstablishment(resource.data);
-      allow write: if isAdmin();
+      // Correctif (trouvé en répondant à une question client, jamais
+      // testé à la création jusqu'ici) : cette collection, pourtant
+      // canonique (lue par _doPatient/_createPatientPin pour retrouver
+      // une fiche depuis un autre appareil que celui qui l'a créée),
+      // n'avait AUCUNE clause de création pour le personnel non-admin
+      // — seul `allow write: if isAdmin()` existait. Un(e)
+      // infirmier/médecin ne pouvait donc jamais faire aboutir
+      // DB.addPatient() ici (échec silencieux, mis en file d'attente
+      // indéfiniment). Miroir exact de la clause déjà en place sur la
+      // collection sœur /patients (ligne ~389).
+      allow create: if isAdmin() ||
+        ((currentRoleIs('doctor') || currentRoleIs('nurse')) &&
+         hospitalCanWrite(request.resource.data.establishmentId != null
+           ? request.resource.data.establishmentId
+           : request.resource.data.hospital_id));
+      allow update, delete: if isAdmin();
     }
 
     match /mc_prescriptions/{docId} {
