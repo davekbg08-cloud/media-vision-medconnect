@@ -284,3 +284,25 @@ test("Auth._doPatient migré : le compte n'est jamais réidentifié par l'uid Fi
   const acc = win.DB.getAccounts().find(a => a.patient_id === id);
   assert.strictEqual(acc.uid, `PAT_${id}`, 'uid ne doit JAMAIS être remplacé par un uid Firebase — casserait mc_accounts/{uid}');
 });
+
+/* ── Correctif (course create-fiche / premier-accès) ───────────────
+   DB.addPatient() lançait l'écriture Firestore de mc_patients en
+   fire-and-forget (jamais attendue) — un premier accès tenté juste
+   après pouvait tomber sur un document pas encore répliqué, et
+   patientFirstAccessOk() (firestore.rules) traitait ça comme "aucun
+   code requis". DB.addPatientAndConfirm() attend la confirmation
+   réelle avant que js/hospital.js n'affiche le code au personnel. */
+test('DB.addPatientAndConfirm attend la confirmation Firestore avant de résoudre (confirmed: true)', async () => {
+  const { win } = setup({ firebaseDB: fakeFirebaseDB() });
+  const { patient, confirmed } = await win.DB.addPatientAndConfirm({ firstname: 'Jean', lastname: 'Kabila', country_code: 'CD' });
+  assert.strictEqual(confirmed, true, 'la confirmation Firestore doit être remontée');
+  assert.ok(patient.firstAccessCode, 'le code d\'accès doit être généré');
+  assert.ok(win.DB.getPatientById(patient.id), 'la fiche doit aussi être sauvegardée localement');
+});
+
+test("DB.addPatientAndConfirm remonte confirmed: false sans bloquer la création locale quand Firestore est injoignable", async () => {
+  const { win } = setup({ firebaseReady: false, firebaseDB: undefined });
+  const { patient, confirmed } = await win.DB.addPatientAndConfirm({ firstname: 'Jean', lastname: 'Kabila', country_code: 'CD' });
+  assert.strictEqual(confirmed, false, 'hors-ligne : la confirmation ne peut pas avoir eu lieu');
+  assert.ok(win.DB.getPatientById(patient.id), 'la fiche reste créée localement (mode dégradé, comme le reste de l\'app)');
+});

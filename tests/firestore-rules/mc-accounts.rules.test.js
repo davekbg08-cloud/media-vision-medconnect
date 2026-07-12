@@ -210,6 +210,27 @@ test("mc_accounts : création d'un compte patient pour une fiche héritée SANS 
   }));
 });
 
+/* ── Correctif (course create-fiche / premier-accès) ──────────────
+   DB.addPatient() lance l'écriture de mc_patients/{id} en
+   fire-and-forget (js/db.js) : le document peut donc ne pas encore
+   exister côté serveur au moment où un premier accès est tenté. Avant
+   ce correctif, patientFirstAccessOk() traitait "document inexistant"
+   comme "aucun code requis" (même branche que les fiches héritées),
+   ce qui acceptait n'importe quel code — y compris vide — tant que la
+   réplication n'avait pas eu lieu. Un identifiant ne correspondant à
+   AUCUNE fiche mc_patients doit désormais être refusé. */
+test("mc_accounts : création d'un compte patient refusée si la fiche mc_patients n'existe pas encore (course de synchronisation)", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  // Volontairement : aucun mc_patients/MC-TEST-CODE-RACE n'est créé —
+  // simule la fenêtre entre DB.addPatient() et la réplication réelle.
+  const patient = env.authenticatedContext('patient-race').firestore();
+  await assertFails(setDoc(doc(patient, 'mc_accounts', 'PAT_MC-TEST-CODE-RACE'), {
+    uid: 'PAT_MC-TEST-CODE-RACE', role: 'patient', authUid: 'patient-race', status: 'approved',
+    patient_id: 'MC-TEST-CODE-RACE', firstAccessCode: 'ANYTHING',
+  }));
+});
+
 test("mc_accounts : la création d'un compte professionnel (sans patient_id) n'est pas affectée par le code d'accès", async () => {
   const env = await getTestEnv();
   await clearAll(env);
