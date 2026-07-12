@@ -31,17 +31,20 @@ jobs:
 
       - name: Vérifier le secret requis
         env:
-          FIREBASE_SERVICE_ACCOUNT_BASE64: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_BASE64 }}
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
         run: |
-          test -n "$FIREBASE_SERVICE_ACCOUNT_BASE64" || (echo "Secret manquant : FIREBASE_SERVICE_ACCOUNT_BASE64 (voir docs/BACKUP_RESTORE_RUNBOOK.md)" && exit 1)
+          test -n "$FIREBASE_SERVICE_ACCOUNT_JSON" || (echo "Secret manquant : FIREBASE_SERVICE_ACCOUNT_JSON (voir docs/BACKUP_RESTORE_RUNBOOK.md)" && exit 1)
 
       - name: Installer firebase-admin (non permanent, cf. scripts/backup-firestore.mjs)
         run: npm install firebase-admin --no-save
 
-      - name: Décoder la clé de compte de service
+      - name: Écrire la clé de compte de service
+        # Le secret contient directement le JSON du compte de service
+        # (pas de base64 : GitHub Actions accepte un secret multi-ligne
+        # tel quel, une étape d'encodage locale n'apporte rien ici).
         env:
-          FIREBASE_SERVICE_ACCOUNT_BASE64: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_BASE64 }}
-        run: echo "$FIREBASE_SERVICE_ACCOUNT_BASE64" | base64 -d > /tmp/firebase-service-account.json
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+        run: echo "$FIREBASE_SERVICE_ACCOUNT_JSON" > /tmp/firebase-service-account.json
 
       - name: Exporter Firestore
         env:

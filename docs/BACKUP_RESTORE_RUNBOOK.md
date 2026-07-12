@@ -30,16 +30,14 @@ dépôt git (données potentiellement volumineuses et sensibles).
 
 1. Firebase Console → ⚙️ Paramètres du projet → **Comptes de service**
    → "Générer une nouvelle clé privée" → télécharge un fichier JSON.
-2. Encode ce fichier en base64 :
-   ```bash
-   base64 -i service-account.json | tr -d '\n' > service-account.b64
-   ```
-3. GitHub → dépôt → Settings → Secrets and variables → Actions →
+2. GitHub → dépôt → Settings → Secrets and variables → Actions →
    "New repository secret" :
-   - Nom : `FIREBASE_SERVICE_ACCOUNT_BASE64`
-   - Valeur : le contenu de `service-account.b64`
-4. Supprime les fichiers `service-account.json`/`.b64` de ton poste
-   après ça — ne les commite jamais.
+   - Nom : `FIREBASE_SERVICE_ACCOUNT_JSON`
+   - Valeur : le contenu **brut** du fichier JSON téléchargé (pas
+     besoin de l'encoder — GitHub Actions accepte un secret
+     multi-ligne tel quel).
+3. Supprime le fichier `service-account.json` de ton poste après ça —
+   ne le commite jamais.
 
 **Cette clé donne un accès complet (lecture/écriture) à tout le
 projet Firebase** — à traiter avec la même prudence qu'un mot de
