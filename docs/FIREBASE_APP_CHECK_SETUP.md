@@ -10,11 +10,16 @@ l'API Firestore avec la clé publique du projet (voir
 `docs/FIREBASE_KEY_SECURITY.md`) en se faisant passer pour la PWA ou
 l'app Android officielles.
 
-**Important — ce document ne configure PAS App Check dans ce PR.** Il
-documente la procédure et les prérequis, pour une activation ultérieure,
-volontairement progressive (mode monitoring d'abord, jamais d'enforcement
-brutal qui risquerait de bloquer des utilisateurs existants sans test
-préalable).
+**Mise à jour — l'intégration côté code est maintenant faite** (SDK
+chargé, activation prête). Elle reste **inerte pour tous les
+utilisateurs actuels** : `APP_CHECK_SITE_KEY` (`js/firebase-config.js`)
+est vide par défaut, donc `activateAppCheck()` ne fait rien tant
+qu'une vraie clé n'y est pas renseignée manuellement. Ce qui reste à
+faire n'est **pas du code** — seulement des actions dans les consoles
+Firebase/Google Cloud, décrites ci-dessous — puis coller la clé
+obtenue dans `APP_CHECK_SITE_KEY`. Le déploiement reste volontairement
+progressif (mode monitoring d'abord, jamais d'enforcement brutal qui
+risquerait de bloquer des utilisateurs existants sans test préalable).
 
 ## Pour la PWA (Web)
 
@@ -27,15 +32,15 @@ préalable).
      ET l'app Electron desktop)
    - `medconnect-e81ba.web.app` / `medconnect-e81ba.firebaseapp.com`
      (Firebase Hosting)
-3. Côté code (`js/firebase-config.js`, à faire lors de l'activation
-   réelle, pas dans ce PR) :
+3. **Côté code : déjà fait.** Une fois la clé reCAPTCHA Enterprise
+   obtenue, il suffit de la coller dans `js/firebase-config.js` :
    ```js
-   const appCheck = firebase.appCheck();
-   appCheck.activate(
-     new firebase.appCheck.ReCaptchaEnterpriseProvider('CLÉ_RECAPTCHA_ICI'),
-     true // isTokenAutoRefreshEnabled
-   );
+   const APP_CHECK_SITE_KEY = "CLÉ_RECAPTCHA_ICI";
    ```
+   `activateAppCheck()` (même fichier) s'occupe du reste
+   (`firebase.appCheck().activate(new ReCaptchaEnterpriseProvider(...), true)`)
+   automatiquement au chargement de l'app — aucun autre changement de
+   code nécessaire.
 4. **Ne jamais** inclure de clé privée/secrète côté client — seule la clé
    reCAPTCHA publique (site key) va dans le code, jamais une clé serveur.
 
@@ -77,13 +82,26 @@ préalable).
    `BrowserWindow` Electron est un contexte Web du point de vue de
    Firebase).
 
-## Ce qui reste à faire (hors de ce PR)
+## Ce qui reste à faire (actions manuelles uniquement, plus de code)
 
 - Créer la clé reCAPTCHA Enterprise et l'app Android dans la Firebase
   Console (actions manuelles, nécessitent un accès administrateur au
   projet Firebase — non disponibles dans cet environnement).
-- Ajouter le SDK `firebase-appcheck-compat` (ou équivalent) au précache
-  du service worker (`sw.js`) une fois l'activation décidée.
+- Coller la clé obtenue dans `APP_CHECK_SITE_KEY`
+  (`js/firebase-config.js`) — seule étape "code", une seule ligne.
 - Documenter le SHA de production réel une fois extrait par le
   propriétaire du projet (le keystore n'est jamais accessible dans cet
   environnement de développement).
+
+## Déjà fait dans ce dépôt (code, sans risque tant que la clé est vide)
+
+- SDK `firebase-app-check-compat.js` (v9.22.0, même version que les
+  autres SDK Firebase) chargé dans `index.html` et précaché dans
+  `sw.js`.
+- `js/firebase-config.js` : constante `APP_CHECK_SITE_KEY` (vide par
+  défaut) + `activateAppCheck()`, appelée automatiquement par
+  `initFirebase()`, no-op tant qu'aucune clé n'est renseignée.
+- Tests : `tests/firebase-app-check.test.js` — vérifie que
+  l'initialisation Firebase reste inchangée sans clé, que l'absence du
+  SDK App Check ne plante jamais, et que l'activation appelle bien le
+  bon fournisseur une fois une clé configurée.

@@ -1,8 +1,15 @@
 {
-  "version": "2.7.0",
-  "build": "2026.07.11.03",
-  "buildDate": "2026-07-11",
+  "version": "2.8.0",
+  "build": "2026.07.12.01",
+  "buildDate": "2026-07-12",
   "changelog": [
+    {
+      "version": "2.8.0",
+      "date": "2026-07-12",
+      "notes": [
+        "Préparation Firebase App Check (SDK intégré, inerte tant qu'aucune clé n'est configurée) : renforce la vérification que les requêtes viennent bien de l'app officielle"
+      ]
+    },
     {
       "version": "2.7.0",
       "date": "2026-07-11",
