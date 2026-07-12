@@ -306,3 +306,45 @@ test("DB.addPatientAndConfirm remonte confirmed: false sans bloquer la création
   assert.strictEqual(confirmed, false, 'hors-ligne : la confirmation ne peut pas avoir eu lieu');
   assert.ok(win.DB.getPatientById(patient.id), 'la fiche reste créée localement (mode dégradé, comme le reste de l\'app)');
 });
+
+/* ── Correctif (redonner le code d'accès après création) ───────────
+   showFirstAccessCodeModal (js/hospital.js) n'affiche le code qu'une
+   fois. DB.accountExistsForPatient/getPatientAccessCode permettent au
+   personnel de le redonner plus tard, en vérifiant d'abord côté
+   serveur (jamais uniquement le cache local, qui peut ne pas refléter
+   un compte créé depuis un autre appareil). */
+function fakeFirebaseDocGet(result) {
+  return { collection: () => ({ doc: () => ({ get: async () => result }) }) };
+}
+
+test('DB.accountExistsForPatient détecte un compte déjà présent localement, sans appel réseau', async () => {
+  const { win } = setup({ firebaseDB: undefined });
+  const id = seedPatient(win);
+  win.DB.saveAccounts([{ uid: `PAT_${id}`, role: 'patient', patient_id: id }]);
+  assert.strictEqual(await win.DB.accountExistsForPatient(id), true);
+});
+
+test("DB.accountExistsForPatient interroge Firestore quand rien n'est en local (compte créé depuis un autre appareil)", async () => {
+  const { win } = setup({ firebaseDB: fakeFirebaseDocGet({ exists: true }) });
+  const id = seedPatient(win);
+  assert.strictEqual(await win.DB.accountExistsForPatient(id), true);
+});
+
+test("DB.accountExistsForPatient renvoie false quand ni le local ni Firestore ne connaissent ce compte", async () => {
+  const { win } = setup({ firebaseDB: fakeFirebaseDocGet({ exists: false }) });
+  const id = seedPatient(win);
+  assert.strictEqual(await win.DB.accountExistsForPatient(id), false);
+});
+
+test('DB.getPatientAccessCode relit le code réel depuis Firestore (source de vérité, pas seulement le cache local)', async () => {
+  const { win } = setup({ firebaseDB: fakeFirebaseDocGet({ exists: true, data: () => ({ firstAccessCode: 'ZZZZ99' }) }) });
+  const id = seedPatient(win);
+  assert.strictEqual(await win.DB.getPatientAccessCode(id), 'ZZZZ99');
+});
+
+test('DB.getPatientAccessCode retombe sur le cache local si Firestore est injoignable', async () => {
+  const { win } = setup({ firebaseReady: false, firebaseDB: undefined });
+  const id = seedPatient(win);
+  const expected = win.DB.getPatientById(id).firstAccessCode;
+  assert.strictEqual(await win.DB.getPatientAccessCode(id), expected);
+});

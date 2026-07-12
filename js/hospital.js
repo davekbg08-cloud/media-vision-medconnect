@@ -249,9 +249,46 @@ const HospitalPortal = (() => {
         <div class="patient-row-actions">
           ${window.HospitalCapabilities?.can?.(Auth.getUser()?.role, 'create_consultation')
             ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();HospitalPortal.openConsult('${p.id}')">🩺</button>` : ''}
+          <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();HospitalPortal.viewAccessCode('${p.id}')">🔑</button>
           <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();HospitalPortal.deletePatient('${p.id}')">🗑️</button>
         </div>
       </div>`;
+  }
+
+  /* ── Redonner le code d'accès patient (après la création) ──
+     showFirstAccessCodeModal ne le montre qu'une fois. Si le
+     personnel doit le redonner (patient absent à la création, oubli),
+     on vérifie d'abord que le compte n'existe pas déjà (sinon le code
+     est sans objet — l'accès normal suffit) avant de relire le code
+     réel côté serveur (DB.getPatientAccessCode, jamais uniquement le
+     cache local, qui peut ne pas refléter un compte créé depuis un
+     autre appareil). */
+  async function viewAccessCode(id) {
+    if (!canUsePatient(id)) { App.toast('Accès patient non autorisé.', 'error'); return; }
+    const exists = await DB.accountExistsForPatient(id);
+    if (exists) { App.toast('✅ Le patient a déjà créé son compte — le code n\'est plus nécessaire.'); return; }
+    const code = await DB.getPatientAccessCode(id);
+    if (!code) {
+      App.toast('ℹ️ Cette fiche n\'a pas de code d\'accès (créée avant ce dispositif) — le patient peut faire son premier accès sans code.');
+      return;
+    }
+    showAccessCodeAgainModal(id, code);
+  }
+
+  // Fenêtre limitée dans le temps (3 min) — un code unique à usage
+  // unique ne doit pas rester affiché indéfiniment à l'écran.
+  function showAccessCodeAgainModal(patientId, code) {
+    const title = "🔑 Code d'accès patient";
+    App.openModal(title, `
+      <p>Code d'accès <strong>unique</strong>, à usage unique pour le premier accès de ce patient — communiquez-le-lui (papier, oralement), il devient inutile dès que son compte est créé.</p>
+      <div class="id-badge-large" style="font-size:1.6rem;letter-spacing:3px;text-align:center;margin:1rem 0">${esc(code)}</div>
+      <p class="muted">Fiche : ${esc(patientId)}</p>
+      <p class="auth-register-info" style="color:var(--accent)">⏱️ Cette fenêtre se fermera automatiquement dans quelques minutes pour limiter son exposition à l'écran.</p>
+      <button class="btn-p" onclick="App.closeModal()">J'ai noté le code</button>
+    `);
+    setTimeout(() => {
+      if (document.getElementById('modal-title')?.textContent === title) App.closeModal();
+    }, 180000);
   }
 
   /* ── PATIENT DETAIL ─────────────────────────────── */
@@ -878,6 +915,7 @@ const HospitalPortal = (() => {
 
   return {
     render, filter, openDetail, openNewPatient, saveNewPatient, deletePatient,
+    viewAccessCode,
     openExternalSearch, searchExternalPatient, requestPatientAccess,
     openConsult, addRxItem, removeRxItem, runSmartCheck, saveConsult, delConsult,
     openPrescriptionTarget, confirmPrescriptionTarget,

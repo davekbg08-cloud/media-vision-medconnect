@@ -455,6 +455,34 @@ const DB = (() => {
     return p;
   }
 
+  /* ── Réaffichage du code d'accès après création ──────
+     showFirstAccessCodeModal (js/hospital.js) ne montre le code
+     qu'une fois, à la création. Si le personnel doit le redonner au
+     patient plus tard, il faut vérifier avant tout que le compte
+     n'est pas déjà créé (le code serait alors sans objet) puis
+     relire le code réel côté serveur — jamais se fier uniquement au
+     cache local, qui peut ne pas refléter un compte créé depuis un
+     autre appareil. */
+  async function accountExistsForPatient(patientId) {
+    const uid = `PAT_${patientId}`;
+    if (getAccounts().some(a => a.uid === uid)) return true;
+    if (!firebaseReady || !firebaseDB) return false;
+    try {
+      const doc = await firebaseDB.collection('mc_accounts').doc(uid).get();
+      return doc.exists;
+    } catch (e) { console.warn('[MedConnect] Vérification compte existant :', e); return false; }
+  }
+
+  async function getPatientAccessCode(patientId) {
+    if (firebaseReady && firebaseDB) {
+      try {
+        const doc = await firebaseDB.collection('mc_patients').doc(patientId).get();
+        if (doc.exists) return doc.data()?.firstAccessCode || null;
+      } catch (e) { console.warn('[MedConnect] Lecture du code d\'accès :', e); }
+    }
+    return getPatientById(patientId)?.firstAccessCode || null;
+  }
+
   /* Variante async de addPatient() : attend la confirmation Firestore
      réelle des 3 écritures avant de résoudre. addPatient() lance déjà
      ces écritures en fire-and-forget (jamais attendu par ses
@@ -898,6 +926,7 @@ const DB = (() => {
     getAccounts, saveAccounts, getUsers, saveUsers, upsertUserProfile,
     getRegistrationRequests, saveRegistrationRequests, createRegistrationRequest,
     getPatients, savePatients, addPatient, addPatientAndConfirm, updatePatient, deletePatient, getPatientById, searchPatients,
+    accountExistsForPatient, getPatientAccessCode,
     getConsultations, addConsultation, getPatientConsultations, deleteConsultation,
     getPrescriptions, addPrescription, updatePrescription, updatePrescriptionAndConfirm, getPatientPrescriptions,
     getEstablishmentDocuments, addEstablishmentDocument, getPatientEstablishmentDocuments,
