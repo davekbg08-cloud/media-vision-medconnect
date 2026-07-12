@@ -67,19 +67,26 @@ async function main() {
     ? '🔍 Mode dry-run (aucune écriture, aucun compte Firebase Auth créé).'
     : '⚠️  Mode --apply : des comptes Firebase Auth vont être créés et mc_accounts modifié.');
 
-  let admin;
+  let initializeApp, applicationDefault, getApps, getFirestore, FieldValue, getAuth;
   try {
-    admin = await import('firebase-admin');
+    // firebase-admin v14+ a retiré l'ancienne API groupée
+    // (admin.firestore(), admin.auth(), admin.credential.applicationDefault())
+    // — il faut désormais importer les sous-modules ESM directement
+    // (bug réel, jamais détecté car ce script n'a jamais été exécuté
+    // contre une vraie base, cf. commentaire en tête de fichier).
+    ({ initializeApp, applicationDefault, getApps } = await import('firebase-admin/app'));
+    ({ getFirestore, FieldValue } = await import('firebase-admin/firestore'));
+    ({ getAuth } = await import('firebase-admin/auth'));
   } catch {
     console.error('❌ firebase-admin introuvable. Installez-le d\'abord : npm install firebase-admin --no-save');
     process.exit(1);
   }
 
-  if (!admin.apps.length) {
-    admin.initializeApp({ credential: admin.credential.applicationDefault() });
+  if (!getApps().length) {
+    initializeApp({ credential: applicationDefault() });
   }
-  const db = admin.firestore();
-  const auth = admin.auth();
+  const db = getFirestore();
+  const auth = getAuth();
 
   const snap = await db.collection('mc_accounts')
     .where('role', '==', 'patient')
@@ -112,7 +119,7 @@ async function main() {
         }
       }
       await db.collection('mc_accounts').doc(doc.id).set(
-        { authUid: userRecord.uid, email, password: admin.firestore.FieldValue.delete() },
+        { authUid: userRecord.uid, email, password: FieldValue.delete() },
         { merge: true }
       );
       journal.push({ docId: doc.id, action: 'migrated' });

@@ -49,18 +49,24 @@ async function main() {
     ? '🔍 Mode dry-run (aucune écriture). Utilisez --apply pour appliquer réellement.'
     : '⚠️  Mode --apply : des écritures réelles vont être effectuées sur Firestore.');
 
-  let admin;
+  let initializeApp, applicationDefault, getApps, getFirestore;
   try {
-    admin = await import('firebase-admin');
+    // firebase-admin v14+ a retiré l'ancienne API groupée
+    // (admin.firestore(), admin.credential.applicationDefault()) —
+    // il faut désormais importer les sous-modules ESM directement
+    // (bug réel, jamais détecté car ce script n'a jamais été exécuté
+    // contre une vraie base, cf. commentaire en tête de fichier).
+    ({ initializeApp, applicationDefault, getApps } = await import('firebase-admin/app'));
+    ({ getFirestore } = await import('firebase-admin/firestore'));
   } catch {
     console.error('❌ firebase-admin introuvable. Installez-le d\'abord : npm install firebase-admin --no-save');
     process.exit(1);
   }
 
-  if (!admin.apps.length) {
-    admin.initializeApp({ credential: admin.credential.applicationDefault() });
+  if (!getApps().length) {
+    initializeApp({ credential: applicationDefault() });
   }
-  const db = admin.firestore();
+  const db = getFirestore();
 
   const [mcPatientsSnap, patientsSnap] = await Promise.all([
     db.collection('mc_patients').get(),
