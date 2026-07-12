@@ -1,0 +1,61 @@
+name: Sauvegarde Firestore (export NDJSON)
+
+# Planifiée + déclenchement manuel. Contrairement au build APK/bureau,
+# ce workflow ne modifie rien dans le dépôt — il lit Firestore via
+# l'Admin SDK (gratuit, ne nécessite PAS le plan Blaze) et publie
+# l'export comme artefact de run, jamais commité dans git (données
+# potentiellement volumineuses et sensibles, à ne jamais faire
+# transiter par l'historique du dépôt).
+on:
+  workflow_dispatch:
+  schedule:
+    # Chaque jour à 02:00 UTC — horaire creux, hors des heures de
+    # bureau habituelles en Afrique centrale/de l'Ouest (UTC+1/+2/+3).
+    - cron: '0 2 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    name: Export Firestore
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Vérifier le secret requis
+        env:
+          FIREBASE_SERVICE_ACCOUNT_BASE64: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_BASE64 }}
+        run: |
+          test -n "$FIREBASE_SERVICE_ACCOUNT_BASE64" || (echo "Secret manquant : FIREBASE_SERVICE_ACCOUNT_BASE64 (voir docs/BACKUP_RESTORE_RUNBOOK.md)" && exit 1)
+
+      - name: Installer firebase-admin (non permanent, cf. scripts/backup-firestore.mjs)
+        run: npm install firebase-admin --no-save
+
+      - name: Décoder la clé de compte de service
+        env:
+          FIREBASE_SERVICE_ACCOUNT_BASE64: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_BASE64 }}
+        run: echo "$FIREBASE_SERVICE_ACCOUNT_BASE64" | base64 -d > /tmp/firebase-service-account.json
+
+      - name: Exporter Firestore
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: /tmp/firebase-service-account.json
+        run: node scripts/backup-firestore.mjs --out backup-output
+
+      - name: Supprimer la clé décodée
+        if: always()
+        run: rm -f /tmp/firebase-service-account.json
+
+      - name: Publier l'export comme artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: firestore-backup-${{ github.run_id }}
+          path: backup-output
+          retention-days: 90
+          if-no-files-found: error

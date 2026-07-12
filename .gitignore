@@ -21,6 +21,11 @@ google-services.json
 *serviceAccountKey*.json
 *service-account*.json
 
+# Sorties locales de scripts/backup-firestore.mjs — jamais commitées
+# (potentiellement volumineuses et sensibles ; publiées uniquement
+# comme artefact GitHub Actions, cf. docs/BACKUP_RESTORE_RUNBOOK.md)
+backups/
+
 # Build outputs
 android/.gradle/
 android/build/
