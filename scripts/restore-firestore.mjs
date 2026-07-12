@@ -53,19 +53,25 @@ async function main() {
     ? '⚠️  Mode --apply : des écritures réelles vont écraser les documents existants sur Firestore.'
     : '🔍 Mode dry-run (aucune écriture). Utilisez --apply pour restaurer réellement.');
 
-  let admin;
+  let db = null;
   if (args.apply) {
+    let initializeApp, applicationDefault, getApps, getFirestore;
     try {
-      admin = await import('firebase-admin');
+      // firebase-admin v14+ a retiré l'ancienne API groupée
+      // (admin.firestore(), admin.credential.applicationDefault()) —
+      // il faut désormais importer les sous-modules ESM directement
+      // (firebase-admin/app, firebase-admin/firestore).
+      ({ initializeApp, applicationDefault, getApps } = await import('firebase-admin/app'));
+      ({ getFirestore } = await import('firebase-admin/firestore'));
     } catch {
       console.error("❌ firebase-admin introuvable. Installez-le d'abord : npm install firebase-admin --no-save");
       process.exit(1);
     }
-    if (!admin.apps.length) {
-      admin.initializeApp({ credential: admin.credential.applicationDefault() });
+    if (!getApps().length) {
+      initializeApp({ credential: applicationDefault() });
     }
+    db = getFirestore();
   }
-  const db = args.apply ? admin.firestore() : null;
 
   const files = readdirSync(args.from).filter(f => f.endsWith('.ndjson'));
   const targets = args.collections
