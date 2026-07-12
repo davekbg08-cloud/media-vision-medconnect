@@ -73,6 +73,8 @@ const Settings = (() => {
         ${user?.role === 'pharmacist' ? `<div class="settings-row"><span>Matricule</span><span style="font-family:monospace;color:var(--purple)">${esc(user?.matricule||'—')}</span></div>` : ''}
         <button class="btn btn-ghost btn-sm" style="color:var(--danger);border-color:rgba(239,68,68,.3);margin-top:.75rem;width:100%"
                 onclick="Auth.logout()">🚪 Se déconnecter</button>
+        <button class="btn btn-ghost btn-sm" style="color:var(--danger);border-color:rgba(239,68,68,.3);margin-top:.5rem;width:100%"
+                onclick="Auth._deleteMyAccount()">🗑️ Supprimer mon compte</button>
       </div>
 
       ${renderAboutSection()}`;

@@ -1,8 +1,15 @@
 {
-  "version": "2.6.0",
-  "build": "2026.07.11.02",
+  "version": "2.7.0",
+  "build": "2026.07.11.03",
   "buildDate": "2026-07-11",
   "changelog": [
+    {
+      "version": "2.7.0",
+      "date": "2026-07-11",
+      "notes": [
+        "Suppression de compte self-service (Paramètres > Compte) : le patient ou le professionnel peut supprimer lui-même son accès, sans toucher au dossier médical"
+      ]
+    },
     {
       "version": "2.6.0",
       "date": "2026-07-11",

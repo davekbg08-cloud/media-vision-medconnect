@@ -965,12 +965,123 @@ const Auth = (() => {
     }
   }
 
+  /* ── SUPPRESSION DE COMPTE (self-service, sans Cloud Function) ──
+     Ferme le point "suppression de compte" de l'audit sécurité :
+     currentUser.delete() est un appel client pur, aucun serveur requis.
+     Ne supprime QUE le compte (accès) — jamais le dossier médical
+     (mc_patients, consultations, ordonnances...), conservé pour raison
+     légale/médicale, cohérent avec delete-account.html.
+     Ordre volontaire : documents Firestore d'abord (pendant que la
+     session Firebase Auth est encore valide), utilisateur Firebase
+     Auth en dernier — supprimer users/{uid} avant la fin ferait
+     retomber accountStatusOk() sur son défaut permissif (document
+     absent), pas sur "déconnecté" ; l'ordre inverse serait trompeur
+     sans rien casser ici, mais reste le bon principe à suivre. */
+  function _deleteMyAccount() {
+    const user = getUser();
+    if (!user) return;
+    App.openModal('🗑️ Supprimer mon compte', `
+      <p style="color:var(--text-dim);font-size:.85rem;line-height:1.7">
+        Cette action supprime définitivement votre accès à MedConnect
+        (identifiants, profil). Elle est irréversible.
+        ${user.role === 'patient'
+          ? "Votre dossier médical n'est pas supprimé (conservation légale/médicale) — seul votre accès personnel l'est."
+          : "Les actes déjà enregistrés (consultations, ordonnances) restent conservés ; seul votre profil professionnel est supprimé."}
+      </p>
+      <form onsubmit="Auth._confirmDeleteMyAccount(event)">
+        <div class="form-group">
+          <label class="inp-lbl">${user.role === 'patient' ? 'Confirmez votre PIN' : 'Confirmez votre mot de passe'}</label>
+          <input type="password" id="del-acc-pass" class="inp" autocomplete="current-password" required>
+        </div>
+        <div id="del-acc-err" class="auth-error" style="display:none"></div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-ghost" onclick="App.closeModal()">Annuler</button>
+          <button type="submit" class="btn" style="background:var(--danger);color:#fff;border-color:var(--danger)">🗑️ Supprimer définitivement</button>
+        </div>
+      </form>`);
+  }
+
+  async function _confirmDeleteMyAccount(e) {
+    e.preventDefault();
+    const pass = (document.getElementById('del-acc-pass')?.value || '').trim();
+    const showErr = msg => _err('del-acc-err', msg);
+    if (!pass) { showErr('Veuillez saisir votre mot de passe/PIN.'); return; }
+    if (!_hasFirebaseAuth() || !_hasFirebaseDB()) { showErr('❌ Connexion internet requise pour supprimer votre compte.'); return; }
+    const user = getUser();
+    if (!user) { showErr('❌ Session introuvable — reconnectez-vous.'); return; }
+    const current = firebaseAuth.currentUser;
+    if (!current || !current.email) { showErr('❌ Session Firebase introuvable — reconnectez-vous puis réessayez.'); return; }
+    if (typeof firebase === 'undefined' || !firebase.auth?.EmailAuthProvider) {
+      showErr('❌ Ré-authentification indisponible. Rechargez la page puis réessayez.');
+      return;
+    }
+
+    try {
+      const credential = firebase.auth.EmailAuthProvider.credential(current.email, pass);
+      await current.reauthenticateWithCredential(credential);
+    } catch (err) {
+      if (err?.code === 'auth/wrong-password' || err?.code === 'auth/invalid-credential') {
+        showErr(user.role === 'patient' ? '❌ PIN incorrect.' : '❌ Mot de passe incorrect.');
+      } else if (err?.code === 'auth/too-many-requests') {
+        showErr('❌ Trop de tentatives — réessayez plus tard.');
+      } else {
+        showErr('❌ Ré-authentification impossible. Vérifiez votre connexion et réessayez.');
+      }
+      return;
+    }
+
+    const docId   = user.uid;    // clé mc_accounts : uid Firebase réel (pro) ou 'PAT_{id}' (patient)
+    const authUid = current.uid;
+
+    // Documents Firestore d'abord, pendant que la session est encore
+    // valide. Chaque étape est indépendante : un échec partiel ne doit
+    // jamais empêcher les suivantes ni bloquer la suite (mc_accounts
+    // reste la seule étape dont le succès est vérifié — voir plus bas).
+    if (user.role !== 'patient') {
+      const collection = DB.roleCollection ? DB.roleCollection(user.role) : null;
+      if (collection) { try { await DB.deleteCloud(collection, docId); } catch (_) {} }
+    }
+    try { await DB.deleteCloud('users', docId); } catch (_) {}
+    try {
+      const memberships = await firebaseDB.collection('hospitalMembers').where('uid', '==', authUid).get();
+      for (const doc of memberships.docs) { try { await DB.deleteCloud('hospitalMembers', doc.id); } catch (_) {} }
+    } catch (_) {}
+
+    const accountDeleted = await DB.deleteCloud('mc_accounts', docId);
+    if (!accountDeleted) {
+      showErr('❌ Suppression refusée par le serveur — vérifiez votre connexion et réessayez.');
+      return;
+    }
+
+    try {
+      await current.delete();
+    } catch (err) {
+      // mc_accounts est déjà supprimé : ce compte n'a de toute façon
+      // plus aucun accès applicatif. On log seulement, sans bloquer la
+      // déconnexion locale — retenter la suppression Auth nécessiterait
+      // une reconnexion, plus complexe qu'utile pour ce cas résiduel.
+      console.warn('[MedConnect] Suppression Firebase Auth incomplète :', err?.code || err);
+    }
+
+    localStorage.removeItem('mc_my_patient_id');
+    try {
+      const remaining = DB.getAccounts().filter(a => a.uid !== docId);
+      localStorage.setItem('mc_accounts', JSON.stringify(remaining));
+    } catch (_) {}
+
+    App.closeModal();
+    sessionStorage.clear();
+    showLogin();
+    App.toast('✅ Votre compte a été supprimé.');
+  }
+
   return {
     getUser, isLogged, logout, showLogin, loginProfessionalSilently,
     _tab, _loginRole, _registerRole,
     _doPatient, _createPatientPin, _doDoctor, _doPharmacist, _doNurse,
     _regDoctor, _regPharmacist, _regNurse, _regLab, _regReception,
     _setupAdmin, _doAdmin,
+    _deleteMyAccount, _confirmDeleteMyAccount,
     getRoleIcon, getRoleLabel,
   };
 })();

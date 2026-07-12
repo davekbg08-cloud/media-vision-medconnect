@@ -874,7 +874,7 @@ const DB = (() => {
     // Firestore local avec .catch(() => {}) qui avale les échecs en
     // silence. Ici, tout échec est loggé ET mis en file d'attente pour
     // rejeu automatique (voir _push ci-dessus).
-    pushCloud: _push, deleteCloud: _delete,
+    pushCloud: _push, deleteCloud: _delete, roleCollection,
     getAccounts, saveAccounts, getUsers, saveUsers, upsertUserProfile,
     getRegistrationRequests, saveRegistrationRequests, createRegistrationRequest,
     getPatients, savePatients, addPatient, updatePatient, deletePatient, getPatientById, searchPatients,
