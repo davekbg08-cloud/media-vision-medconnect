@@ -307,12 +307,20 @@ service cloud.firestore {
        Rétro-compatible : les fiches créées avant ce chantier n'ont pas
        ce champ, donc aucun code n'est exigé pour elles (défaut
        permissif, même logique que accountStatusOk()/
-       hospitalSubscriptionOk()). */
+       hospitalSubscriptionOk()).
+       Correctif (course create-fiche / premier-accès) : le document
+       mc_patients/{id} doit exister pour que le code soit vérifié. Un
+       !exists() en tête de clause serait AUSSI vrai juste après la
+       création d'une fiche (écriture Firestore asynchrone, cf.
+       js/db.js addPatient) — ça revenait à accepter n'importe quel
+       code (y compris vide) pendant cette fenêtre, vidant la
+       protection anti-préemption. Un identifiant ne correspondant à
+       AUCUNE fiche doit être refusé, pas laissé passer. */
     function patientFirstAccessOk(patientMcId, submittedCode) {
       return patientMcId == null ||
-        !exists(/databases/$(database)/documents/mc_patients/$(patientMcId)) ||
-        get(/databases/$(database)/documents/mc_patients/$(patientMcId)).data.get('firstAccessCode', null) == null ||
-        get(/databases/$(database)/documents/mc_patients/$(patientMcId)).data.get('firstAccessCode', null) == submittedCode;
+        (exists(/databases/$(database)/documents/mc_patients/$(patientMcId)) &&
+         (get(/databases/$(database)/documents/mc_patients/$(patientMcId)).data.get('firstAccessCode', null) == null ||
+          get(/databases/$(database)/documents/mc_patients/$(patientMcId)).data.get('firstAccessCode', null) == submittedCode));
     }
 
     function canReadMedicalData(data) {

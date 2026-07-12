@@ -326,7 +326,7 @@ const HospitalPortal = (() => {
       </form>`);
   }
 
-  function saveNewPatient(e) {
+  async function saveNewPatient(e) {
     e.preventDefault();
     if (!window.HospitalCapabilities?.guardHospitalAction?.('create_patient')) return;
     const user = Auth.getUser() || {};
@@ -349,7 +349,15 @@ const HospitalPortal = (() => {
           created_by_role: user.role || '',
           medical_completion_status: (user.role === 'doctor') ? 'completed' : 'pending',
         };
-    const p = DB.addPatient({
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = '⏳ Enregistrement…'; }
+    // Correctif (course create-fiche / premier-accès) : on attend la
+    // confirmation Firestore réelle de mc_patients avant d'afficher le
+    // code d'accès — sinon un premier accès tenté trop tôt tombait sur
+    // un document pas encore répliqué côté serveur, et
+    // patientFirstAccessOk() acceptait alors n'importe quel code (voir
+    // firestore.rules). Voir aussi DB.addPatientAndConfirm.
+    const { patient: p, confirmed } = await DB.addPatientAndConfirm({
       firstname: document.getElementById('hp-fn').value.trim(),
       lastname:  document.getElementById('hp-ln').value.trim(),
       dob:       document.getElementById('hp-dob').value,
@@ -365,7 +373,7 @@ const HospitalPortal = (() => {
       ...completionFields,
     });
     App.closeModal(); App.toast(`✅ ${t('msg_saved')} — ${p.id}`); App.navigateTo('patients');
-    showFirstAccessCodeModal(p);
+    showFirstAccessCodeModal(p, confirmed);
   }
 
   // Affiché une seule fois à la création de la fiche : le code n'est
@@ -375,11 +383,16 @@ const HospitalPortal = (() => {
   // le saisira avec son PIN au premier accès (voir js/auth.js
   // _createPatientPin). Ferme la préemption de compte par un tiers
   // connaissant seulement le numéro de fiche (voir rapport de sécurité).
-  function showFirstAccessCodeModal(p) {
+  // `confirmed` (voir DB.addPatientAndConfirm) : si la synchronisation
+  // Firestore n'a pas encore abouti (hors-ligne, latence), le code ne
+  // sera pas encore vérifiable côté serveur — on le dit honnêtement
+  // plutôt que de laisser croire qu'il fonctionne déjà.
+  function showFirstAccessCodeModal(p, confirmed = true) {
     App.openModal("🔑 Code d'accès patient", `
       <p>Communiquez ce code au patient (ou à la personne qui l'accompagne) — il devra le saisir avec son PIN lors de son premier accès à l'application. Il ne sera plus jamais réaffiché.</p>
       <div class="id-badge-large" style="font-size:1.6rem;letter-spacing:3px;text-align:center;margin:1rem 0">${esc(p.firstAccessCode || '')}</div>
       <p class="muted">Fiche : ${esc(p.id)}</p>
+      ${confirmed ? '' : `<p class="auth-register-info" style="color:var(--accent)">⚠️ Synchronisation en attente (pas de connexion pour le moment) — le patient devra patienter quelques instants après le retour de la connexion avant que ce code soit reconnu par le serveur.</p>`}
       <button class="btn-p" onclick="App.closeModal()">J'ai noté le code</button>
     `);
   }

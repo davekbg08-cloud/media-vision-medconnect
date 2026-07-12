@@ -455,6 +455,26 @@ const DB = (() => {
     return p;
   }
 
+  /* Variante async de addPatient() : attend la confirmation Firestore
+     réelle des 3 écritures avant de résoudre. addPatient() lance déjà
+     ces écritures en fire-and-forget (jamais attendu par ses
+     appelants historiques, ne pas changer son comportement) — ici on
+     les repousse explicitement en mode critique (_pushCritical, même
+     principe que pushAndReport) pour savoir si elles ont réellement
+     atteint le cloud. Nécessaire pour fermer la course où le code
+     d'accès (firstAccessCode) d'une fiche tout juste créée n'a pas
+     encore atteint Firestore au moment où le patient tente son
+     premier accès (voir firestore.rules patientFirstAccessOk). */
+  async function addPatientAndConfirm(data) {
+    const p = addPatient(data);
+    // Seul mc_patients est vérifié par patientFirstAccessOk() côté
+    // règles — inutile de re-pousser patients/medical_records ici,
+    // addPatient() les a déjà mis en route (fire-and-forget, comme
+    // pour tous ses autres appelants).
+    const ok = await pushAndReport([['mc_patients', p.id, p]]);
+    return { patient: p, confirmed: ok };
+  }
+
   function updatePatient(id, data) {
     const list = getPatients();
     const idx  = list.findIndex(p => p.id === id);
@@ -877,7 +897,7 @@ const DB = (() => {
     pushCloud: _push, deleteCloud: _delete, roleCollection,
     getAccounts, saveAccounts, getUsers, saveUsers, upsertUserProfile,
     getRegistrationRequests, saveRegistrationRequests, createRegistrationRequest,
-    getPatients, savePatients, addPatient, updatePatient, deletePatient, getPatientById, searchPatients,
+    getPatients, savePatients, addPatient, addPatientAndConfirm, updatePatient, deletePatient, getPatientById, searchPatients,
     getConsultations, addConsultation, getPatientConsultations, deleteConsultation,
     getPrescriptions, addPrescription, updatePrescription, updatePrescriptionAndConfirm, getPatientPrescriptions,
     getEstablishmentDocuments, addEstablishmentDocument, getPatientEstablishmentDocuments,

@@ -1,8 +1,15 @@
 {
-  "version": "2.8.0",
-  "build": "2026.07.12.01",
+  "version": "2.8.1",
+  "build": "2026.07.12.02",
   "buildDate": "2026-07-12",
   "changelog": [
+    {
+      "version": "2.8.1",
+      "date": "2026-07-12",
+      "notes": [
+        "Correctif sécurité : le premier accès patient pouvait, dans une fenêtre de quelques instants après la création de la fiche, contourner le code d'accès hôpital (course de synchronisation) — désormais refusé côté serveur tant que la fiche n'est pas confirmée"
+      ]
+    },
     {
       "version": "2.8.0",
       "date": "2026-07-12",
