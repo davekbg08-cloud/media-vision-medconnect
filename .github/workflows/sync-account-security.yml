@@ -1,0 +1,53 @@
+name: Synchronisation sécurité des comptes (révocation + custom claims)
+
+# Planifiée + déclenchement manuel. Réutilise le secret
+# FIREBASE_SERVICE_ACCOUNT_JSON déjà configuré pour la sauvegarde
+# (.github/workflows/backup-firestore.yml) — aucun nouveau secret à
+# créer. Ne modifie jamais Firestore (uniquement Firebase Auth :
+# révocation de refresh tokens + custom claims), et rien dans le dépôt.
+on:
+  workflow_dispatch:
+  schedule:
+    # Toutes les 30 minutes — délai assumé et documenté (pas une vraie
+    # révocation instantanée façon Cloud Function réactive), cf.
+    # docs/SESSION_REVOCATION_SYNC.md.
+    - cron: '*/30 * * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    name: Révocation + custom claims
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Vérifier le secret requis
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          test -n "$FIREBASE_SERVICE_ACCOUNT_JSON" || (echo "Secret manquant : FIREBASE_SERVICE_ACCOUNT_JSON (voir docs/BACKUP_RESTORE_RUNBOOK.md)" && exit 1)
+
+      - name: Installer firebase-admin (non permanent, cf. scripts/sync-account-security.mjs)
+        run: npm install firebase-admin --no-save
+
+      - name: Écrire la clé de compte de service
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+        run: echo "$FIREBASE_SERVICE_ACCOUNT_JSON" > /tmp/firebase-service-account.json
+
+      - name: Synchroniser révocations + custom claims
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: /tmp/firebase-service-account.json
+        run: node scripts/sync-account-security.mjs --apply
+
+      - name: Supprimer la clé décodée
+        if: always()
+        run: rm -f /tmp/firebase-service-account.json
