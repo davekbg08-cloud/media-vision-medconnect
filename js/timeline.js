@@ -14,6 +14,8 @@ const Timeline = (() => {
     appointment:  { icon:'📅', label:'Rendez-vous',          color:'#06B6D4' },
     document:     { icon:'📄', label:'Document',             color:'var(--text-muted)' },
     admission:    { icon:'🏥', label:'Hospitalisation',      color:'var(--danger)' },
+    emergency:    { icon:'🚑', label:'Urgences',             color:'var(--danger)' },
+    maternity:    { icon:'🤰', label:'Maternité',            color:'#EC4899' },
   };
 
   function render(main, patientId) {
@@ -66,6 +68,18 @@ const Timeline = (() => {
       type:'appointment', date:a.date, id:a.aid || a.id,
       title:esc(a.reason || a.motif)||'Rendez-vous',
       sub:  `${a.time || a.heure || ''} · Dr. ${esc(a.doctor || a.docteur)||'—'} · ${a.status || a.statut || ''}`,
+    }));
+
+    (DB.getPatientEmergencyCases?.(patientId) || []).forEach(e => events.push({
+      type:'emergency', date:(e.arrivedAt || e.date || '').slice(0,10), id:e.eid,
+      title:'Passage aux urgences',
+      sub:  esc(e.complaint)||'',
+    }));
+
+    (DB.getPatientMaternityCases?.(patientId) || []).forEach(m => events.push({
+      type:'maternity', date:(m.openedAt || m.date || '').slice(0,10), id:m.mid,
+      title:'Dossier de grossesse',
+      sub:  `DPA : ${esc(m.dueDate)||'—'}`,
     }));
 
     return events.filter(ev => ev.date).sort((a,b) => b.date.localeCompare(a.date));

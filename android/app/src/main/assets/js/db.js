@@ -240,6 +240,7 @@ const DB = (() => {
     // listener est un sous-ensemble filtré (pharmacies publiques).
     const collections = [
       'mc_vaccinations','mc_lab_results','mc_consents',
+      'mc_emergency_cases','mc_maternity_cases',
       'users',
       'patients','doctors','nurses','pharmacies','hospitals',
       'medical_records','prescriptions','appointments','notifications',
@@ -826,6 +827,44 @@ const DB = (() => {
   }
 
   /* ══════════════════════════════════════════════════
+     URGENCES / MATERNITÉ (miroirs patient)
+
+     Correctif (audit) : hospital-emergency.js/hospital-maternity.js
+     écrivent uniquement dans les collections desktop emergencyCases/
+     maternityCases (patientMc, aucun champ patient_uid/uid) — lues
+     exclusivement par leur propre module desktop, jamais par le
+     patient ni par un autre professionnel. Même principe de miroir
+     que mc_lab_results/mc_admissions.
+  ══════════════════════════════════════════════════ */
+  function getAllEmergencyCases() { return load('mc_emergency_cases'); }
+
+  function addEmergencyCaseRecord(data) {
+    const list = getAllEmergencyCases();
+    const e = { ...data, eid: data.eid || makeId('ER'), date: data.date || today() };
+    list.push(e); store('mc_emergency_cases', list);
+    _push('mc_emergency_cases', e.eid, e);
+    return e;
+  }
+
+  function getPatientEmergencyCases(pid) {
+    return getAllEmergencyCases().filter(e => e.patient_id === pid).sort((a,b) => b.date.localeCompare(a.date));
+  }
+
+  function getAllMaternityCases() { return load('mc_maternity_cases'); }
+
+  function addMaternityCaseRecord(data) {
+    const list = getAllMaternityCases();
+    const m = { ...data, mid: data.mid || makeId('MAT'), date: data.date || today() };
+    list.push(m); store('mc_maternity_cases', list);
+    _push('mc_maternity_cases', m.mid, m);
+    return m;
+  }
+
+  function getPatientMaternityCases(pid) {
+    return getAllMaternityCases().filter(m => m.patient_id === pid).sort((a,b) => b.date.localeCompare(a.date));
+  }
+
+  /* ══════════════════════════════════════════════════
      MÉDICAMENTS
   ══════════════════════════════════════════════════ */
   function getMedicines() { return load('mc_medicines'); }
@@ -946,6 +985,8 @@ const DB = (() => {
     getAppointments, addAppointment, updateAppointment, deleteAppointment, getPatientAppointments,
     getVaccinations, addVaccination, getPatientVaccinations, deleteVaccination,
     getAllLabResults, addLabResult, getPatientLabResults, deleteLabResult,
+    getAllEmergencyCases, addEmergencyCaseRecord, getPatientEmergencyCases,
+    getAllMaternityCases, addMaternityCaseRecord, getPatientMaternityCases,
     getMedicines, addMedicine, updateMedicine, deleteMedicine,
     getSales, addSale,
     getMessages, saveMessages,

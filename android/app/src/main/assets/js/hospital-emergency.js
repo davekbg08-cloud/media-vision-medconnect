@@ -191,6 +191,19 @@ const HospitalEmergencyModule = (() => {
         ...est,
       }, caseId);
 
+      // Miroir vers mc_emergency_cases — correctif (audit) : sans lui,
+      // ce passage aux urgences reste invisible au patient (emergencyCases
+      // n'est lu que par ce module desktop).
+      if (window.DB?.addEmergencyCaseRecord) {
+        DB.addEmergencyCaseRecord({
+          patient_id: mc,
+          patient_uid: patient?.patient_uid || patient?.patientAuthUid || '',
+          complaint, triageLevel, status: 'waiting',
+          arrivedAt: new Date().toISOString(),
+          hospital_id: hospitalId, establishmentId: hospitalId,
+        });
+      }
+
       App.closeModal();
       App.toast('🚑 Urgence enregistrée.');
       HospitalDesktopUI.navigate('emergency');
