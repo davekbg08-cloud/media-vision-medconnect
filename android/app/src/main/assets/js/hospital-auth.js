@@ -396,9 +396,27 @@ const HospitalAuth = (() => {
           const cred = await firebaseAuth.createUserWithEmailAndPassword(
             establishmentEmail(mat), pw);
           authUid = cred?.user?.uid || '';
-          // Document users/{uid} : rôle 'hospital', statut 'pending'
-          // (validé par l'admin comme les autres inscriptions).
-          if (authUid && typeof firebaseDB !== 'undefined' && firebaseDB) {
+        } catch (authErr) {
+          if (authErr?.code === 'auth/email-already-in-use') {
+            App.toast('Un établissement existe déjà avec ce matricule.', 'error'); return;
+          }
+          console.warn('[HospitalAuth] Création compte établissement :', authErr?.code || authErr?.message);
+          App.toast('Création du compte impossible : ' + (authErr?.message || authErr), 'error');
+          return;
+        }
+
+        // Document users/{uid} : rôle 'hospital', statut 'pending'
+        // (validé par l'admin comme les autres inscriptions). Correctif
+        // (audit) : cette écriture partageait auparavant le try/catch
+        // ci-dessus — un échec ici (règle rejetée, coupure réseau)
+        // tombait dans le même catch SANS nettoyer le compte Firebase
+        // Auth qui vient d'être créé, le laissant orphelin (email
+        // squatté) : à la relance, auth/email-already-in-use affiche à
+        // tort "Un établissement existe déjà" alors qu'aucun
+        // établissement n'a jamais été créé — même famille de bug que
+        // _createPatientPin/_reg, corrigée ici avec le même rollback.
+        if (authUid && typeof firebaseDB !== 'undefined' && firebaseDB) {
+          try {
             await firebaseDB.collection('users').doc(authUid).set({
               uid: authUid,
               role: 'hospital',
@@ -407,14 +425,13 @@ const HospitalAuth = (() => {
               officialId: mat.toUpperCase(),
               establishmentName: name,
             }, { merge: true });
+          } catch (usersErr) {
+            console.warn('[HospitalAuth] Écriture users/ échouée, nettoyage du compte Firebase :', usersErr?.code || usersErr?.message);
+            try { await firebaseAuth.currentUser?.delete(); }
+            catch (e) { console.warn('[HospitalAuth] Nettoyage compte Firebase après échec users/ :', e); }
+            App.toast('Création du compte impossible : ' + (usersErr?.message || usersErr), 'error');
+            return;
           }
-        } catch (authErr) {
-          if (authErr?.code === 'auth/email-already-in-use') {
-            App.toast('Un établissement existe déjà avec ce matricule.', 'error'); return;
-          }
-          console.warn('[HospitalAuth] Création compte établissement :', authErr?.code || authErr?.message);
-          App.toast('Création du compte impossible : ' + (authErr?.message || authErr), 'error');
-          return;
         }
       }
 

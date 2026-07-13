@@ -1,8 +1,15 @@
 {
-  "version": "2.9.7",
-  "build": "2026.07.13.08",
+  "version": "2.9.8",
+  "build": "2026.07.13.09",
   "buildDate": "2026-07-13",
   "changelog": [
+    {
+      "version": "2.9.8",
+      "date": "2026-07-13",
+      "notes": [
+        "Correctif : un échec après la création du compte lors d'une inscription hôpital pouvait verrouiller définitivement le candidat (compte orphelin nettoyé automatiquement, comme pour les autres flux d'inscription)"
+      ]
+    },
     {
       "version": "2.9.7",
       "date": "2026-07-13",
