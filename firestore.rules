@@ -730,6 +730,24 @@ service cloud.firestore {
         hasRole('reception') || hasRole('admin_hospital');
     }
 
+    // Correctif (audit) : miroirs patient des collections desktop
+    // emergencyCases/maternityCases (patientMc, jamais lues par le
+    // patient) — même principe que mc_lab_results/mc_admissions.
+    // Écrits par hospital-emergency.js/hospital-maternity.js, gatés
+    // côté client par guardHospitalAction('view_patient'/'create_patient'),
+    // mêmes rôles que canRegisterPatient().
+    match /mc_emergency_cases/{docId} {
+      allow read: if canReadMedicalData(resource.data);
+      allow write: if isAdmin() || currentRoleIs('doctor') || currentRoleIs('nurse') ||
+        hasRole('reception') || hasRole('admin_hospital');
+    }
+
+    match /mc_maternity_cases/{docId} {
+      allow read: if canReadMedicalData(resource.data);
+      allow write: if isAdmin() || currentRoleIs('doctor') || currentRoleIs('nurse') ||
+        hasRole('reception') || hasRole('admin_hospital');
+    }
+
     match /mc_medicines/{docId} {
       allow read: if signedIn();
       allow write: if isAdmin() || currentRoleIs('pharmacist');
