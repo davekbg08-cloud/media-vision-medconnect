@@ -148,3 +148,7 @@ jobs:
           name: medconnect-v2.6.0-apk
           path: build-output/medconnect-v2.6.0.apk
           if-no-files-found: error
+
+      - name: Supprimer le keystore et ses secrets
+        if: always()
+        run: rm -f android/keystore.jks android/keystore.properties
