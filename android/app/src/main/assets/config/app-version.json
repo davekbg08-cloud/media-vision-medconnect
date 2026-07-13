@@ -1,8 +1,15 @@
 {
-  "version": "2.9.3",
-  "build": "2026.07.13.04",
+  "version": "2.9.4",
+  "build": "2026.07.13.05",
   "buildDate": "2026-07-13",
   "changelog": [
+    {
+      "version": "2.9.4",
+      "date": "2026-07-13",
+      "notes": [
+        "Correctif sécurité : la messagerie entre professionnels (boîte de réception, \"Nouveau message\") n'appliquait jamais le contrôle d'abonnement desktop — désormais soumise au même principe que les consultations/ordonnances (jamais de blocage si un patient est impliqué)"
+      ]
+    },
     {
       "version": "2.9.3",
       "date": "2026-07-13",
