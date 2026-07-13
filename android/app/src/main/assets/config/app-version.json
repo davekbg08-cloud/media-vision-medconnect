@@ -1,13 +1,20 @@
 {
-  "version": "2.9.9",
-  "build": "2026.07.13.10",
+  "version": "2.9.10",
+  "build": "2026.07.13.11",
   "buildDate": "2026-07-13",
   "changelog": [
+    {
+      "version": "2.9.10",
+      "date": "2026-07-13",
+      "notes": [
+        "Correctif : un passage aux urgences ou un dossier de grossesse saisi côté desktop hôpital n'apparaissait jamais dans le dossier du patient — désormais synchronisé automatiquement (Timeline médicale, filtres Urgences/Maternité)"
+      ]
+    },
     {
       "version": "2.9.9",
       "date": "2026-07-13",
       "notes": [
-        "Correctif : un passage aux urgences ou un dossier de grossesse saisi côté desktop hôpital n'apparaissait jamais dans le dossier du patient — désormais synchronisé automatiquement (Timeline médicale, filtres Urgences/Maternité)"
+        "Correctif : le filtre \"🏥 Hospitalisation\" du dossier patient (Timeline médicale) existait déjà mais n'était jamais alimenté — les admissions saisies côté desktop y apparaissent désormais"
       ]
     },
     {

@@ -718,6 +718,18 @@ service cloud.firestore {
         hasRole('lab') || hasRole('admin_hospital');
     }
 
+    // Correctif (audit) : miroir patient de la collection desktop
+    // `admissions` (patientMc, jamais lue par le patient) — sans lui,
+    // le filtre "🏥 Hospitalisation" du dossier patient
+    // (js/timeline.js) n'était jamais alimenté. Écrit par
+    // hospital-beds.js/hospital-reception.js (doctor/nurse/reception/
+    // admin_hospital, mêmes rôles que canRegisterPatient()).
+    match /mc_admissions/{docId} {
+      allow read: if canReadMedicalData(resource.data);
+      allow write: if isAdmin() || currentRoleIs('doctor') || currentRoleIs('nurse') ||
+        hasRole('reception') || hasRole('admin_hospital');
+    }
+
     // Correctif (audit) : miroirs patient des collections desktop
     // emergencyCases/maternityCases (patientMc, jamais lues par le
     // patient) — même principe que mc_lab_results/mc_admissions.
