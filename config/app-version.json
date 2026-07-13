@@ -1,8 +1,16 @@
 {
-  "version": "2.9.3",
-  "build": "2026.07.13.04",
+  "version": "2.9.4",
+  "build": "2026.07.13.05",
   "buildDate": "2026-07-13",
   "changelog": [
+    {
+      "version": "2.9.4",
+      "date": "2026-07-13",
+      "notes": [
+        "Nettoyage : arrêt d'écritures Firestore mortes (mc_affiliations, jamais lue par l'app) qui étaient rejetées en boucle silencieuse",
+        "Correctif : la suspension d'un compte par l'administrateur ne vérifiait pas que l'écriture cloud avait bien été confirmée (comme pour l'approbation/le rejet)"
+      ]
+    },
     {
       "version": "2.9.3",
       "date": "2026-07-13",
