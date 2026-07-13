@@ -1,8 +1,15 @@
 {
-  "version": "2.9.8",
-  "build": "2026.07.13.09",
+  "version": "2.9.9",
+  "build": "2026.07.13.10",
   "buildDate": "2026-07-13",
   "changelog": [
+    {
+      "version": "2.9.9",
+      "date": "2026-07-13",
+      "notes": [
+        "Correctif : le filtre \"🏥 Hospitalisation\" du dossier patient (Timeline médicale) existait déjà mais n'était jamais alimenté — les admissions saisies côté desktop y apparaissent désormais"
+      ]
+    },
     {
       "version": "2.9.8",
       "date": "2026-07-13",

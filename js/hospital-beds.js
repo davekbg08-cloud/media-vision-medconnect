@@ -231,6 +231,21 @@ const HospitalBedsModule = (() => {
       await CloudDB.updateDoc('beds', bedId, { status: 'occupied' });
       await CloudDB.createAuditLog('patient_admitted', 'admissions', admissionId, { patientMc: mc, bedId });
 
+      // Miroir vers mc_admissions — correctif (audit) : sans lui, le
+      // filtre "🏥 Hospitalisation" du dossier patient (js/timeline.js)
+      // n'est jamais alimenté (admissions n'est lu que côté desktop).
+      if (window.DB?.addAdmissionRecord) {
+        const patient = window.DB.getPatients?.().find(p => p.id === mc);
+        DB.addAdmissionRecord({
+          patient_id: mc,
+          patient_uid: patient?.patient_uid || patient?.patientAuthUid || '',
+          bedId, ward: bed.ward || '', reason,
+          status: 'admitted',
+          admittedAt: new Date().toISOString(),
+          hospital_id: hospitalId, establishmentId: hospitalId,
+        });
+      }
+
       App.closeModal();
       App.toast('Patient admis.');
       HospitalDesktopUI.navigate('beds');

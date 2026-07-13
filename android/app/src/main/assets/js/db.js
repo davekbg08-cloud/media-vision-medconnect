@@ -239,7 +239,7 @@ const DB = (() => {
     // documenté de la version publiée). 'users' reste ici car son
     // listener est un sous-ensemble filtré (pharmacies publiques).
     const collections = [
-      'mc_vaccinations','mc_lab_results','mc_consents',
+      'mc_vaccinations','mc_lab_results','mc_consents','mc_admissions',
       'users',
       'patients','doctors','nurses','pharmacies','hospitals',
       'medical_records','prescriptions','appointments','notifications',
@@ -826,6 +826,30 @@ const DB = (() => {
   }
 
   /* ══════════════════════════════════════════════════
+     ADMISSIONS (miroir patient)
+
+     Correctif (audit) : hospital-beds.js/hospital-reception.js
+     écrivent l'admission dans la collection desktop `admissions`
+     (patientMc, jamais lue par le patient) — le filtre "🏥
+     Hospitalisation" de js/timeline.js existait déjà côté interface
+     mais n'était jamais alimenté. mc_admissions est le miroir
+     lisible côté patient, même principe que mc_lab_results.
+  ══════════════════════════════════════════════════ */
+  function getAllAdmissions() { return load('mc_admissions'); }
+
+  function addAdmissionRecord(data) {
+    const list = getAllAdmissions();
+    const a = { ...data, aid: data.aid || makeId('ADM'), date: data.date || today() };
+    list.push(a); store('mc_admissions', list);
+    _push('mc_admissions', a.aid, a);
+    return a;
+  }
+
+  function getPatientAdmissions(pid) {
+    return getAllAdmissions().filter(a => a.patient_id === pid).sort((a,b) => b.date.localeCompare(a.date));
+  }
+
+  /* ══════════════════════════════════════════════════
      MÉDICAMENTS
   ══════════════════════════════════════════════════ */
   function getMedicines() { return load('mc_medicines'); }
@@ -946,6 +970,7 @@ const DB = (() => {
     getAppointments, addAppointment, updateAppointment, deleteAppointment, getPatientAppointments,
     getVaccinations, addVaccination, getPatientVaccinations, deleteVaccination,
     getAllLabResults, addLabResult, getPatientLabResults, deleteLabResult,
+    getAllAdmissions, addAdmissionRecord, getPatientAdmissions,
     getMedicines, addMedicine, updateMedicine, deleteMedicine,
     getSales, addSale,
     getMessages, saveMessages,

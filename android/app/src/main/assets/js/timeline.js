@@ -68,6 +68,12 @@ const Timeline = (() => {
       sub:  `${a.time || a.heure || ''} · Dr. ${esc(a.doctor || a.docteur)||'—'} · ${a.status || a.statut || ''}`,
     }));
 
+    (DB.getPatientAdmissions?.(patientId) || []).forEach(a => events.push({
+      type:'admission', date:(a.admittedAt || a.date || '').slice(0,10), id:a.aid,
+      title:'Hospitalisation',
+      sub:  `${a.ward ? 'Service ' + esc(a.ward) + ' · ' : ''}${esc(a.reason)||''}${a.status === 'discharged' ? ' · Sortie' : ''}`,
+    }));
+
     return events.filter(ev => ev.date).sort((a,b) => b.date.localeCompare(a.date));
   }
 
