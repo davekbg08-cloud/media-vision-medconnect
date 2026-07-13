@@ -754,7 +754,15 @@ service cloud.firestore {
 
     match /mc_appointments/{docId} {
       allow read: if canReadMedicalData(resource.data);
-      allow write: if isAdmin();
+      // Correctif (audit) : aucune clause create — seul isAdmin()
+      // pouvait écrire, alors que DB.addAppointment() (js/db.js) est
+      // appelé par un médecin/infirmier/patient normal
+      // (js/appointments.js save()). Miroir exact de la clause déjà en
+      // place sur la collection sœur /appointments (ligne ~541).
+      allow create: if isAdmin() ||
+        ((currentRoleIs('doctor') || currentRoleIs('nurse') || ownsPatientData(request.resource.data)) &&
+         hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
+      allow update, delete: if isAdmin() || doctorCanRead(resource.data) || ownsPatientData(resource.data);
     }
 
     match /mc_messages/{docId} {
