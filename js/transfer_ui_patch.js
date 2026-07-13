@@ -150,7 +150,7 @@
     } catch (_) {}
   }
 
-  function sendMessage(event) {
+  async function sendMessage(event) {
     event.preventDefault();
 
     const role = normalizeRole(document.getElementById('msg-role')?.value);
@@ -167,6 +167,26 @@
       return;
     }
 
+    // Correctif (audit) : pré-contrôle d'abonnement uniquement pour la
+    // messagerie pro→pro (ni l'expéditeur ni le destinataire n'est un
+    // patient) — jamais pour un message impliquant un patient, principe
+    // déjà établi ailleurs (le soin/l'échange avec le patient n'est
+    // jamais coupé pour une facture desktop impayée).
+    const senderRole = normalizeRole(window.Auth?.getUser?.()?.role);
+    const isProfessionalTraffic = senderRole !== 'patient' && role !== 'patient';
+    let hospitalId = null;
+    if (isProfessionalTraffic) {
+      hospitalId = (await window.CloudDB?.getActiveHospitalId?.()) || null;
+      try {
+        await window.CloudDB?.requireWritableSubscription?.(
+          priority === 'urgent' ? 'send_message_urgent' : 'send_message_professional'
+        );
+      } catch (err) {
+        window.App.toast(err.message || 'Abonnement expiré — action bloquée.', 'error');
+        return;
+      }
+    }
+
     try {
       if (window.TransferService?.transferObject) {
         const transfer = window.TransferService.transferObject({
@@ -176,7 +196,7 @@
           objectSummary: body.slice(0, 180),
           recipient: { role, uid: toUid, name: toName },
           priority,
-          metadata: { source: 'network_compose' },
+          metadata: { source: 'network_compose', hospitalId },
         });
 
         syncTransferToCloud(transfer);
@@ -189,6 +209,7 @@
           priority,
           subject,
           body,
+          hospitalId,
         });
       }
 
