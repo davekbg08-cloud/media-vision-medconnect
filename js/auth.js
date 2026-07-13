@@ -594,7 +594,6 @@ const Auth = (() => {
       _err('auth-err', '❌ Création du compte impossible sans connexion internet. Réessayez plus tard.');
       return;
     }
-    accounts.push(acc); DB.saveAccounts(accounts);
     // Confirmation cloud réelle (même principe qu'à l'inscription
     // professionnelle, voir _reg) : un code d'accès incorrect est
     // rejeté par la règle mc_accounts.create — indiscernable côté
@@ -603,9 +602,20 @@ const Auth = (() => {
     // établir ici.
     const criticalOk = DB.pushAndReport ? await DB.pushAndReport([['mc_accounts', acc.uid, acc]]) : false;
     if (!criticalOk) {
+      // Correctif (revue de sécurité) : sans ce nettoyage, l'utilisateur
+      // Firebase Auth créé juste au-dessus reste "squatté" indéfiniment
+      // (email synthétique pris avec le PIN d'un tiers) — le vrai
+      // patient, plus tard avec le bon code, ne pourrait plus jamais
+      // créer son propre compte (auth/email-already-in-use avec un mot
+      // de passe qu'il ne connaît pas). currentUser vient d'être créé
+      // dans le même appel : delete() ne nécessite pas de
+      // réauthentification récente.
+      try { await firebaseAuth.currentUser?.delete(); }
+      catch (e) { console.warn('[MedConnect] Nettoyage du compte Firebase après refus :', e); }
       _err('auth-err', "❌ Création refusée — vérifiez le code d'accès (donné par l'hôpital) et votre connexion internet.");
       return;
     }
+    accounts.push(acc); DB.saveAccounts(accounts);
     localStorage.setItem('mc_my_patient_id', id);
     _save(acc); _launch(acc);
     App.toast(`✅ Bienvenue ${patient.firstname} ! PIN créé.`);
