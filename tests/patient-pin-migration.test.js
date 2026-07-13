@@ -186,6 +186,68 @@ test("Auth._createPatientPin transmet le code d'accès saisi à l'écriture mc_a
   assert.strictEqual(acc.firstAccessCode, code, 'le code transmis correspond à celui de la fiche (comparé côté règles, pas ici)');
 });
 
+// Correctif (revue de sécurité) : Firebase Auth n'a aucune notion de
+// "code d'accès" — createUserWithEmailAndPassword réussit quel que
+// soit le code fourni. Sans nettoyage, un code d'accès refusé côté
+// serveur (mc_accounts.create) laissait l'identité Firebase Auth
+// "squattée" indéfiniment (email synthétique pris avec le PIN d'un
+// tiers), verrouillant le vrai patient hors de son propre compte pour
+// toujours (auth/email-already-in-use avec un mot de passe inconnu de
+// lui). _createPatientPin doit désormais supprimer ce compte Firebase
+// Auth orphelin dès que le refus serveur est constaté.
+function fakeFirebaseDBRejectingSet() {
+  return { collection: () => ({ doc: () => ({ set: async () => { throw new Error('permission-denied'); } }) }) };
+}
+
+test("Auth._createPatientPin supprime le compte Firebase Auth orphelin quand mc_accounts est refusé (mauvais code)", async () => {
+  let deleteCalls = 0;
+  const firebaseAuthImpl = {
+    createUserWithEmailAndPassword: async () => ({ user: { uid: 'orphan-uid' } }),
+    currentUser: { delete: async () => { deleteCalls++; } },
+  };
+  const { win, setField, errorText } = setup({ firebaseAuthImpl, firebaseDB: fakeFirebaseDBRejectingSet() });
+  const id = seedPatient(win);
+  setField('lp-id', id);
+  setField('lp-pin', '123456');
+  setField('lp-access-code', 'WRONGCODE');
+  await win.Auth._createPatientPin();
+  assert.strictEqual(deleteCalls, 1, 'le compte Firebase Auth orphelin doit être supprimé exactement une fois');
+  assert.strictEqual(win.DB.getAccounts().length, 0, 'aucun compte ne doit rester en local non plus');
+  assert.match(errorText(), /Création refusée/);
+});
+
+test("Auth._createPatientPin n'appelle jamais delete() quand la création Firebase Auth échoue elle-même (hors-ligne)", async () => {
+  let deleteCalls = 0;
+  const firebaseAuthImpl = {
+    createUserWithEmailAndPassword: async () => { throw new Error('network-error'); },
+    currentUser: { delete: async () => { deleteCalls++; } },
+  };
+  const { win, setField, errorText } = setup({ firebaseAuthImpl, firebaseDB: fakeFirebaseDB() });
+  const id = seedPatient(win);
+  setField('lp-id', id);
+  setField('lp-pin', '123456');
+  setField('lp-access-code', accessCodeFor(win, id));
+  await win.Auth._createPatientPin();
+  assert.strictEqual(deleteCalls, 0, 'rien à nettoyer : aucun compte Firebase Auth n\'a été créé');
+  assert.match(errorText(), /impossible sans connexion/);
+});
+
+test("Auth._createPatientPin n'appelle jamais delete() en cas de succès (bon code)", async () => {
+  let deleteCalls = 0;
+  const firebaseAuthImpl = {
+    createUserWithEmailAndPassword: async () => ({ user: { uid: 'legit-uid' } }),
+    currentUser: { delete: async () => { deleteCalls++; } },
+  };
+  const { win, setField } = setup({ firebaseAuthImpl, firebaseDB: fakeFirebaseDB() });
+  const id = seedPatient(win);
+  setField('lp-id', id);
+  setField('lp-pin', '123456');
+  setField('lp-access-code', accessCodeFor(win, id));
+  await win.Auth._createPatientPin();
+  assert.strictEqual(deleteCalls, 0, 'succès : rien à nettoyer');
+  assert.ok(win.DB.getAccounts().find(a => a.patient_id === id), 'le compte doit bien être créé');
+});
+
 // Correctif (revue de sécurité) : créer quand même le compte sans
 // authUid produisait un compte fantôme — aucun secret Firebase Auth
 // réel, et plus aucun password/pin local (PARTIE B) : la prochaine

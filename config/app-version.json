@@ -1,8 +1,15 @@
 {
-  "version": "2.8.2",
-  "build": "2026.07.12.03",
+  "version": "2.8.3",
+  "build": "2026.07.12.04",
   "buildDate": "2026-07-12",
   "changelog": [
+    {
+      "version": "2.8.3",
+      "date": "2026-07-12",
+      "notes": [
+        "Correctif sécurité : un code d'accès refusé laissait le compte Firebase Auth du patient déjà créé (avec le PIN de celui qui l'avait saisi), verrouillant le vrai patient hors de son propre dossier — le compte orphelin est maintenant supprimé automatiquement"
+      ]
+    },
     {
       "version": "2.8.2",
       "date": "2026-07-12",
