@@ -1,8 +1,15 @@
 {
-  "version": "2.9.3",
-  "build": "2026.07.13.04",
+  "version": "2.9.4",
+  "build": "2026.07.13.05",
   "buildDate": "2026-07-13",
   "changelog": [
+    {
+      "version": "2.9.4",
+      "date": "2026-07-13",
+      "notes": [
+        "Correctif : la prise de rendez-vous n'appliquait pas non plus le contrôle d'abonnement desktop (même principe que les consultations/ordonnances) — le champ manquant qui rendait la règle serveur inopérante est désormais posé, et un message clair s'affiche côté interface en cas de blocage"
+      ]
+    },
     {
       "version": "2.9.3",
       "date": "2026-07-13",

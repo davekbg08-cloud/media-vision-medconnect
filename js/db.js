@@ -738,7 +738,13 @@ const DB = (() => {
 
   function addAppointment(data) {
     const list = getAppointments();
-    const a = { ...data, aid: makeId('A'), created_at: new Date().toISOString() };
+    // sourceDevice : nécessaire pour que hospitalCanWriteFromDevice()
+    // (firestore.rules, mc_appointments) applique la distinction
+    // desktop/mobile — la clause existait déjà côté règles (PR2) mais
+    // restait un no-op sans ce champ, comme pour addConsultation avant
+    // son propre correctif.
+    const a = { ...data, aid: makeId('A'), created_at: new Date().toISOString(),
+      sourceDevice: data.sourceDevice || window.ExchangeBridge?.currentSourceDevice?.() || 'mobile' };
     list.push(a); store('mc_appointments', list);
     _push('mc_appointments', a.aid, a);
     _push('appointments', a.aid, a);
