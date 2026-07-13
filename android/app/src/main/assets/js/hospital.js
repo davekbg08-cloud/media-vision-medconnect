@@ -515,12 +515,23 @@ const HospitalPortal = (() => {
     document.getElementById('smart-check-result').innerHTML = Network.renderSmartCheckResult(warns);
   }
 
-  function saveConsult(e, patientId) {
+  async function saveConsult(e, patientId) {
     e.preventDefault();
     // Garde de capacité (desktop hôpital) : créer une consultation +
     // prescrire est réservé au médecin. Un infirmier/labo/réception en
     // session hôpital ne peut pas exécuter cette action.
     if (!window.HospitalCapabilities?.guardHospitalAction?.('create_consultation')) return;
+    try {
+      // Pré-contrôle client (audit, même pattern que
+      // js/hospital-beds.js saveBed/admitPatient) : le serveur
+      // (hospitalCanWriteFromDevice, firestore.rules mc_consultations/
+      // mc_prescriptions) bloquera de toute façon en desktop expiré —
+      // ceci donne un message clair au lieu d'un refus Firestore brut.
+      await CloudDB.requireWritableSubscription('create_consultation');
+    } catch (err) {
+      App.toast(err.message || 'Abonnement expiré — action bloquée.', 'error');
+      return;
+    }
     const user = Auth.getUser() || {};
     const hosp = window.HospitalsRegistry?.getCurrentHospital?.();
 

@@ -1,8 +1,15 @@
 {
-  "version": "2.9.2",
-  "build": "2026.07.13.03",
+  "version": "2.9.3",
+  "build": "2026.07.13.04",
   "buildDate": "2026-07-13",
   "changelog": [
+    {
+      "version": "2.9.3",
+      "date": "2026-07-13",
+      "notes": [
+        "Correctif : le principe \"desktop bloqué en écriture si l'abonnement hôpital est expiré, mobile jamais coupé pour le soin courant\" n'était en réalité jamais appliqué à la création de consultation/ordonnance — désormais vérifié côté règles serveur et signalé clairement côté interface"
+      ]
+    },
     {
       "version": "2.9.2",
       "date": "2026-07-13",
