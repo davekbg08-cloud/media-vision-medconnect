@@ -766,6 +766,18 @@ const Auth = (() => {
 
     const criticalOk = DB.pushAndReport ? await DB.pushAndReport(criticalWrites) : false;
     if (!criticalOk) {
+      // Correctif (audit) : même principe que _createPatientPin et
+      // registration-submit-flow.js — sans ce nettoyage, un compte
+      // Firebase Auth fraîchement créé (finalAccount.authUid présent =
+      // _createFirebaseUser a bien créé un NOUVEL utilisateur, pas
+      // simplement repris un compte existant via auth/email-already-
+      // in-use, qui ne pose jamais authUid) reste squatté indéfiniment
+      // si l'écriture Firestore échoue définitivement — le candidat ne
+      // pourrait alors plus jamais réinscrire ce même email.
+      if (finalAccount.authUid) {
+        try { await firebaseAuth.currentUser?.delete(); }
+        catch (e) { console.warn('[MedConnect] Nettoyage compte Firebase après échec labo/réception :', e); }
+      }
       _err('reg-err', 'Demande enregistrée localement, mais synchronisation cloud non confirmée. Vérifiez la connexion puis réessayez.');
       return 'local-only';
     }

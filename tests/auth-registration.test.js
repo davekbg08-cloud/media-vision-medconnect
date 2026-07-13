@@ -59,3 +59,43 @@ test('les comptes créés par _reg restent status=pending et sont poussés vers 
   assert.match(body, /\['mc_accounts', finalAccount\.uid, finalAccount\]/, 'écriture critique vers mc_accounts');
   assert.match(body, /\['users', finalAccount\.uid, finalAccount\]/, 'écriture vers users');
 });
+
+/* =====================================================
+   Correctif (audit) : compte Firebase Auth orphelin si l'écriture
+   critique échoue après création — même famille que
+   Auth._createPatientPin (tests/patient-pin-migration.test.js) et
+   registration-submit-flow.js submitRegistration
+   (tests/registration-submit-flow.test.js), mais _reg() (labo/
+   réception) ne l'avait jamais eu.
+   ===================================================== */
+test("_reg supprime le compte Firebase Auth si la synchronisation cloud critique échoue (finalAccount.authUid présent)", () => {
+  const body = regBody();
+  const criticalOkIdx = body.indexOf('const criticalOk =');
+  assert.ok(criticalOkIdx !== -1, 'criticalOk doit être calculé');
+  const ifIdx = body.indexOf('if (!criticalOk) {', criticalOkIdx);
+  assert.ok(ifIdx !== -1, 'un bloc if (!criticalOk) doit suivre');
+  const ifBlockEnd = body.indexOf('\n    }', ifIdx);
+  const ifBody = body.slice(ifIdx, ifBlockEnd);
+  assert.match(ifBody, /if\s*\(finalAccount\.authUid\)/, 'le nettoyage ne doit se déclencher que si un NOUVEAU compte a été créé (authUid posé)');
+  assert.match(ifBody, /firebaseAuth\.currentUser\?\.delete\(\)/, 'le compte Firebase Auth orphelin doit être supprimé');
+  const deleteIdx = ifBody.indexOf('firebaseAuth.currentUser?.delete()');
+  const before = ifBody.slice(Math.max(0, deleteIdx - 40), deleteIdx);
+  assert.match(before, /try\s*\{/, 'la suppression doit être protégée par un try/catch, ne jamais faire planter le message d\'erreur réel');
+});
+
+test("_reg n'essaie de nettoyer que si finalAccount.authUid est posé (pas le cas auth/email-already-in-use, qui ne modifie pas authUid)", () => {
+  const body = regBody();
+  const createIdx = body.indexOf('const finalAccount = await _createFirebaseUser(');
+  assert.ok(createIdx !== -1);
+  // _createFirebaseUser (fonction voisine) ne pose authUid que sur un
+  // succès de création réelle — sur auth/email-already-in-use, elle
+  // retourne le compte sans modification (pas de authUid ajouté).
+  const fnStart = src.indexOf('async function _createFirebaseUser(');
+  const fnEnd = src.indexOf('\n  async function _reg(', fnStart);
+  const fnBody = src.slice(fnStart, fnEnd);
+  assert.match(fnBody, /email-already-in-use/);
+  const branchIdx = fnBody.indexOf('email-already-in-use');
+  const branchEnd = fnBody.indexOf('return', branchIdx);
+  const returnLine = fnBody.slice(branchEnd, fnBody.indexOf('\n', branchEnd));
+  assert.doesNotMatch(returnLine, /authUid/, 'le repli auth/email-already-in-use ne doit jamais poser authUid — sinon le nettoyage supprimerait un compte préexistant d\'un tiers');
+});
