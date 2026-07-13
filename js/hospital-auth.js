@@ -10,10 +10,15 @@
    Puis l'agent choisit son rôle dans cet hôpital (le rôle fixe
    son niveau d'accès dans le tableau de bord).
 
-   Sécurité : le mot de passe hôpital n'est JAMAIS stocké en clair.
-   On conserve seulement son empreinte SHA-256 (passwordHash) dans
-   le document établissement. Firestore reste la source de vérité ;
-   localStorage n'est qu'un cache de session.
+   Sécurité : le mot de passe hôpital est vérifié via un vrai compte
+   Firebase Auth (signInWithEmailAndPassword), jamais via une valeur
+   stockée dans le document établissement — ce document est lisible
+   par tout utilisateur connecté (allow read: if signedIn()), donc
+   inadapté à y garder un secret, même haché. (Ancien mécanisme :
+   hash SHA-256 non salé en clair dans ce document — corrigé, voir
+   migrateLegacyEstablishmentAuth pour les établissements hérités.)
+   Firestore reste la source de vérité ; localStorage n'est qu'un
+   cache de session.
 
    Rôles desktop autorisés (jamais 'patient') :
      admin_hospital, doctor, nurse, lab, reception, pharmacist
@@ -148,6 +153,30 @@ const HospitalAuth = (() => {
       const pw  = document.getElementById('ha-login-pw').value;
       if (!mat || !pw) { App.toast('Matricule et mot de passe requis.', 'error'); return; }
 
+      // Correctif sécurité (audit) : l'ancien mécanisme comparait un
+      // hash SHA-256 NON SALÉ stocké dans le document établissement —
+      // lisible par TOUT utilisateur connecté (allow read: if
+      // signedIn() sur hospitals/establissements). Cassable hors ligne
+      // par table arc-en-ciel. L'établissement a pourtant déjà un vrai
+      // compte Firebase Auth créé à l'inscription (register()) : on
+      // l'utilise désormais ici, comme pour le PIN patient. La session
+      // Firebase Auth ouverte ici est de toute façon remplacée
+      // immédiatement par celle de l'agent (verifyAgent →
+      // loginProfessionalSilently, signInWithEmailAndPassword propre à
+      // l'agent) — la remarque historique sur "pas de session
+      // établissement ici" ne s'applique donc plus.
+      const email = establishmentEmail(mat);
+      let signedInViaAuth = false;
+      if (typeof firebaseAuth !== 'undefined' && firebaseAuth) {
+        try {
+          await firebaseAuth.signInWithEmailAndPassword(email, pw);
+          signedInViaAuth = true;
+        } catch (authErr) {
+          // Repli hérité (établissement créé avant ce correctif, encore
+          // sur passwordHash) géré plus bas — pas d'erreur bloquante ici.
+        }
+      }
+
       const est = await findByOfficialId(mat);
       if (!est) { App.toast('Établissement introuvable pour ce matricule.', 'error'); return; }
 
@@ -159,17 +188,17 @@ const HospitalAuth = (() => {
         return;
       }
 
-      // Vérification du mot de passe hôpital (première barrière d'accès
-      // à l'établissement). NB : la vraie session Firebase sera celle de
-      // l'AGENT, pas de l'établissement — c'est ce qui permet au serveur
-      // de distinguer médecin/laborantin. On ne fait donc PAS de
-      // signInWithEmailAndPassword établissement ici.
-      if (est.passwordHash) {
+      if (!signedInViaAuth) {
+        // Établissement hérité : encore vérifié via l'ancien hash, PUIS
+        // migré organiquement (jamais l'inverse — le hash n'est retiré
+        // qu'une fois la migration confirmée).
+        if (!est.passwordHash) {
+          App.toast('Cet établissement n\'a pas encore de mot de passe défini. Contactez l\'administration.', 'error');
+          return;
+        }
         const hash = await hashPassword(pw);
         if (hash !== est.passwordHash) { App.toast('Mot de passe incorrect.', 'error'); return; }
-      } else {
-        App.toast('Cet établissement n\'a pas encore de mot de passe défini. Contactez l\'administration.', 'error');
-        return;
+        await migrateLegacyEstablishmentAuth(est, email, pw);
       }
 
       // Établissement déverrouillé → connexion personnelle de l'agent.
@@ -177,6 +206,22 @@ const HospitalAuth = (() => {
     } catch (e) {
       console.error('[HospitalAuth] login :', e);
       App.toast(e.message || 'Connexion impossible.', 'error');
+    }
+  }
+
+  /* Migration organique (même principe que le PIN patient) : crée le
+     compte Firebase Auth manquant pour un établissement hérité, puis
+     retire le hash en clair du document — non bloquant pour la
+     connexion en cours (déjà réussie via l'ancien hash au-dessus). */
+  async function migrateLegacyEstablishmentAuth(est, email, pw) {
+    if (typeof firebaseAuth === 'undefined' || !firebaseAuth) return;
+    try {
+      const cred = await firebaseAuth.createUserWithEmailAndPassword(email, pw);
+      const authUid = cred?.user?.uid || '';
+      if (!authUid) return;
+      await window.HospitalsRegistry?.migratePasswordHashToAuth?.(est.establishmentId || est.id, authUid);
+    } catch (e) {
+      console.warn('[HospitalAuth] Migration établissement :', e?.code || e?.message);
     }
   }
 
@@ -344,8 +389,6 @@ const HospitalAuth = (() => {
       const existing = await findByOfficialId(mat);
       if (existing) { App.toast('Un établissement existe déjà avec ce matricule.', 'error'); return; }
 
-      const passwordHash = await hashPassword(pw);
-
       // 1) Compte Firebase Auth de l'établissement (identité serveur).
       let authUid = '';
       if (typeof firebaseAuth !== 'undefined' && firebaseAuth) {
@@ -375,17 +418,35 @@ const HospitalAuth = (() => {
         }
       }
 
-      // 2) Document établissement (registre métier).
-      const est = window.HospitalsRegistry?.addHospital?.({
-        name,
-        officialId: mat.toUpperCase(),
-        city,
-        passwordHash,
-        authUid,
-        status: 'pending', // validation par l'admin MedConnect
-        registeredFrom: 'desktop',
-      });
-      if (!est) { App.toast('Création impossible.', 'error'); return; }
+      // 2) Document établissement (registre métier). Correctif (audit) :
+      // establishments/hospitals/mc_hospitals n'acceptaient l'écriture
+      // que d'un admin — le compte non-admin qui vient de s'inscrire ne
+      // pouvait donc JAMAIS faire aboutir cette écriture (échec
+      // silencieux, jamais rejoué avec succès). La règle a été corrigée
+      // (voir firestore.rules) ; on attend maintenant la confirmation
+      // réelle avant d'annoncer un succès, et on nettoie le compte
+      // Firebase Auth orphelin si le serveur refuse quand même (même
+      // principe que le correctif patient, js/auth.js
+      // _createPatientPin).
+      const result = window.HospitalsRegistry?.addHospitalAndConfirm
+        ? await window.HospitalsRegistry.addHospitalAndConfirm({
+            name,
+            officialId: mat.toUpperCase(),
+            city,
+            authUid,
+            status: 'pending', // validation par l'admin MedConnect
+            registeredFrom: 'desktop',
+          })
+        : null;
+      if (!result?.hospital) { App.toast('Création impossible.', 'error'); return; }
+      if (!result.confirmed) {
+        if (authUid && typeof firebaseAuth !== 'undefined' && firebaseAuth?.currentUser) {
+          try { await firebaseAuth.currentUser.delete(); }
+          catch (e) { console.warn('[HospitalAuth] Nettoyage du compte Firebase après refus :', e); }
+        }
+        App.toast('❌ Création refusée — réessayez plus tard ou contactez le support.', 'error');
+        return;
+      }
 
       App.toast('✅ Établissement créé. En attente de validation par l\'administration.');
       showTab('login');

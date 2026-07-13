@@ -165,6 +165,49 @@ const HospitalsRegistry = (() => {
     return h;
   }
 
+  /* Variante confirmée de addHospital() : attend la confirmation
+     Firestore réelle des 3 collections avant de résoudre (même
+     principe que DB.addPatientAndConfirm, js/db.js). Nécessaire car
+     `establishments`/`hospitals`/`mc_hospitals` ne sont pas
+     inscriptibles par le compte non-admin qui vient de s'inscrire tant
+     que la règle serveur ne l'autorise pas explicitement — sans
+     confirmation, l'appelant (hospital-auth.js register()) ne peut pas
+     savoir que l'établissement n'a en réalité jamais été créé côté
+     serveur. */
+  async function addHospitalAndConfirm(data) {
+    const h = addHospital(data);
+    const confirmed = await DB.pushAndReport([
+      ['establishments', h.establishmentId, h],
+      ['hospitals', h.establishmentId, h],
+      ['mc_hospitals', h.establishmentId, h],
+    ]);
+    return { hospital: h, confirmed };
+  }
+
+  /* Migration organique du mot de passe hérité vers Firebase Auth
+     (voir js/hospital-auth.js migrateLegacyEstablishmentAuth) : retire
+     RÉELLEMENT passwordHash (pas juste `null` — hasNoSecretFields()
+     côté règles bloque toute clé présente, valeur ou non) et pose
+     authUid. Écrite en direct (pas via updateHospital/saveHospitals,
+     qui font un .set() intégral côté cloud — la valeur locale de
+     passwordHash serait alors repoussée telle quelle et annulerait la
+     suppression cloud). */
+  async function migratePasswordHashToAuth(establishmentId, authUid) {
+    const list = getHospitals();
+    const idx = list.findIndex(h => h.establishmentId === establishmentId || h.hid === establishmentId);
+    if (idx === -1) return;
+    list[idx] = { ...list[idx], authUid };
+    delete list[idx].passwordHash;
+    store(EST_KEY, list);
+    store(LEGACY_EST_KEY, list);
+    if (typeof firebaseDB === 'undefined' || !firebaseDB || typeof firebase === 'undefined') return;
+    const patch = { authUid, passwordHash: firebase.firestore.FieldValue.delete() };
+    await Promise.all(['establishments', 'hospitals', 'mc_hospitals'].map(col =>
+      firebaseDB.collection(col).doc(establishmentId).set(patch, { merge: true })
+        .catch(e => console.warn(`[HospitalsRegistry] Migration ${col} :`, e?.code || e?.message))
+    ));
+  }
+
   function updateHospital(establishmentId, data) {
     const list = getHospitals();
     const idx = list.findIndex(h => h.establishmentId === establishmentId || h.hid === establishmentId);
@@ -1006,7 +1049,7 @@ const HospitalsRegistry = (() => {
   }
 
   return {
-    getHospitals, saveHospitals, addHospital, updateHospital, getHospitalById,
+    getHospitals, saveHospitals, addHospital, addHospitalAndConfirm, migratePasswordHashToAuth, updateHospital, getHospitalById,
     getAffiliations, saveAffiliations, requestAffiliation, respondAffiliation, removeStaff, validateEstablishment,
     getDoctorHospitals, getPendingAffiliations, ensureHospitalMembership,
     getCurrentHospital, setCurrentHospital, clearCurrentHospital,
