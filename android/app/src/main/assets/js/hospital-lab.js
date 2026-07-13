@@ -239,6 +239,31 @@ const HospitalLabModule = (() => {
         doctorUid: req.doctorUid || req.requestedByUid || '',
       }, DB.makeId('LABR'));
 
+      // 3) Miroir vers mc_lab_results — correctif (audit) : sans lui, le
+      //    patient (js/lab.js renderForPatient, filtré sur patient_id)
+      //    ne voit JAMAIS ce résultat. labRequests/labResults ci-dessus
+      //    ne sont notifiés/lus qu'au médecin demandeur (listener
+      //    doctorUid) — deux systèmes jusqu'ici totalement déconnectés.
+      //    patientMc est le même identifiant que patient_id (numéro de
+      //    fiche MC-xxx) ; patient_uid récupéré depuis le cache local
+      //    des patients si le patient a déjà fait son "premier accès"
+      //    (limite assumée : sinon il ne verra ce résultat qu'après).
+      if (window.DB?.addLabResult) {
+        const patient = window.DB.getPatients?.().find(p => p.id === req.patientMc);
+        const user = await CloudDB.getCurrentUserProfile();
+        DB.addLabResult({
+          patient_id: req.patientMc || '',
+          patient_uid: patient?.patient_uid || patient?.patientAuthUid || '',
+          type: req.type || '',
+          doctor: user?.name || user?.uid || '',
+          value, notes: comment,
+          results: [{ param: req.type || '', value, ref: '' }],
+          created_by: user?.uid || '',
+          hospital_id: hospitalId,
+          establishmentId: hospitalId,
+        });
+      }
+
       await CloudDB.createAuditLog('lab_result_added', 'labRequests', requestId, {});
       App.closeModal();
       App.toast('Résultat enregistré.');

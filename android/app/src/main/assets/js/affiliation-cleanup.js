@@ -109,8 +109,13 @@
       updatedAt: new Date().toISOString(),
       decided_at: new Date().toISOString(),
     };
+    // Correctif (audit) : mc_affiliations (allow write: if isAdmin();)
+    // n'est jamais lue par l'app — voir js/hospitals_registry.js
+    // saveAffiliations() pour le même correctif. Cette écriture
+    // pouvait en plus échouer silencieusement ici puisque
+    // cleanOrphanRequests() peut être déclenché par un appelant
+    // non-admin (getAffiliations/renderManagePage patchés).
     window.DB.pushCloud('affiliation_requests', id, cleaned);
-    window.DB.pushCloud('mc_affiliations', id, cleaned);
   }
 
   function cleanOrphanRequests() {

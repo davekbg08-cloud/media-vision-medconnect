@@ -1,13 +1,42 @@
 {
-  "version": "2.9.4",
-  "build": "2026.07.13.05",
+  "version": "2.9.8",
+  "build": "2026.07.13.09",
   "buildDate": "2026-07-13",
   "changelog": [
+    {
+      "version": "2.9.8",
+      "date": "2026-07-13",
+      "notes": [
+        "Correctif : la prise de rendez-vous n'appliquait pas non plus le contrôle d'abonnement desktop (même principe que les consultations/ordonnances) — le champ manquant qui rendait la règle serveur inopérante est désormais posé, et un message clair s'affiche côté interface en cas de blocage"
+      ]
+    },
+    {
+      "version": "2.9.7",
+      "date": "2026-07-13",
+      "notes": [
+        "Nettoyage : arrêt d'écritures Firestore mortes (mc_affiliations, jamais lue par l'app) qui étaient rejetées en boucle silencieuse",
+        "Correctif : la suspension d'un compte par l'administrateur ne vérifiait pas que l'écriture cloud avait bien été confirmée (comme pour l'approbation/le rejet)"
+      ]
+    },
+    {
+      "version": "2.9.6",
+      "date": "2026-07-13",
+      "notes": [
+        "Correctif : un résultat de laboratoire saisi côté desktop hôpital n'apparaissait jamais dans la vue \"Mes analyses\" du patient (deux systèmes de laboratoire jusqu'ici déconnectés) — désormais synchronisé automatiquement"
+      ]
+    },
+    {
+      "version": "2.9.5",
+      "date": "2026-07-13",
+      "notes": [
+        "Correctif : un échec après la création du compte lors d'une inscription laboratoire/réception pouvait verrouiller définitivement le candidat (compte orphelin nettoyé automatiquement, comme pour les autres rôles professionnels)"
+      ]
+    },
     {
       "version": "2.9.4",
       "date": "2026-07-13",
       "notes": [
-        "Correctif : la prise de rendez-vous n'appliquait pas non plus le contrôle d'abonnement desktop (même principe que les consultations/ordonnances) — le champ manquant qui rendait la règle serveur inopérante est désormais posé, et un message clair s'affiche côté interface en cas de blocage"
+        "Correctif sécurité : la messagerie entre professionnels (boîte de réception, \"Nouveau message\") n'appliquait jamais le contrôle d'abonnement desktop — désormais soumise au même principe que les consultations/ordonnances (jamais de blocage si un patient est impliqué)"
       ]
     },
     {

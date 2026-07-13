@@ -389,6 +389,11 @@
       transferId: transfer.transferId,
       objectType: transfer.objectType,
       objectId: transfer.objectId,
+      // Correctif (audit) : propage le hospitalId posé par
+      // transfer_ui_patch.js sendMessage() jusqu'à Network.notify(),
+      // seul moyen pour firestore.rules de soumettre ce message au
+      // contrôle d'abonnement desktop/mobile.
+      hospitalId: overrides?.hospitalId || transfer.metadata?.hospitalId || null,
     };
   }
 

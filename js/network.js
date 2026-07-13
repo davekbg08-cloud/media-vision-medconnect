@@ -17,7 +17,7 @@ const Network = (() => {
      toUid/fromUid/fromRole/readStatus/priority/createdAt
      sont les champs propres pour les nouveaux usages.
   ──────────────────────────────────────────────────── */
-  function notify({ to_role, to_id, type, subject, body, priority, recipientUid }) {
+  function notify({ to_role, to_id, type, subject, body, priority, recipientUid, hospitalId }) {
     const from = window.Auth?.getUser?.();
     const msgs = DB.getMessages();
     msgs.push({
@@ -38,6 +38,14 @@ const Network = (() => {
       read:       false,
       readStatus: 'unread',
       readAt:     null,
+      // Correctif (audit) : seul champ qui permet à
+      // hospitalCanWriteFromDevice() (firestore.rules, mc_messages) de
+      // s'appliquer — absent (null) pour les 8 autres types de
+      // notification (rendez-vous, ordonnance, labo, affiliation...),
+      // qui restent donc toujours autorisés comme aujourd'hui. Seule la
+      // messagerie pro→pro (js/transfer_ui_patch.js) le renseigne.
+      hospitalId: hospitalId || null,
+      sourceDevice: window.ExchangeBridge?.currentSourceDevice?.() || 'mobile',
     });
     DB.saveMessages(msgs);
   }
