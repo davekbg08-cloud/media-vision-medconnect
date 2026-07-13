@@ -1,8 +1,15 @@
 {
-  "version": "2.9.11",
-  "build": "2026.07.13.12",
+  "version": "2.9.12",
+  "build": "2026.07.13.13",
   "buildDate": "2026-07-13",
   "changelog": [
+    {
+      "version": "2.9.12",
+      "date": "2026-07-13",
+      "notes": [
+        "Correctif : l'envoi d'une ordonnance vers une pharmacie partenaire depuis le desktop hôpital n'appliquait aucun contrôle d'abonnement (contrairement aux consultations/ordonnances) — désormais bloqué si l'abonnement de l'établissement est expiré, tout en laissant toujours ouvert l'envoi de l'ordonnance au patient (qui la présente à la pharmacie de son choix)"
+      ]
+    },
     {
       "version": "2.9.11",
       "date": "2026-07-13",

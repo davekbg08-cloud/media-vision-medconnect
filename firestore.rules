@@ -519,8 +519,12 @@ service cloud.firestore {
          hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
       // La pharmacie ciblée peut toujours mettre à jour le statut
       // même abonnement expiré/suspendu (une ordonnance déjà envoyée
-      // doit pouvoir être honorée) ; le médecin auteur reste soumis
-      // à la même règle desktop/mobile que la création.
+      // doit pouvoir être honorée). Le médecin auteur n'est soumis au
+      // contrôle desktop/mobile QUE lorsqu'il dispatche vers une
+      // pharmacie précise (pharmacyUid non nul) ; l'envoi au patient
+      // (pharmacyUid null) reste toujours ouvert — le soin du patient
+      // n'est jamais coupé pour une facture desktop impayée. Périmètre
+      // aligné sur la collection canonique mc_prescriptions.
       // PARTIE H — le pharmacien ne peut modifier QUE le statut et les
       // métadonnées de traitement, jamais le contenu médical
       // (patient_id, doctor_uid, diagnosis, medicines, establishmentId,
@@ -532,7 +536,8 @@ service cloud.firestore {
          request.resource.data.diff(resource.data).affectedKeys()
            .hasOnly(['status', 'updatedAt', 'updatedByUid', 'updatedByRole', 'cancelReason'])) ||
         (doctorCanRead(resource.data) &&
-         hospitalCanWriteFromDevice(resolveHospitalId(resource.data), request.resource.data.sourceDevice));
+         (request.resource.data.get('pharmacyUid', null) == null ||
+          hospitalCanWriteFromDevice(resolveHospitalId(resource.data), request.resource.data.get('sourceDevice', null))));
       allow delete: if isAdmin();
     }
 
@@ -836,8 +841,19 @@ service cloud.firestore {
       // PARTIE H — même restriction de champs que /prescriptions : le
       // pharmacien ne modifie jamais le contenu médical, uniquement le
       // statut et ses métadonnées de traitement.
+      // Correctif (audit — dérive canonique/legacy) : le médecin auteur
+      // pouvait modifier mc_prescriptions (collection réellement lue)
+      // sans AUCUN contrôle d'abonnement, alors que la collection
+      // jumelle /prescriptions gate déjà cette mise à jour via
+      // hospitalCanWriteFromDevice. On aligne les deux — mais le
+      // contrôle ne s'applique QUE lorsqu'une pharmacie précise est
+      // ciblée (pharmacyUid non nul) : l'envoi au patient (pharmacyUid
+      // null) reste toujours ouvert, le soin du patient n'est jamais
+      // coupé pour une facture desktop impayée.
       allow update: if isAdmin()
-        || doctorCanRead(resource.data)
+        || (doctorCanRead(resource.data) &&
+            (request.resource.data.get('pharmacyUid', null) == null ||
+             hospitalCanWriteFromDevice(resolveHospitalId(resource.data), request.resource.data.get('sourceDevice', null))))
         || (pharmacyCanReadPrescription(resource.data) &&
             request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(['status', 'updatedAt', 'updatedByUid', 'updatedByRole', 'cancelReason']));
