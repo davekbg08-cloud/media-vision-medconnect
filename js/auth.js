@@ -961,6 +961,15 @@ const Auth = (() => {
         if (data) break;
       }
       if (!data) return null;
+      // Correctif (audit) : contrairement à doctor/nurse/pharmacist
+      // (_restoreProfessional, qui appelle handleAccountStatusBeforeAuth
+      // AVANT tout signInWithEmailAndPassword), ce chemin lab/reception
+      // ne vérifiait jamais le statut du compte — un compte rejeté ou
+      // suspendu par l'admin (voir js/admin.js reject()/suspend(), qui
+      // ne peuvent que changer le statut Firestore, jamais désactiver le
+      // compte Firebase Auth lui-même : aucun Admin SDK sur ce projet,
+      // plan Spark) pouvait donc continuer à se connecter normalement.
+      if (!handleAccountStatusBeforeAuth(data, role, num)) return null;
       if (data.email && _hasFirebaseAuth()) {
         const cred = await firebaseAuth.signInWithEmailAndPassword(data.email, pass);
         data.uid = cred?.user?.uid || data.uid;
