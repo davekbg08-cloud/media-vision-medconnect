@@ -227,6 +227,21 @@ const HospitalReceptionModule = (() => {
           console.error('[Reception] Occupation du lit échouée :', bedErr);
           App.toast('⚠️ Patient admis, mais le lit n\'a pas pu être marqué occupé. Vérifiez l\'état des lits.', 'error');
         }
+
+        // Miroir vers mc_admissions — correctif (audit) : même besoin
+        // que hospital-beds.js saveAdmission(), sinon cette admission-là
+        // (créée depuis le flux réception) reste elle aussi invisible
+        // au patient.
+        if (window.DB?.addAdmissionRecord) {
+          DB.addAdmissionRecord({
+            patient_id: mc,
+            patient_uid: patient?.patient_uid || patient?.patientAuthUid || '',
+            bedId, ward: bedLabel, reason,
+            status: 'admitted',
+            admittedAt: new Date().toISOString(),
+            hospital_id: hospitalId, establishmentId: hospitalId,
+          });
+        }
       }
 
       // Notifie le médecin orienté (file de travail côté mobile/desktop).

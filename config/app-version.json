@@ -1,13 +1,27 @@
 {
-  "version": "2.9.8",
-  "build": "2026.07.13.09",
+  "version": "2.9.10",
+  "build": "2026.07.13.11",
   "buildDate": "2026-07-13",
   "changelog": [
+    {
+      "version": "2.9.10",
+      "date": "2026-07-13",
+      "notes": [
+        "Correctif : un échec après la création du compte lors d'une inscription hôpital pouvait verrouiller définitivement le candidat (compte orphelin nettoyé automatiquement, comme pour les autres flux d'inscription)"
+      ]
+    },
+    {
+      "version": "2.9.9",
+      "date": "2026-07-13",
+      "notes": [
+        "Correctif : le filtre \"🏥 Hospitalisation\" du dossier patient (Timeline médicale) existait déjà mais n'était jamais alimenté — les admissions saisies côté desktop y apparaissent désormais"
+      ]
+    },
     {
       "version": "2.9.8",
       "date": "2026-07-13",
       "notes": [
-        "Correctif : un échec après la création du compte lors d'une inscription hôpital pouvait verrouiller définitivement le candidat (compte orphelin nettoyé automatiquement, comme pour les autres flux d'inscription)"
+        "Correctif : la prise de rendez-vous n'appliquait pas non plus le contrôle d'abonnement desktop (même principe que les consultations/ordonnances) — le champ manquant qui rendait la règle serveur inopérante est désormais posé, et un message clair s'affiche côté interface en cas de blocage"
       ]
     },
     {
