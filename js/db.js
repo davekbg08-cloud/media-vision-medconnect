@@ -616,7 +616,14 @@ const DB = (() => {
 
   function addConsultation(data) {
     const list = getConsultations();
-    const c = { ...data, cid: makeId('C'), date: data.date || today() };
+    // sourceDevice : nécessaire pour que hospitalCanWriteFromDevice()
+    // (firestore.rules) applique la distinction desktop/mobile — sans
+    // ce champ, resolveHospitalId() trouve bien l'établissement mais
+    // la règle reste permissive par défaut (même piège déjà corrigé
+    // au cas par cas sur emergency-transfer.js, voir addPrescription
+    // ci-dessous qui l'a déjà).
+    const c = { ...data, cid: makeId('C'), date: data.date || today(),
+      sourceDevice: data.sourceDevice || window.ExchangeBridge?.currentSourceDevice?.() || 'mobile' };
     list.push(c); store('mc_consultations', list);
     _push('mc_consultations', c.cid, c);
     _push('medical_records', c.cid, {

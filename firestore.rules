@@ -686,7 +686,19 @@ service cloud.firestore {
       // Créer/valider une consultation = acte médical : médecin
       // uniquement (l'infirmier peut lire, pas créer). Verrouillage
       // serveur du contrôle de capacité côté client.
-      allow write: if canDecideMedical();
+      // Correctif (audit) : le principe documenté plus haut
+      // (hospitalCanWriteFromDevice — mobile jamais coupé, desktop
+      // bloqué si abonnement expiré) n'était en réalité JAMAIS
+      // appliqué ici : seule la collection jumelle /consultations
+      // (jamais lue en pratique par l'app, mirror mort) avait cette
+      // clause. Le vrai chemin d'écriture (js/db.js addConsultation)
+      // pouvait donc créer des consultations indéfiniment sur
+      // desktop, abonnement expiré ou non.
+      allow create: if canDecideMedical() &&
+        hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice);
+      allow update: if canDecideMedical() &&
+        hospitalCanWriteFromDevice(resolveHospitalId(resource.data), request.resource.data.sourceDevice);
+      allow delete: if canDecideMedical();
     }
 
     match /mc_vaccinations/{docId} {
@@ -776,7 +788,14 @@ service cloud.firestore {
       allow read: if canReadMedicalData(resource.data) ||
         belongsToSameEstablishment(resource.data) ||
         pharmacyCanReadPrescription(resource.data);
-      allow create: if isAdmin() || currentRoleIs('doctor');
+      // Correctif (audit) : même défaut que mc_consultations — le
+      // principe hospitalCanWriteFromDevice n'était appliqué que sur
+      // la collection jumelle /prescriptions (mirror jamais lu en
+      // pratique). js/db.js addPrescription pose déjà sourceDevice ;
+      // il ne restait qu'à le vérifier ici.
+      allow create: if isAdmin() ||
+        (currentRoleIs('doctor') &&
+         hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
       // PARTIE H — même restriction de champs que /prescriptions : le
       // pharmacien ne modifie jamais le contenu médical, uniquement le
       // statut et ses métadonnées de traitement.
