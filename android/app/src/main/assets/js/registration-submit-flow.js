@@ -311,9 +311,12 @@
     }
 
     setSubmitting(true);
+    // Déclaré hors du try suivant (pas seulement à l'intérieur) pour
+    // rester visible dans le catch englobant ci-dessous — correctif
+    // de nettoyage du compte Firebase Auth orphelin.
+    let credential;
 
     try {
-      let credential;
       try {
         credential = await firebaseAuth.createUserWithEmailAndPassword(email, pass);
       } catch (err) {
@@ -345,6 +348,17 @@
       App?.toast?.('✅ Votre demande a été envoyée. Elle sera examinée par l’administrateur.');
     } catch (err) {
       console.error('[MedConnect] Envoi demande inscription impossible :', err);
+      // Correctif (audit) : sans ce nettoyage, un échec après la
+      // création réussie du compte Firebase Auth (writeRegistrationToFirestore
+      // — pas de file de réessai ici, contrairement à Auth._reg) laissait
+      // l'identité orpheline indéfiniment. Toute nouvelle tentative avec
+      // le même email tombait ensuite sur auth/email-already-in-use alors
+      // qu'aucune demande n'existait réellement côté serveur — le
+      // candidat restait verrouillé sans recours.
+      if (credential?.user) {
+        try { await credential.user.delete(); }
+        catch (e) { console.warn('[MedConnect] Nettoyage compte Firebase après échec inscription :', e); }
+      }
       showError(`❌ Impossible d’envoyer la demande : ${err?.message || 'erreur inconnue'}`);
     } finally {
       setSubmitting(false);
