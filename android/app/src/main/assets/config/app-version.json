@@ -1,8 +1,15 @@
 {
-  "version": "2.9.4",
-  "build": "2026.07.13.05",
+  "version": "2.9.5",
+  "build": "2026.07.13.06",
   "buildDate": "2026-07-13",
   "changelog": [
+    {
+      "version": "2.9.5",
+      "date": "2026-07-13",
+      "notes": [
+        "Correctif : un échec après la création du compte lors d'une inscription laboratoire/réception pouvait verrouiller définitivement le candidat (compte orphelin nettoyé automatiquement, comme pour les autres rôles professionnels)"
+      ]
+    },
     {
       "version": "2.9.4",
       "date": "2026-07-13",
