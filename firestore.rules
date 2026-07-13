@@ -829,7 +829,18 @@ service cloud.firestore {
 
     match /mc_messages/{docId} {
       allow read, update: if isAdmin() || (signedIn() && resource.data.to_id == request.auth.uid);
-      allow create: if signedIn();
+      // Correctif (audit) : seuls les messages qui portent explicitement
+      // un hospitalId (messagerie pro→pro, js/transfer_ui_patch.js) sont
+      // soumis à hospitalCanWriteFromDevice — les 8 autres types de
+      // notification (rendez-vous, ordonnance, labo, affiliation...) ne
+      // posent jamais ce champ et restent donc toujours autorisés,
+      // inchangés.
+      allow create: if isAdmin() ||
+        (signedIn() &&
+         ((!('hospitalId' in request.resource.data)) ||
+          request.resource.data.hospitalId in [null, ''] ||
+          hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data),
+                                      request.resource.data.sourceDevice)));
       allow delete: if isAdmin();
     }
 
