@@ -368,6 +368,38 @@ service cloud.firestore {
         hasNoSecretFields(request.resource.data);
     }
 
+    /* Correctif (audit) : establishments/hospitals/mc_hospitals
+       n'avaient QUE `allow write/create: if isAdmin()` — le compte
+       hôpital non-admin qui vient de s'inscrire (hospital-auth.js
+       register()) ne pouvait donc jamais faire aboutir la création de
+       son propre document (échec silencieux, jamais rejoué avec
+       succès). Miroir de safeSelfUserCreate : l'établissement crée SON
+       PROPRE document (authUid == soi-même), statut figé à 'pending'
+       (validation admin obligatoire), sans champ secret (voir
+       hasNoSecretFields — interdit notamment l'ancien passwordHash en
+       clair, désormais remplacé par Firebase Auth). */
+    function establishmentSelfCreateOk(data) {
+      return signedIn() &&
+        data.get('authUid', null) == request.auth.uid &&
+        data.get('status', null) == 'pending' &&
+        hasNoSecretFields(data);
+    }
+    /* Update self-service restreint à 2 cas : (a) l'établissement met à
+       jour SON PROPRE document déjà réclamé (authUid inchangé), (b) un
+       établissement hérité (créé avant ce correctif, authUid absent)
+       réclame son document lors de la migration organique du mot de
+       passe (migrateLegacyEstablishmentAuth, js/hospital-auth.js) — le
+       statut ne peut jamais changer par cette voie (auto-approbation
+       impossible), et authUid ne peut jamais être réattribué à un tiers
+       une fois posé. */
+    function establishmentSelfClaimOk(data) {
+      return signedIn() &&
+        data.get('authUid', null) == request.auth.uid &&
+        (resource.data.get('authUid', null) == null || resource.data.get('authUid', null) == request.auth.uid) &&
+        data.get('status', null) == resource.data.get('status', null) &&
+        hasNoSecretFields(data);
+    }
+
     match /users/{uid} {
       allow create: if isAdmin() || safeSelfUserCreate(uid);
       allow read: if isAdmin() ||
@@ -466,7 +498,9 @@ service cloud.firestore {
         resource.data.owner_uid == request.auth.uid ||
         isAdmin()
       );
-      allow create, update, delete: if isAdmin();
+      allow create: if isAdmin() || establishmentSelfCreateOk(request.resource.data);
+      allow update: if isAdmin() || establishmentSelfClaimOk(request.resource.data);
+      allow delete: if isAdmin();
     }
 
     match /medical_records/{recordId} {
@@ -536,7 +570,9 @@ service cloud.firestore {
 
     match /establishments/{establishmentId} {
       allow read: if signedIn();
-      allow create, update, delete: if isAdmin();
+      allow create: if isAdmin() || establishmentSelfCreateOk(request.resource.data);
+      allow update: if isAdmin() || establishmentSelfClaimOk(request.resource.data);
+      allow delete: if isAdmin();
     }
 
     /* PARTIE G/E — trace/audit des documents médicaux par établissement.
@@ -765,7 +801,9 @@ service cloud.firestore {
 
     match /mc_hospitals/{docId} {
       allow read: if signedIn();
-      allow write: if isAdmin();
+      allow create: if isAdmin() || establishmentSelfCreateOk(request.resource.data);
+      allow update: if isAdmin() || establishmentSelfClaimOk(request.resource.data);
+      allow delete: if isAdmin();
     }
 
     match /mc_affiliations/{docId} {
