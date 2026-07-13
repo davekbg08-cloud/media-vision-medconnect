@@ -14,6 +14,12 @@ const { assertSucceeds, assertFails } = require('@firebase/rules-unit-testing');
 const { doc, setDoc } = require('firebase/firestore');
 const { getTestEnv, clearAll } = require('./helpers');
 
+async function seedExpiredSubscription(env, hospitalId) {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'subscriptions', hospitalId), { status: 'expired' });
+  });
+}
+
 test('mc_appointments : un médecin peut créer un rendez-vous', async () => {
   const env = await getTestEnv();
   await clearAll(env);
@@ -51,5 +57,31 @@ test("mc_appointments : un rôle sans lien (ex. pharmacien) ne peut pas créer d
   await assertFails(setDoc(doc(pharmacist, 'mc_appointments', 'APT-4'), {
     aid: 'APT-4', patient_id: 'MC-APT-4', doctor: 'Dr. Test', date: '2026-08-04', time: '12:00',
     reason: 'Contrôle', status: 'pending',
+  }));
+});
+
+// La clause hospitalCanWriteFromDevice existait déjà ici (voir tests
+// ci-dessus) mais restait un no-op tant que DB.addAppointment()
+// (js/db.js) ne posait jamais sourceDevice — correctif appliqué en
+// parallèle de ces tests.
+test("mc_appointments : création refusée pour un desktop dont l'abonnement hôpital est expiré", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await seedExpiredSubscription(env, 'HOSP-APT-DEV-1');
+  const doctor = env.authenticatedContext('doctor-apt-dev-1', { role: 'doctor' }).firestore();
+  await assertFails(setDoc(doc(doctor, 'mc_appointments', 'APT-DEV-1'), {
+    aid: 'APT-DEV-1', patient_id: 'MC-APT-DEV-1', doctor: 'Dr. Test', date: '2026-08-05', time: '09:00',
+    reason: 'Contrôle', status: 'pending', establishmentId: 'HOSP-APT-DEV-1', sourceDevice: 'desktop',
+  }));
+});
+
+test("mc_appointments : création acceptée pour un mobile même si l'abonnement hôpital est expiré (le soin courant n'est jamais coupé)", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await seedExpiredSubscription(env, 'HOSP-APT-DEV-2');
+  const doctor = env.authenticatedContext('doctor-apt-dev-2', { role: 'doctor' }).firestore();
+  await assertSucceeds(setDoc(doc(doctor, 'mc_appointments', 'APT-DEV-2'), {
+    aid: 'APT-DEV-2', patient_id: 'MC-APT-DEV-2', doctor: 'Dr. Test', date: '2026-08-06', time: '10:00',
+    reason: 'Contrôle', status: 'pending', establishmentId: 'HOSP-APT-DEV-2', sourceDevice: 'mobile',
   }));
 });

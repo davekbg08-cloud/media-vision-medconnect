@@ -139,8 +139,19 @@ const AppointmentsModule = (() => {
       </form>`);
   }
 
-  function save(e) {
+  async function save(e) {
     e.preventDefault();
+    try {
+      // Pré-contrôle client (même pattern que js/hospital.js
+      // saveConsult) : le serveur (hospitalCanWriteFromDevice,
+      // firestore.rules mc_appointments) bloquera de toute façon en
+      // desktop expiré — ceci donne un message clair au lieu d'un
+      // refus Firestore brut.
+      await CloudDB.requireWritableSubscription('create_appointment');
+    } catch (err) {
+      App.toast(err.message || 'Abonnement expiré — action bloquée.', 'error');
+      return;
+    }
     const a = DB.addAppointment({
       patient_id: document.getElementById('apt-pid').value,
       doctor:     document.getElementById('apt-doc').value,
