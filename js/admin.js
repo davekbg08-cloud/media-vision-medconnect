@@ -411,7 +411,7 @@ const AdminModule = (() => {
     App.navigateTo('dashboard');
   }
 
-  function suspend(uid) {
+  async function suspend(uid) {
     if (!uid || !confirm('Suspendre cet utilisateur ?')) return;
     const accounts = getAccountsSafe();
     const idx = accounts.findIndex(a => a.uid === uid);
@@ -419,7 +419,13 @@ const AdminModule = (() => {
     accounts[idx].status = 'suspended';
     accounts[idx].suspended_at = now();
     DB.saveAccounts(accounts);
-    pushRegistrationCloud(uid, accounts[idx], 'suspended');
+    // Correctif (audit) : contrairement à approve()/reject(), le résultat
+    // de l'écriture critique n'était jusqu'ici ni attendu ni vérifié —
+    // un échec silencieux laissait l'admin croire le compte suspendu
+    // alors que users/{uid}.status (celui que lit accountStatusOk() côté
+    // règles) pouvait rester inchangé côté serveur.
+    const ok = await pushRegistrationCloud(uid, accounts[idx], 'suspended');
+    if (!ok) App.toast('⚠️ Enregistré localement, mais Firestore n\'a pas confirmé l\'écriture. Vérifiez la connexion et réessayez.', 'error');
     App.toast('🚫 Utilisateur suspendu');
     App.navigateTo('dashboard');
   }

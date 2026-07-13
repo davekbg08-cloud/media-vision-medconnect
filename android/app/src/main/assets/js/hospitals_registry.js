@@ -232,9 +232,14 @@ const HospitalsRegistry = (() => {
     const normalized = list.map(normalizeRequest);
     store(REQ_KEY, normalized);
     store(LEGACY_REQ_KEY, normalized);
+    // Correctif (audit) : mc_affiliations (allow write: if isAdmin();)
+    // n'est jamais lue par l'app (seule affiliation_requests l'est,
+    // voir js/db.js) — cette écriture était systématiquement rejetée
+    // pour l'appelant réel (le professionnel demandeur, non-admin),
+    // sans impact fonctionnel mais avec un réessai perpétuel silencieux
+    // dans la file d'attente locale. Collection legacy morte, retirée.
     normalized.forEach(a => {
       pushCloud('affiliation_requests', a.requestId, a);
-      pushCloud('mc_affiliations', a.requestId, a);
     });
   }
 
