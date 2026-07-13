@@ -1,8 +1,15 @@
 {
-  "version": "2.9.3",
-  "build": "2026.07.13.04",
+  "version": "2.9.4",
+  "build": "2026.07.13.05",
   "buildDate": "2026-07-13",
   "changelog": [
+    {
+      "version": "2.9.4",
+      "date": "2026-07-13",
+      "notes": [
+        "Correctif : un résultat de laboratoire saisi côté desktop hôpital n'apparaissait jamais dans la vue \"Mes analyses\" du patient (deux systèmes de laboratoire jusqu'ici déconnectés) — désormais synchronisé automatiquement"
+      ]
+    },
     {
       "version": "2.9.3",
       "date": "2026-07-13",
