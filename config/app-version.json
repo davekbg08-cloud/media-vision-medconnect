@@ -1,13 +1,20 @@
 {
-  "version": "2.9.10",
-  "build": "2026.07.13.11",
+  "version": "2.9.11",
+  "build": "2026.07.13.12",
   "buildDate": "2026-07-13",
   "changelog": [
+    {
+      "version": "2.9.11",
+      "date": "2026-07-13",
+      "notes": [
+        "Correctif : un échec après la création du compte lors d'une inscription hôpital pouvait verrouiller définitivement le candidat (compte orphelin nettoyé automatiquement, comme pour les autres flux d'inscription)"
+      ]
+    },
     {
       "version": "2.9.10",
       "date": "2026-07-13",
       "notes": [
-        "Correctif : un échec après la création du compte lors d'une inscription hôpital pouvait verrouiller définitivement le candidat (compte orphelin nettoyé automatiquement, comme pour les autres flux d'inscription)"
+        "Correctif : un passage aux urgences ou un dossier de grossesse saisi côté desktop hôpital n'apparaissait jamais dans le dossier du patient — désormais synchronisé automatiquement (Timeline médicale, filtres Urgences/Maternité)"
       ]
     },
     {

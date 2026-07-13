@@ -180,6 +180,19 @@ const HospitalMaternityModule = (() => {
         ...est,
       }, caseId);
 
+      // Miroir vers mc_maternity_cases — correctif (audit) : sans lui,
+      // ce dossier de grossesse reste invisible à la patiente
+      // (maternityCases n'est lu que par ce module desktop).
+      if (window.DB?.addMaternityCaseRecord) {
+        DB.addMaternityCaseRecord({
+          patient_id: mc,
+          patient_uid: patient?.patient_uid || patient?.patientAuthUid || '',
+          lmpDate: lmp, dueDate: dueDate(lmp), prenatalVisits: 0, status: 'prenatal',
+          openedAt: new Date().toISOString(),
+          hospital_id: hospitalId, establishmentId: hospitalId,
+        });
+      }
+
       App.closeModal();
       App.toast('🤰 Dossier de grossesse créé.');
       HospitalDesktopUI.navigate('maternity');
