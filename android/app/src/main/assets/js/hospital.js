@@ -249,9 +249,46 @@ const HospitalPortal = (() => {
         <div class="patient-row-actions">
           ${window.HospitalCapabilities?.can?.(Auth.getUser()?.role, 'create_consultation')
             ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();HospitalPortal.openConsult('${p.id}')">🩺</button>` : ''}
+          <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();HospitalPortal.viewAccessCode('${p.id}')">🔑</button>
           <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();HospitalPortal.deletePatient('${p.id}')">🗑️</button>
         </div>
       </div>`;
+  }
+
+  /* ── Redonner le code d'accès patient (après la création) ──
+     showFirstAccessCodeModal ne le montre qu'une fois. Si le
+     personnel doit le redonner (patient absent à la création, oubli),
+     on vérifie d'abord que le compte n'existe pas déjà (sinon le code
+     est sans objet — l'accès normal suffit) avant de relire le code
+     réel côté serveur (DB.getPatientAccessCode, jamais uniquement le
+     cache local, qui peut ne pas refléter un compte créé depuis un
+     autre appareil). */
+  async function viewAccessCode(id) {
+    if (!canUsePatient(id)) { App.toast('Accès patient non autorisé.', 'error'); return; }
+    const exists = await DB.accountExistsForPatient(id);
+    if (exists) { App.toast('✅ Le patient a déjà créé son compte — le code n\'est plus nécessaire.'); return; }
+    const code = await DB.getPatientAccessCode(id);
+    if (!code) {
+      App.toast('ℹ️ Cette fiche n\'a pas de code d\'accès (créée avant ce dispositif) — le patient peut faire son premier accès sans code.');
+      return;
+    }
+    showAccessCodeAgainModal(id, code);
+  }
+
+  // Fenêtre limitée dans le temps (3 min) — un code unique à usage
+  // unique ne doit pas rester affiché indéfiniment à l'écran.
+  function showAccessCodeAgainModal(patientId, code) {
+    const title = "🔑 Code d'accès patient";
+    App.openModal(title, `
+      <p>Code d'accès <strong>unique</strong>, à usage unique pour le premier accès de ce patient — communiquez-le-lui (papier, oralement), il devient inutile dès que son compte est créé.</p>
+      <div class="id-badge-large" style="font-size:1.6rem;letter-spacing:3px;text-align:center;margin:1rem 0">${esc(code)}</div>
+      <p class="muted">Fiche : ${esc(patientId)}</p>
+      <p class="auth-register-info" style="color:var(--accent)">⏱️ Cette fenêtre se fermera automatiquement dans quelques minutes pour limiter son exposition à l'écran.</p>
+      <button class="btn-p" onclick="App.closeModal()">J'ai noté le code</button>
+    `);
+    setTimeout(() => {
+      if (document.getElementById('modal-title')?.textContent === title) App.closeModal();
+    }, 180000);
   }
 
   /* ── PATIENT DETAIL ─────────────────────────────── */
@@ -326,7 +363,7 @@ const HospitalPortal = (() => {
       </form>`);
   }
 
-  function saveNewPatient(e) {
+  async function saveNewPatient(e) {
     e.preventDefault();
     if (!window.HospitalCapabilities?.guardHospitalAction?.('create_patient')) return;
     const user = Auth.getUser() || {};
@@ -349,7 +386,15 @@ const HospitalPortal = (() => {
           created_by_role: user.role || '',
           medical_completion_status: (user.role === 'doctor') ? 'completed' : 'pending',
         };
-    const p = DB.addPatient({
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = '⏳ Enregistrement…'; }
+    // Correctif (course create-fiche / premier-accès) : on attend la
+    // confirmation Firestore réelle de mc_patients avant d'afficher le
+    // code d'accès — sinon un premier accès tenté trop tôt tombait sur
+    // un document pas encore répliqué côté serveur, et
+    // patientFirstAccessOk() acceptait alors n'importe quel code (voir
+    // firestore.rules). Voir aussi DB.addPatientAndConfirm.
+    const { patient: p, confirmed } = await DB.addPatientAndConfirm({
       firstname: document.getElementById('hp-fn').value.trim(),
       lastname:  document.getElementById('hp-ln').value.trim(),
       dob:       document.getElementById('hp-dob').value,
@@ -365,6 +410,28 @@ const HospitalPortal = (() => {
       ...completionFields,
     });
     App.closeModal(); App.toast(`✅ ${t('msg_saved')} — ${p.id}`); App.navigateTo('patients');
+    showFirstAccessCodeModal(p, confirmed);
+  }
+
+  // Affiché une seule fois à la création de la fiche : le code n'est
+  // jamais réaffiché ensuite (non stocké en clair côté interface après
+  // cet instant, seulement dans mc_patients côté serveur pour
+  // vérification). À communiquer au patient (papier, oralement) — il
+  // le saisira avec son PIN au premier accès (voir js/auth.js
+  // _createPatientPin). Ferme la préemption de compte par un tiers
+  // connaissant seulement le numéro de fiche (voir rapport de sécurité).
+  // `confirmed` (voir DB.addPatientAndConfirm) : si la synchronisation
+  // Firestore n'a pas encore abouti (hors-ligne, latence), le code ne
+  // sera pas encore vérifiable côté serveur — on le dit honnêtement
+  // plutôt que de laisser croire qu'il fonctionne déjà.
+  function showFirstAccessCodeModal(p, confirmed = true) {
+    App.openModal("🔑 Code d'accès patient", `
+      <p>Communiquez ce code au patient (ou à la personne qui l'accompagne) — il devra le saisir avec son PIN lors de son premier accès à l'application. Il ne sera plus jamais réaffiché.</p>
+      <div class="id-badge-large" style="font-size:1.6rem;letter-spacing:3px;text-align:center;margin:1rem 0">${esc(p.firstAccessCode || '')}</div>
+      <p class="muted">Fiche : ${esc(p.id)}</p>
+      ${confirmed ? '' : `<p class="auth-register-info" style="color:var(--accent)">⚠️ Synchronisation en attente (pas de connexion pour le moment) — le patient devra patienter quelques instants après le retour de la connexion avant que ce code soit reconnu par le serveur.</p>`}
+      <button class="btn-p" onclick="App.closeModal()">J'ai noté le code</button>
+    `);
   }
 
   function deletePatient(id) {
@@ -848,6 +915,7 @@ const HospitalPortal = (() => {
 
   return {
     render, filter, openDetail, openNewPatient, saveNewPatient, deletePatient,
+    viewAccessCode,
     openExternalSearch, searchExternalPatient, requestPatientAccess,
     openConsult, addRxItem, removeRxItem, runSmartCheck, saveConsult, delConsult,
     openPrescriptionTarget, confirmPrescriptionTarget,

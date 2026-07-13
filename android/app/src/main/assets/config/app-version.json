@@ -1,8 +1,83 @@
 {
-  "version": "2.4.0",
-  "build": "2026.07.09.01",
-  "buildDate": "2026-07-09",
+  "version": "2.9.2",
+  "build": "2026.07.13.03",
+  "buildDate": "2026-07-13",
   "changelog": [
+    {
+      "version": "2.9.2",
+      "date": "2026-07-13",
+      "notes": [
+        "Correctif : un compte laboratoire/réception rejeté ou suspendu par l'administration pouvait quand même se connecter normalement (contrairement aux autres rôles professionnels) — même vérification de statut appliquée désormais"
+      ]
+    },
+    {
+      "version": "2.9.1",
+      "date": "2026-07-13",
+      "notes": [
+        "Correctif : un échec après la création du compte lors d'une inscription médecin/pharmacien/infirmier(ère) pouvait verrouiller définitivement le candidat (compte orphelin nettoyé automatiquement, comme pour le patient)"
+      ]
+    },
+    {
+      "version": "2.9.0",
+      "date": "2026-07-13",
+      "notes": [
+        "Correctif : l'inscription d'un nouvel hôpital ne se synchronisait jamais côté serveur (règle manquante) — l'écran de validation admin ne voyait jamais les nouvelles inscriptions",
+        "Correctif sécurité : le mot de passe de connexion hôpital était vérifié via un hash SHA-256 non salé, lisible par tout utilisateur connecté — remplacé par Firebase Authentication (comme pour le PIN patient), avec migration automatique des établissements existants"
+      ]
+    },
+    {
+      "version": "2.8.3",
+      "date": "2026-07-12",
+      "notes": [
+        "Correctif sécurité : un code d'accès refusé laissait le compte Firebase Auth du patient déjà créé (avec le PIN de celui qui l'avait saisi), verrouillant le vrai patient hors de son propre dossier — le compte orphelin est maintenant supprimé automatiquement"
+      ]
+    },
+    {
+      "version": "2.8.2",
+      "date": "2026-07-12",
+      "notes": [
+        "Nouveau : bouton 🔑 sur la liste des patients pour redonner le code d'accès si besoin (fenêtre limitée à 3 minutes)"
+      ]
+    },
+    {
+      "version": "2.8.1",
+      "date": "2026-07-12",
+      "notes": [
+        "Correctif sécurité : le premier accès patient pouvait, dans une fenêtre de quelques instants après la création de la fiche, contourner le code d'accès hôpital (course de synchronisation) — désormais refusé côté serveur tant que la fiche n'est pas confirmée"
+      ]
+    },
+    {
+      "version": "2.8.0",
+      "date": "2026-07-12",
+      "notes": [
+        "Préparation Firebase App Check (SDK intégré, inerte tant qu'aucune clé n'est configurée) : renforce la vérification que les requêtes viennent bien de l'app officielle"
+      ]
+    },
+    {
+      "version": "2.7.0",
+      "date": "2026-07-11",
+      "notes": [
+        "Suppression de compte self-service (Paramètres > Compte) : le patient ou le professionnel peut supprimer lui-même son accès, sans toucher au dossier médical"
+      ]
+    },
+    {
+      "version": "2.6.0",
+      "date": "2026-07-11",
+      "notes": [
+        "Code d'accès hôpital à usage unique pour le premier accès patient : ferme la préemption d'une fiche par un tiers connaissant seulement le numéro MC-xxx"
+      ]
+    },
+    {
+      "version": "2.5.0",
+      "date": "2026-07-11",
+      "notes": [
+        "Sécurisation : PIN patient migré vers Firebase Authentication (plus de PIN en clair)",
+        "Isolation par établissement appliquée côté serveur (Firestore Rules) pour les dossiers, consultations, ordonnances, laboratoire et admissions",
+        "Consentements patients sécurisés (seul le patient concerné peut approuver)",
+        "Ordonnances : pharmacien restreint au statut, transitions de statut validées, confirmation cloud avant message de succès",
+        "Scanner de secrets automatique (npm run security:scan) et tests de règles Firestore (npm run test:rules)"
+      ]
+    },
     {
       "version": "2.4.0",
       "date": "2026-07-09",

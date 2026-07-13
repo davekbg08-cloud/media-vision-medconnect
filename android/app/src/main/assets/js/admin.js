@@ -152,18 +152,14 @@ const AdminModule = (() => {
       DB.saveAccounts?.(accounts.filter(a => a.uid !== uid));
     }
 
-    // 3) propagation cloud (suppression des documents)
-    try {
-      if (typeof firebaseDB !== 'undefined' && firebaseDB) {
-        for (const r of removed) {
-          if (r.requestId) await firebaseDB.collection('registration_requests').doc(r.requestId).delete().catch(() => {});
-        }
-        if (acc?.uid && !['approved','active'].includes(String(acc.status||'').toLowerCase())) {
-          await firebaseDB.collection('mc_accounts').doc(acc.uid).delete().catch(() => {});
-        }
-      }
-    } catch (e) {
-      console.warn('[Admin] Suppression cloud demande :', e);
+    // 3) propagation cloud (suppression des documents) — via
+    // DB.deleteCloud (PARTIE K), qui logue tout échec au lieu de
+    // l'avaler silencieusement.
+    for (const r of removed) {
+      if (r.requestId) await DB.deleteCloud('registration_requests', r.requestId);
+    }
+    if (acc?.uid && !['approved','active'].includes(String(acc.status||'').toLowerCase())) {
+      await DB.deleteCloud('mc_accounts', acc.uid);
     }
 
     App.toast('🗑️ Demande supprimée.');

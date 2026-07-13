@@ -114,6 +114,12 @@ const Auth = (() => {
           <label class="inp-lbl">PIN (4-6 chiffres) *</label>
           <input type="password" id="lp-pin" class="inp" maxlength="6" placeholder="••••" inputmode="numeric">
         </div>
+        <div class="form-group">
+          <label class="inp-lbl">Code d'accès hôpital (uniquement pour le premier accès)</label>
+          <input type="text" id="lp-access-code" class="inp" maxlength="6" placeholder="Donné par l'hôpital à la création de votre fiche"
+            style="letter-spacing:2px;text-transform:uppercase;font-family:monospace"
+            oninput="this.value=this.value.toUpperCase()">
+        </div>
         <button class="btn-p" onclick="Auth._doPatient()">🔐 Se connecter à mon dossier existant</button>
         <button class="btn btn-ghost" style="width:100%;margin-top:.6rem" onclick="Auth._createPatientPin()">🆕 Premier accès : créer mon PIN</button>`,
 
@@ -203,6 +209,60 @@ const Auth = (() => {
   function _hasFirebaseAuth() { return typeof firebaseAuth !== 'undefined' && !!firebaseAuth; }
   function _hasFirebaseDB() { return typeof firebaseDB !== 'undefined' && !!firebaseDB; }
   const _professionalField = role => role === 'doctor' ? 'order_num' : 'matricule';
+
+  /* ── PARTIE B — PIN patient via Firebase Authentication ──
+     Le patient ne saisit jamais d'email (aucun champ dans l'UI) : on
+     dérive un email synthétique déterministe de son numéro de fiche
+     public, uniquement pour réutiliser _createFirebaseUser/
+     _signInFirebaseForAccount — exactement le même mécanisme déjà en
+     place pour médecin/infirmier/pharmacien (email + mot de passe
+     gérés par Firebase Auth, jamais stockés en clair dans
+     mc_accounts). Firebase Auth exige un mot de passe d'au moins 6
+     caractères ; un PIN plus court est complété par des zéros — ça ne
+     renforce pas l'entropie du PIN lui-même, seulement une contrainte
+     technique de l'API, à ne jamais présenter comme un renforcement
+     de sécurité. */
+  function _syntheticPatientEmail(patientId) {
+    return `patient-${String(patientId).toLowerCase().replace(/[^a-z0-9]/g, '')}@patients.medconnect.internal`;
+  }
+  function _toFirebasePassword(pin) {
+    return pin.length >= 6 ? pin : pin.padEnd(6, '0');
+  }
+
+  /* IMPORTANT : contrairement à _createFirebaseUser/_signInFirebaseForAccount
+     (utilisées pour médecin/infirmier/pharmacien, dont le uid EST déjà
+     l'uid Firebase généré à l'inscription), le compte patient garde un
+     uid stable 'PAT_'+id — clé de document mc_accounts et référence
+     utilisée partout dans l'app. Ces deux fonctions dédiées ne
+     touchent donc JAMAIS account.uid, uniquement account.authUid. */
+  async function _createPatientFirebaseAuth(email, pass, account) {
+    if (!email || !_hasFirebaseAuth()) return account;
+    try {
+      const credential = await firebaseAuth.createUserWithEmailAndPassword(email, pass);
+      return { ...account, authUid: credential?.user?.uid || null };
+    } catch (err) {
+      if (err?.code === 'auth/email-already-in-use') {
+        // Le compte Firebase Auth existe déjà (migration réussie sur un
+        // autre appareil, ou double-tentative sur celui-ci) : on se
+        // connecte simplement pour récupérer l'authUid, sans le recréer.
+        const signIn = await _signInPatientFirebaseAuth(email, pass);
+        return signIn.ok ? { ...account, authUid: signIn.authUid } : account;
+      }
+      console.warn('[MedConnect] Création Firebase Auth patient impossible, poursuite en mode dégradé :', err);
+      return account;
+    }
+  }
+
+  async function _signInPatientFirebaseAuth(email, pass) {
+    if (!_hasFirebaseAuth()) return { ok: false, authUid: null };
+    try {
+      const credential = await firebaseAuth.signInWithEmailAndPassword(email, pass);
+      return { ok: true, authUid: credential?.user?.uid || null };
+    } catch (e) {
+      console.warn('[MedConnect] Connexion Firebase Auth patient impossible :', e);
+      return { ok: false, authUid: null };
+    }
+  }
 
   /* ── Vérifie que le compte Firebase Auth a bien role:'admin'
      dans Firestore (users/{uid}). Sans ce document, isAdmin()
@@ -449,7 +509,46 @@ const Auth = (() => {
       _err('auth-err', '⚠️ Aucun compte trouvé pour cette fiche, ni localement ni dans le cloud.<br>Si c’est votre tout premier accès, utilisez “Premier accès : créer mon PIN”.');
       return;
     }
-    if (existing.password !== pin) { _err('auth-err', '❌ PIN incorrect.'); return; }
+
+    // PARTIE B — plus de comparaison en clair. Compte déjà migré vers
+    // Firebase Auth (email synthétique posé à la création ou lors
+    // d'une migration précédente) : vérification via Firebase Auth
+    // (_signInPatientFirebaseAuth, qui ne touche jamais uid — voir sa
+    // définition — contrairement à _signInFirebaseForAccount conçue
+    // pour des comptes dont uid EST déjà l'uid Firebase).
+    if (existing.email && _hasFirebaseAuth()) {
+      const { ok } = await _signInPatientFirebaseAuth(existing.email, _toFirebasePassword(pin));
+      if (!ok) { _err('auth-err', '❌ PIN incorrect.'); return; }
+    } else if (!existing.email && existing.password !== undefined) {
+      // Compte hérité (créé avant ce chantier), PIN encore en clair.
+      // Vérification UNE dernière fois avec l'ancien champ, puis
+      // migration immédiate vers Firebase Auth : le champ password
+      // n'est supprimé QUE si le compte Firebase Auth a bien été créé
+      // (jamais de suppression qui laisserait le compte inaccessible).
+      if (existing.password !== pin) { _err('auth-err', '❌ PIN incorrect.'); return; }
+      const email = _syntheticPatientEmail(id);
+      const migrated = await _createPatientFirebaseAuth(email, _toFirebasePassword(pin), { ...existing, email });
+      if (migrated.authUid) {
+        delete migrated.password;
+        existing = migrated;
+        // Remplacement (pas fusion) : _upsertAccount fait
+        // {...ancien, ...nouveau}, ce qui NE supprime PAS password
+        // (l'ancien objet le porte encore et le spread ne peut pas
+        // "effacer" une clé absente du second objet). Il faut donc
+        // remplacer l'entrée telle quelle dans le tableau de comptes.
+        const accounts = DB.getAccounts();
+        const idx = accounts.findIndex(a => a.uid === existing.uid);
+        if (idx === -1) accounts.push(existing); else accounts[idx] = existing;
+        DB.saveAccounts(accounts);
+      }
+      // Sinon (Firebase Auth injoignable maintenant) : le PIN vient
+      // d'être vérifié avec succès, la connexion continue normalement ;
+      // la migration réessaiera à la prochaine connexion réussie en ligne.
+    } else {
+      _err('auth-err', '❌ Connexion Firebase impossible. Réessayez avec une connexion internet.');
+      return;
+    }
+
     localStorage.setItem('mc_my_patient_id', id);
     _save(existing); _launch(existing);
   }
@@ -457,9 +556,11 @@ const Auth = (() => {
   async function _createPatientPin() {
     const id  = (document.getElementById('lp-id')?.value  || '').trim().toUpperCase();
     const pin = (document.getElementById('lp-pin')?.value || '').trim();
+    const accessCode = (document.getElementById('lp-access-code')?.value || '').trim().toUpperCase();
     if (!id || !pin) { _err('auth-err', 'Veuillez remplir le numéro de fiche et le PIN.'); return; }
     if (!id.startsWith('MC-')) { _err('auth-err', '❌ Format invalide. Ex : MC-2026-CD-A3B7X9Q2'); return; }
-    if (pin.length < 4) { _err('auth-err', '❌ PIN trop court — minimum 4 chiffres.'); return; }
+    if (pin.length < 6) { _err('auth-err', '❌ PIN trop court — minimum 6 chiffres.'); return; }
+    if (!accessCode) { _err('auth-err', "❌ Code d'accès requis — donné par l'hôpital à la création de votre fiche. Contactez votre médecin si vous ne l'avez pas."); return; }
     await _syncBeforeAuth('premier accès patient');
     const patient = DB.getPatientById(id);
     if (!patient) { _err('auth-err', '❌ Numéro de fiche introuvable. Contactez votre médecin.'); return; }
@@ -469,7 +570,51 @@ const Auth = (() => {
       _err('auth-err', '⚠️ Un compte existe déjà pour cette fiche. Utilisez “Se connecter à mon dossier existant”.');
       return;
     }
-    const acc = { uid:`PAT_${id}`, username:id, password:pin, role:'patient', status:'approved', name:`${patient.firstname} ${patient.lastname}`, patient_id:id, created_at:new Date().toISOString() };
+    // PARTIE B — jamais de PIN en clair (ni de hash) dans mc_accounts,
+    // collection en lecture publique : Firebase Auth gère le PIN comme
+    // mot de passe côté serveur, exactement comme pour les
+    // professionnels (voir _createFirebaseUser). mc_accounts ne reçoit
+    // que l'email synthétique et l'authUid Firebase.
+    // firstAccessCode : vérifié côté serveur (firestore.rules) contre
+    // mc_patients/{id}.firstAccessCode — ferme la préemption de compte
+    // par un tiers connaissant seulement le numéro de fiche (voir
+    // rapport de sécurité). Reste ensuite tel quel sur ce document
+    // (mc_accounts est public) : sans conséquence, la création est de
+    // toute façon bloquée pour cette fiche une fois le compte créé
+    // (!exists sur mc_accounts), donc le code redevient inutilisable.
+    const email = _syntheticPatientEmail(id);
+    const baseAcc = { uid:`PAT_${id}`, username:id, role:'patient', status:'approved', name:`${patient.firstname} ${patient.lastname}`, patient_id:id, email, firstAccessCode: accessCode, created_at:new Date().toISOString() };
+    const acc = await _createPatientFirebaseAuth(email, _toFirebasePassword(pin), baseAcc);
+    if (!acc.authUid) {
+      // Correctif (revue de sécurité) : sans authUid, ce compte n'a
+      // aucun secret nulle part (ni Firebase Auth réel, ni password/pin
+      // local — PARTIE B) : le sauvegarder quand même le rendrait
+      // inaccessible dès la prochaine tentative de connexion. On refuse
+      // la création plutôt que de produire un compte fantôme.
+      _err('auth-err', '❌ Création du compte impossible sans connexion internet. Réessayez plus tard.');
+      return;
+    }
+    // Confirmation cloud réelle (même principe qu'à l'inscription
+    // professionnelle, voir _reg) : un code d'accès incorrect est
+    // rejeté par la règle mc_accounts.create — indiscernable côté
+    // client d'une simple coupure réseau, d'où le message couvrant les
+    // deux cas plutôt que d'affirmer un diagnostic qu'on ne peut pas
+    // établir ici.
+    const criticalOk = DB.pushAndReport ? await DB.pushAndReport([['mc_accounts', acc.uid, acc]]) : false;
+    if (!criticalOk) {
+      // Correctif (revue de sécurité) : sans ce nettoyage, l'utilisateur
+      // Firebase Auth créé juste au-dessus reste "squatté" indéfiniment
+      // (email synthétique pris avec le PIN d'un tiers) — le vrai
+      // patient, plus tard avec le bon code, ne pourrait plus jamais
+      // créer son propre compte (auth/email-already-in-use avec un mot
+      // de passe qu'il ne connaît pas). currentUser vient d'être créé
+      // dans le même appel : delete() ne nécessite pas de
+      // réauthentification récente.
+      try { await firebaseAuth.currentUser?.delete(); }
+      catch (e) { console.warn('[MedConnect] Nettoyage du compte Firebase après refus :', e); }
+      _err('auth-err', "❌ Création refusée — vérifiez le code d'accès (donné par l'hôpital) et votre connexion internet.");
+      return;
+    }
     accounts.push(acc); DB.saveAccounts(accounts);
     localStorage.setItem('mc_my_patient_id', id);
     _save(acc); _launch(acc);
@@ -816,6 +961,15 @@ const Auth = (() => {
         if (data) break;
       }
       if (!data) return null;
+      // Correctif (audit) : contrairement à doctor/nurse/pharmacist
+      // (_restoreProfessional, qui appelle handleAccountStatusBeforeAuth
+      // AVANT tout signInWithEmailAndPassword), ce chemin lab/reception
+      // ne vérifiait jamais le statut du compte — un compte rejeté ou
+      // suspendu par l'admin (voir js/admin.js reject()/suspend(), qui
+      // ne peuvent que changer le statut Firestore, jamais désactiver le
+      // compte Firebase Auth lui-même : aucun Admin SDK sur ce projet,
+      // plan Spark) pouvait donc continuer à se connecter normalement.
+      if (!handleAccountStatusBeforeAuth(data, role, num)) return null;
       if (data.email && _hasFirebaseAuth()) {
         const cred = await firebaseAuth.signInWithEmailAndPassword(data.email, pass);
         data.uid = cred?.user?.uid || data.uid;
@@ -830,12 +984,123 @@ const Auth = (() => {
     }
   }
 
+  /* ── SUPPRESSION DE COMPTE (self-service, sans Cloud Function) ──
+     Ferme le point "suppression de compte" de l'audit sécurité :
+     currentUser.delete() est un appel client pur, aucun serveur requis.
+     Ne supprime QUE le compte (accès) — jamais le dossier médical
+     (mc_patients, consultations, ordonnances...), conservé pour raison
+     légale/médicale, cohérent avec delete-account.html.
+     Ordre volontaire : documents Firestore d'abord (pendant que la
+     session Firebase Auth est encore valide), utilisateur Firebase
+     Auth en dernier — supprimer users/{uid} avant la fin ferait
+     retomber accountStatusOk() sur son défaut permissif (document
+     absent), pas sur "déconnecté" ; l'ordre inverse serait trompeur
+     sans rien casser ici, mais reste le bon principe à suivre. */
+  function _deleteMyAccount() {
+    const user = getUser();
+    if (!user) return;
+    App.openModal('🗑️ Supprimer mon compte', `
+      <p style="color:var(--text-dim);font-size:.85rem;line-height:1.7">
+        Cette action supprime définitivement votre accès à MedConnect
+        (identifiants, profil). Elle est irréversible.
+        ${user.role === 'patient'
+          ? "Votre dossier médical n'est pas supprimé (conservation légale/médicale) — seul votre accès personnel l'est."
+          : "Les actes déjà enregistrés (consultations, ordonnances) restent conservés ; seul votre profil professionnel est supprimé."}
+      </p>
+      <form onsubmit="Auth._confirmDeleteMyAccount(event)">
+        <div class="form-group">
+          <label class="inp-lbl">${user.role === 'patient' ? 'Confirmez votre PIN' : 'Confirmez votre mot de passe'}</label>
+          <input type="password" id="del-acc-pass" class="inp" autocomplete="current-password" required>
+        </div>
+        <div id="del-acc-err" class="auth-error" style="display:none"></div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-ghost" onclick="App.closeModal()">Annuler</button>
+          <button type="submit" class="btn" style="background:var(--danger);color:#fff;border-color:var(--danger)">🗑️ Supprimer définitivement</button>
+        </div>
+      </form>`);
+  }
+
+  async function _confirmDeleteMyAccount(e) {
+    e.preventDefault();
+    const pass = (document.getElementById('del-acc-pass')?.value || '').trim();
+    const showErr = msg => _err('del-acc-err', msg);
+    if (!pass) { showErr('Veuillez saisir votre mot de passe/PIN.'); return; }
+    if (!_hasFirebaseAuth() || !_hasFirebaseDB()) { showErr('❌ Connexion internet requise pour supprimer votre compte.'); return; }
+    const user = getUser();
+    if (!user) { showErr('❌ Session introuvable — reconnectez-vous.'); return; }
+    const current = firebaseAuth.currentUser;
+    if (!current || !current.email) { showErr('❌ Session Firebase introuvable — reconnectez-vous puis réessayez.'); return; }
+    if (typeof firebase === 'undefined' || !firebase.auth?.EmailAuthProvider) {
+      showErr('❌ Ré-authentification indisponible. Rechargez la page puis réessayez.');
+      return;
+    }
+
+    try {
+      const credential = firebase.auth.EmailAuthProvider.credential(current.email, pass);
+      await current.reauthenticateWithCredential(credential);
+    } catch (err) {
+      if (err?.code === 'auth/wrong-password' || err?.code === 'auth/invalid-credential') {
+        showErr(user.role === 'patient' ? '❌ PIN incorrect.' : '❌ Mot de passe incorrect.');
+      } else if (err?.code === 'auth/too-many-requests') {
+        showErr('❌ Trop de tentatives — réessayez plus tard.');
+      } else {
+        showErr('❌ Ré-authentification impossible. Vérifiez votre connexion et réessayez.');
+      }
+      return;
+    }
+
+    const docId   = user.uid;    // clé mc_accounts : uid Firebase réel (pro) ou 'PAT_{id}' (patient)
+    const authUid = current.uid;
+
+    // Documents Firestore d'abord, pendant que la session est encore
+    // valide. Chaque étape est indépendante : un échec partiel ne doit
+    // jamais empêcher les suivantes ni bloquer la suite (mc_accounts
+    // reste la seule étape dont le succès est vérifié — voir plus bas).
+    if (user.role !== 'patient') {
+      const collection = DB.roleCollection ? DB.roleCollection(user.role) : null;
+      if (collection) { try { await DB.deleteCloud(collection, docId); } catch (_) {} }
+    }
+    try { await DB.deleteCloud('users', docId); } catch (_) {}
+    try {
+      const memberships = await firebaseDB.collection('hospitalMembers').where('uid', '==', authUid).get();
+      for (const doc of memberships.docs) { try { await DB.deleteCloud('hospitalMembers', doc.id); } catch (_) {} }
+    } catch (_) {}
+
+    const accountDeleted = await DB.deleteCloud('mc_accounts', docId);
+    if (!accountDeleted) {
+      showErr('❌ Suppression refusée par le serveur — vérifiez votre connexion et réessayez.');
+      return;
+    }
+
+    try {
+      await current.delete();
+    } catch (err) {
+      // mc_accounts est déjà supprimé : ce compte n'a de toute façon
+      // plus aucun accès applicatif. On log seulement, sans bloquer la
+      // déconnexion locale — retenter la suppression Auth nécessiterait
+      // une reconnexion, plus complexe qu'utile pour ce cas résiduel.
+      console.warn('[MedConnect] Suppression Firebase Auth incomplète :', err?.code || err);
+    }
+
+    localStorage.removeItem('mc_my_patient_id');
+    try {
+      const remaining = DB.getAccounts().filter(a => a.uid !== docId);
+      localStorage.setItem('mc_accounts', JSON.stringify(remaining));
+    } catch (_) {}
+
+    App.closeModal();
+    sessionStorage.clear();
+    showLogin();
+    App.toast('✅ Votre compte a été supprimé.');
+  }
+
   return {
     getUser, isLogged, logout, showLogin, loginProfessionalSilently,
     _tab, _loginRole, _registerRole,
     _doPatient, _createPatientPin, _doDoctor, _doPharmacist, _doNurse,
     _regDoctor, _regPharmacist, _regNurse, _regLab, _regReception,
     _setupAdmin, _doAdmin,
+    _deleteMyAccount, _confirmDeleteMyAccount,
     getRoleIcon, getRoleLabel,
   };
 })();

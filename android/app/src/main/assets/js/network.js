@@ -17,13 +17,18 @@ const Network = (() => {
      toUid/fromUid/fromRole/readStatus/priority/createdAt
      sont les champs propres pour les nouveaux usages.
   ──────────────────────────────────────────────────── */
-  function notify({ to_role, to_id, type, subject, body, priority }) {
+  function notify({ to_role, to_id, type, subject, body, priority, recipientUid }) {
     const from = window.Auth?.getUser?.();
     const msgs = DB.getMessages();
     msgs.push({
       mid:        DB.makeId('N'),
       to_role, to_id, type, subject, body,
       toUid:      to_id || null,
+      // PARTIE H — recipientUid : uid Firebase réel du destinataire
+      // patient quand disponible (patientAuthUid, posé après migration
+      // PIN → Firebase Auth), en plus de to_id qui reste le numéro MC
+      // pour compatibilité avec le matching existant (recipientKeys).
+      recipientUid: recipientUid || null,
       fromUid:    from?.uid || null,
       fromRole:   from?.role || 'system',
       from:       from?.name || 'MedConnect',
@@ -171,34 +176,52 @@ const Network = (() => {
     App.toast('✅ Message envoyé');
   }
 
-  /* ── DOCTOR → PHARMACY (ciblée, plus de diffusion globale) ── */
+  /* ── DOCTOR → PHARMACY (ciblée, plus de diffusion globale) ──
+     PARTIE H — restreint strictement à l'admin et au médecin auteur de
+     l'ordonnance, aligné sur la règle serveur mc_prescriptions.update
+     (doctorCanRead || admin). L'ancien repli ACL.canAccessPatient
+     autorisait à tort toute personne ayant simplement accès au dossier
+     patient (via consentement notamment) à envoyer une ordonnance. */
   function canSendPrescription(rx) {
     const user = Auth.getUser();
     if (!user || !rx) return false;
     if (user.role === 'admin') return true;
-    if (rx.created_by === user.uid || rx.doctor_uid === user.uid) return true;
-    return ACL.canAccessPatient(user, rx.patient_id || rx.patientId);
+    return rx.created_by === user.uid || rx.doctor_uid === user.uid;
   }
 
-  /** Liste les pharmaciens actifs pouvant recevoir une ordonnance */
+  /** Liste les pharmaciens actifs pouvant recevoir une ordonnance.
+      PARTIE H — accepte aussi 'active' (pas seulement 'approved'),
+      sinon des pharmacies pourtant validées restaient invisibles. */
   function getAvailablePharmacies() {
-    return DB.getAccounts().filter(a => a.role === 'pharmacist' && a.status === 'approved');
+    return DB.getAccounts().filter(a => a.role === 'pharmacist' && ['approved', 'active'].includes(a.status));
   }
 
-  /** PARTIE E/F — envoi ciblé : 'patient' | uid pharmacien précis */
-  function sendPrescriptionToPharmacy(prescriptionId, target) {
+  /** PARTIE E/F — envoi ciblé : 'patient' | uid pharmacien précis.
+      PARTIE H — devient asynchrone et attend la confirmation Firestore
+      réelle (DB.updatePrescriptionAndConfirm) avant d'afficher un
+      message de succès — plus de toast optimiste sur une écriture
+      fire-and-forget non confirmée. */
+  async function sendPrescriptionToPharmacy(prescriptionId, target) {
     const rx = DB.getPrescriptions().find(p => p.pid === prescriptionId || p.code === prescriptionId);
     if (!rx) { App.toast('Ordonnance introuvable.', 'error'); return; }
     if (!canSendPrescription(rx)) { App.toast('Accès ordonnance non autorisé.', 'error'); return; }
 
     const pt = DB.getPatientById(rx.patient_id || rx.patientId);
     const patientId = rx.patient_id || rx.patientId || '—';
+    const patientUid = pt?.patientAuthUid || null;
+
+    function offlineOrDeniedMessage(reason) {
+      return reason === 'offline'
+        ? '📶 Ordonnance enregistrée localement — en attente de synchronisation.'
+        : '❌ Échec de l\'envoi — droits ou connexion à vérifier.';
+    }
 
     // "patient" seul : aucune pharmacie ne doit voir l'ordonnance
     if (!target || target === 'patient') {
-      DB.updatePrescription(rx.pid, { pharmacyUid: null, pharmacyName: null, status: 'sent' });
+      const result = await DB.updatePrescriptionAndConfirm(rx.pid, { pharmacyUid: null, pharmacyName: null, status: 'sent' });
+      if (!result.ok) { App.toast(offlineOrDeniedMessage(result.reason), 'warning'); return; }
       notify({
-        to_role: 'patient', to_id: patientId, type: 'prescription',
+        to_role: 'patient', to_id: patientId, recipientUid: patientUid, type: 'prescription',
         subject: '💊 Ordonnance disponible',
         body: `Votre ordonnance du ${rx.date} est disponible dans votre espace. Présentez-la à la pharmacie de votre choix.`,
       });
@@ -210,11 +233,12 @@ const Network = (() => {
     const pharmacist = getAvailablePharmacies().find(p => p.uid === target);
     if (!pharmacist) { App.toast('Pharmacie introuvable ou non validée.', 'error'); return; }
 
-    DB.updatePrescription(rx.pid, {
+    const result = await DB.updatePrescriptionAndConfirm(rx.pid, {
       pharmacyUid:  pharmacist.uid,
       pharmacyName: pharmacist.pharmacy || pharmacist.name,
       status:       'sent',
     });
+    if (!result.ok) { App.toast(offlineOrDeniedMessage(result.reason), 'warning'); return; }
 
     const body = [
       `Patient : ${patientName(pt)} [${patientId}]`,
@@ -231,21 +255,43 @@ const Network = (() => {
       body,
     });
     notify({
-      to_role: 'patient', to_id: patientId, type: 'prescription',
+      to_role: 'patient', to_id: patientId, recipientUid: patientUid, type: 'prescription',
       subject: `✅ Ordonnance envoyée à ${pharmacist.pharmacy || pharmacist.name}`,
       body: `Votre ordonnance du ${rx.date} a été transmise. Vous pouvez aller récupérer vos médicaments.`,
     });
     App.toast(`📤 Ordonnance envoyée à ${pharmacist.pharmacy || pharmacist.name}`);
   }
 
-  /* ── PARTIE B — statuts ordonnance côté pharmacie ───────── */
+  /* ── PARTIE B/H — statuts ordonnance côté pharmacie ───────── */
   const RX_STATUSES = ['sent','received','preparing','ready','delivered','cancelled'];
+
+  // PARTIE H — transitions valides : empêche un retour arbitraire de
+  // statut (ex : delivered → sent, qui était accepté sans contrôle).
+  // cancelled reste atteignable depuis n'importe quel statut actif,
+  // mais seulement avec une raison (vérifié ci-dessous).
+  const RX_TRANSITIONS = {
+    sent:      ['received', 'cancelled'],
+    received:  ['preparing', 'cancelled'],
+    preparing: ['ready', 'cancelled'],
+    ready:     ['delivered', 'cancelled'],
+    delivered: [],
+    cancelled: [],
+  };
 
   function setPrescriptionStatus(pid, status, reason) {
     const user = Auth.getUser();
     if (!RX_STATUSES.includes(status)) return;
     const rx = DB.getPrescriptions().find(p => p.pid === pid);
     if (!rx) return;
+    const allowed = RX_TRANSITIONS[rx.status] || [];
+    if (!allowed.includes(status)) {
+      App.toast(`❌ Transition invalide : ${rx.status} → ${status}`, 'error');
+      return;
+    }
+    if (status === 'cancelled' && !reason) {
+      App.toast('⚠️ Une raison d\'annulation est requise.', 'error');
+      return;
+    }
     DB.updatePrescription(pid, {
       status, updatedByUid: user?.uid || '', updatedByRole: user?.role || '',
       ...(reason ? { cancelReason: reason } : {}),
@@ -335,7 +381,8 @@ const Network = (() => {
   return {
     notify, getUnread, markRead, markUnread,
     renderInbox, openMsg, openCompose, sendMessage,
-    sendPrescriptionToPharmacy, getAvailablePharmacies, setPrescriptionStatus, RX_STATUSES,
+    sendPrescriptionToPharmacy, getAvailablePharmacies, setPrescriptionStatus, RX_STATUSES, RX_TRANSITIONS,
+    canSendPrescription,
     smartCheck, renderSmartCheckResult,
     checkStockForMeds,
   };

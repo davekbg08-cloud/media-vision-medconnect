@@ -58,3 +58,47 @@ test('android/app/src/main/assets/ contient bien les fichiers critiques du deskt
     assert.ok(fs.existsSync(path.join(assetsDir, f)), `${f} devrait être présent dans les assets Android (committé ou resynchronisé)`);
   }
 });
+
+// Correctif (audit) : le test ci-dessus ne vérifie que la PRÉSENCE des
+// fichiers, jamais leur CONTENU — la copie Android committée avait pu
+// dériver silencieusement du code source (version pré-durcissement :
+// PIN patient en clair, pas de code d'accès, pas de Firebase Auth
+// patient) sans qu'aucun test ne le détecte, puisque le build CI
+// écrase cette copie avant chaque APK (donc pas d'impact en
+// production) — mais un dev qui build en local sans relancer la
+// synchro, ou qui lit cette copie par erreur, tombe sur du code
+// périmé. Comparaison octet pour octet, même liste de dossiers/
+// fichiers que l'étape "Sync web assets into Android app" du workflow.
+function listFilesRecursive(dir) {
+  const out = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...listFilesRecursive(full));
+    else out.push(full);
+  }
+  return out;
+}
+
+test("la copie Android (android/app/src/main/assets) est identique octet pour octet à la racine (js/, css/, config/app-version.json, index.html, sw.js)", () => {
+  const root = path.resolve(__dirname, '..');
+  const assetsDir = path.join(root, 'android/app/src/main/assets');
+  const mismatches = [];
+
+  for (const dir of ['js', 'css']) {
+    const rootDir = path.join(root, dir);
+    for (const rootFile of listFilesRecursive(rootDir)) {
+      const rel = path.join(dir, path.relative(rootDir, rootFile));
+      const mirrorFile = path.join(assetsDir, rel);
+      if (!fs.existsSync(mirrorFile)) { mismatches.push(`${rel} (absent côté Android)`); continue; }
+      if (fs.readFileSync(rootFile, 'utf8') !== fs.readFileSync(mirrorFile, 'utf8')) mismatches.push(rel);
+    }
+  }
+  for (const rel of ['config/app-version.json', 'index.html', 'sw.js']) {
+    const rootFile = path.join(root, rel);
+    const mirrorFile = path.join(assetsDir, rel);
+    if (!fs.existsSync(mirrorFile)) { mismatches.push(`${rel} (absent côté Android)`); continue; }
+    if (fs.readFileSync(rootFile, 'utf8') !== fs.readFileSync(mirrorFile, 'utf8')) mismatches.push(rel);
+  }
+
+  assert.deepStrictEqual(mismatches, [], `Fichiers désynchronisés (relancer la sync avant de committer) : ${mismatches.join(', ')}`);
+});

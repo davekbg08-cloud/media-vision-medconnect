@@ -14,10 +14,38 @@ const firebaseConfig = {
   measurementId:     "G-5WJ8G0PKWW"
 };
 
+/* ── App Check (voir docs/FIREBASE_APP_CHECK_SETUP.md) ──
+   Vide par défaut : l'activation ci-dessous est un no-op tant qu'aucune
+   clé n'est renseignée ici — aucun risque pour les utilisateurs actuels
+   tant que la clé reCAPTCHA Enterprise n'a pas été créée manuellement
+   dans Google Cloud Console (action hors de cet environnement). Ne
+   JAMAIS mettre autre chose ici qu'une clé reCAPTCHA publique (site
+   key) — jamais de clé secrète/serveur. */
+const APP_CHECK_SITE_KEY = "";
+
 /* ── INITIALISATION ─────────────────────────────── */
 let firebaseDB   = null;
 let firebaseAuth = null;
 let firebaseReady = false;
+
+// Séparée de initFirebase() pour rester testable isolément et pour que
+// l'absence du SDK App Check (firebase.appCheck) — normale tant que le
+// script firebase-app-check-compat.js n'est pas chargé, ex. anciens
+// caches PWA pas encore rafraîchis — ne fasse jamais échouer
+// l'initialisation Firebase principale.
+function activateAppCheck() {
+  if (!APP_CHECK_SITE_KEY) return;
+  try {
+    if (!firebase.appCheck) return;
+    const appCheck = firebase.appCheck();
+    appCheck.activate(
+      new firebase.appCheck.ReCaptchaEnterpriseProvider(APP_CHECK_SITE_KEY),
+      true // isTokenAutoRefreshEnabled
+    );
+  } catch (err) {
+    console.warn('[MedConnect] App Check indisponible :', err);
+  }
+}
 
 function initFirebase() {
   try {
@@ -26,6 +54,7 @@ function initFirebase() {
     }
 
     if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+    activateAppCheck();
     firebaseDB    = firebase.firestore();
     firebaseAuth  = firebase.auth ? firebase.auth() : null;
     firebaseReady = true;

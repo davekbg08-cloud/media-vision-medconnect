@@ -37,14 +37,11 @@ const HospitalsRegistry = (() => {
     localStorage.setItem(key, JSON.stringify(value));
   }
 
-  function cloudReady() {
-    return typeof firebaseReady !== 'undefined' && firebaseReady &&
-      typeof firebaseDB !== 'undefined' && firebaseDB;
-  }
-
+  /* PARTIE K — délègue à DB.pushCloud (js/db.js) au lieu d'un mini-push
+     Firestore local avec .catch(() => {}) : tout échec est loggé et mis
+     en file d'attente pour rejeu automatique, jamais perdu en silence. */
   function pushCloud(collection, docId, data) {
-    if (!cloudReady()) return;
-    firebaseDB.collection(collection).doc(String(docId)).set(data).catch(() => {});
+    DB.pushCloud(collection, docId, data);
   }
 
   function normalizeType(type) {
@@ -168,6 +165,49 @@ const HospitalsRegistry = (() => {
     return h;
   }
 
+  /* Variante confirmée de addHospital() : attend la confirmation
+     Firestore réelle des 3 collections avant de résoudre (même
+     principe que DB.addPatientAndConfirm, js/db.js). Nécessaire car
+     `establishments`/`hospitals`/`mc_hospitals` ne sont pas
+     inscriptibles par le compte non-admin qui vient de s'inscrire tant
+     que la règle serveur ne l'autorise pas explicitement — sans
+     confirmation, l'appelant (hospital-auth.js register()) ne peut pas
+     savoir que l'établissement n'a en réalité jamais été créé côté
+     serveur. */
+  async function addHospitalAndConfirm(data) {
+    const h = addHospital(data);
+    const confirmed = await DB.pushAndReport([
+      ['establishments', h.establishmentId, h],
+      ['hospitals', h.establishmentId, h],
+      ['mc_hospitals', h.establishmentId, h],
+    ]);
+    return { hospital: h, confirmed };
+  }
+
+  /* Migration organique du mot de passe hérité vers Firebase Auth
+     (voir js/hospital-auth.js migrateLegacyEstablishmentAuth) : retire
+     RÉELLEMENT passwordHash (pas juste `null` — hasNoSecretFields()
+     côté règles bloque toute clé présente, valeur ou non) et pose
+     authUid. Écrite en direct (pas via updateHospital/saveHospitals,
+     qui font un .set() intégral côté cloud — la valeur locale de
+     passwordHash serait alors repoussée telle quelle et annulerait la
+     suppression cloud). */
+  async function migratePasswordHashToAuth(establishmentId, authUid) {
+    const list = getHospitals();
+    const idx = list.findIndex(h => h.establishmentId === establishmentId || h.hid === establishmentId);
+    if (idx === -1) return;
+    list[idx] = { ...list[idx], authUid };
+    delete list[idx].passwordHash;
+    store(EST_KEY, list);
+    store(LEGACY_EST_KEY, list);
+    if (typeof firebaseDB === 'undefined' || !firebaseDB || typeof firebase === 'undefined') return;
+    const patch = { authUid, passwordHash: firebase.firestore.FieldValue.delete() };
+    await Promise.all(['establishments', 'hospitals', 'mc_hospitals'].map(col =>
+      firebaseDB.collection(col).doc(establishmentId).set(patch, { merge: true })
+        .catch(e => console.warn(`[HospitalsRegistry] Migration ${col} :`, e?.code || e?.message))
+    ));
+  }
+
   function updateHospital(establishmentId, data) {
     const list = getHospitals();
     const idx = list.findIndex(h => h.establishmentId === establishmentId || h.hid === establishmentId);
@@ -259,6 +299,26 @@ const HospitalsRegistry = (() => {
     });
   }
 
+  /* PARTIE E — hospitalMembers/{establishmentId}_{uid} : document plat
+     miroir de establishments.staff[], nécessaire car une règle
+     Firestore ne peut pas tester efficacement l'appartenance à un
+     tableau d'objets. C'est la vraie source que firestore.rules
+     consulte (isHospitalMember/belongsToSameEstablishment) pour
+     l'isolation par établissement. Écrit ici à chaque
+     approbation/retrait, ET par ensureHospitalMembership (auto-
+     guérison à la connexion) pour les comptes déjà affiliés
+     avant l'introduction de cette collection. */
+  function writeHospitalMemberDoc(establishmentId, uid, role, status) {
+    if (!establishmentId || !uid) return;
+    pushCloud('hospitalMembers', `${establishmentId}_${uid}`, {
+      hospitalId: establishmentId,
+      uid,
+      role: role || '',
+      status,
+      updatedAt: now(),
+    });
+  }
+
   function upsertStaffMember(establishment, request) {
     const staff = Array.isArray(establishment.staff) ? establishment.staff : [];
     const idx = staff.findIndex(s => s.uid === request.requesterUid);
@@ -276,6 +336,23 @@ const HospitalsRegistry = (() => {
     if (idx === -1) staff.push(member);
     else staff[idx] = { ...staff[idx], ...member };
     updateHospital(establishment.establishmentId, { staff });
+    writeHospitalMemberDoc(establishment.establishmentId, request.requesterUid, request.requesterRole, 'active');
+  }
+
+  // Auto-guérison : comptes affiliés avant l'introduction de
+  // hospitalMembers (ou dont l'écriture aurait échoué) convergent au
+  // fil des connexions, sans script de migration à lancer contre la
+  // prod. Chacun n'écrit QUE son propre document ({hospitalId}_{son
+  // uid}), jamais celui d'un tiers — aucune élévation de privilège
+  // possible même si cette fonction est appelée pour n'importe quel uid.
+  const _healedThisSession = new Set();
+  function ensureHospitalMembership(uid) {
+    if (!uid || _healedThisSession.has(uid)) return;
+    _healedThisSession.add(uid);
+    const account = DB.getAccounts().find(a => a.uid === uid);
+    getAffiliations()
+      .filter(a => a.requesterUid === uid && a.status === 'approved')
+      .forEach(a => writeHospitalMemberDoc(a.establishmentId, uid, a.requesterRole || account?.role, 'active'));
   }
 
   function updateUserAffiliation(request, establishment, attach) {
@@ -376,6 +453,7 @@ const HospitalsRegistry = (() => {
       member.uid === uid ? { ...member, status: 'removed', removedAt: now(), updatedAt: now() } : member
     );
     updateHospital(establishmentId, { staff });
+    writeHospitalMemberDoc(establishmentId, uid, staff.find(s => s.uid === uid)?.role, 'removed');
 
     const reqs = getAffiliations().map(req => {
       if (req.requesterUid === uid && req.establishmentId === establishmentId && req.status === 'approved') {
@@ -390,6 +468,7 @@ const HospitalsRegistry = (() => {
   }
 
   function getDoctorHospitals(uid) {
+    ensureHospitalMembership(uid);
     const affs = getAffiliations().filter(a => a.requesterUid === uid && a.status === 'approved');
     return affs.map(a => getHospitalById(a.establishmentId)).filter(Boolean);
   }
@@ -970,9 +1049,9 @@ const HospitalsRegistry = (() => {
   }
 
   return {
-    getHospitals, saveHospitals, addHospital, updateHospital, getHospitalById,
+    getHospitals, saveHospitals, addHospital, addHospitalAndConfirm, migratePasswordHashToAuth, updateHospital, getHospitalById,
     getAffiliations, saveAffiliations, requestAffiliation, respondAffiliation, removeStaff, validateEstablishment,
-    getDoctorHospitals, getPendingAffiliations,
+    getDoctorHospitals, getPendingAffiliations, ensureHospitalMembership,
     getCurrentHospital, setCurrentHospital, clearCurrentHospital,
     getPatientsForContext, getAppointmentsForContext, getPatientsForEstablishment,
     renderHospitalSwitcher, openRequestAffiliation, submitAffiliation,

@@ -2,7 +2,7 @@
    MedConnect 2.0 — Service Worker
    Optimisation chargement / PWA
    ===================================================== */
-const CACHE = 'medconnect-v4.8';
+const CACHE = 'medconnect-v4.18';
 
 const ASSETS = [
   './', './index.html', './css/style.css', './css/establishments-balance.css',
@@ -15,6 +15,7 @@ const ASSETS = [
   'https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js',
   'https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js',
   'https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js',
+  'https://www.gstatic.com/firebasejs/9.22.0/firebase-app-check-compat.js',
   './js/firebase-config.js',
   // Contrat d'échange + transfert d'urgence (manquaient au précache
   // depuis leur intégration — le fetch network-first masquait le trou

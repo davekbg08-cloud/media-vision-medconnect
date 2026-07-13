@@ -85,6 +85,21 @@ const DB = (() => {
     return `MC-${yr}-${cc}-${rnd}`;
   }
 
+  /* ── CODE D'ACCÈS PATIENT (premier accès) ──────────
+     Donné par l'hôpital au patient à la création de sa fiche, saisi
+     avec le PIN au premier accès (js/auth.js _createPatientPin) —
+     vérifié côté serveur (firestore.rules) contre
+     mc_patients/{id}.firstAccessCode. Empêche un tiers connaissant
+     seulement le numéro de fiche de préempter le compte du patient
+     avant lui (voir rapport de sécurité). Alphabet sans caractères
+     ambigus à l'oral/à l'écrit (pas de O/0, I/1/L). */
+  function generateFirstAccessCode() {
+    const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+    let code = '';
+    for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
+    return code;
+  }
+
   /* ── SYNC FIREBASE ───────────────────────────────────
      Écrit dans localStorage ET dans Firestore si dispo.
      Lit toujours depuis localStorage (cache local).
@@ -422,7 +437,7 @@ const DB = (() => {
 
   function addPatient(data) {
     const list = getPatients();
-    const p = { ...data, id: generatePatientId(data.country_code), created_at: new Date().toISOString() };
+    const p = { ...data, id: generatePatientId(data.country_code), firstAccessCode: generateFirstAccessCode(), created_at: new Date().toISOString() };
     list.push(p); store('mc_patients', list);
     _push('mc_patients', p.id, p);
     _push('patients', p.id, p);
@@ -438,6 +453,54 @@ const DB = (() => {
       updatedAt: p.created_at,
     });
     return p;
+  }
+
+  /* ── Réaffichage du code d'accès après création ──────
+     showFirstAccessCodeModal (js/hospital.js) ne montre le code
+     qu'une fois, à la création. Si le personnel doit le redonner au
+     patient plus tard, il faut vérifier avant tout que le compte
+     n'est pas déjà créé (le code serait alors sans objet) puis
+     relire le code réel côté serveur — jamais se fier uniquement au
+     cache local, qui peut ne pas refléter un compte créé depuis un
+     autre appareil. */
+  async function accountExistsForPatient(patientId) {
+    const uid = `PAT_${patientId}`;
+    if (getAccounts().some(a => a.uid === uid)) return true;
+    if (!firebaseReady || !firebaseDB) return false;
+    try {
+      const doc = await firebaseDB.collection('mc_accounts').doc(uid).get();
+      return doc.exists;
+    } catch (e) { console.warn('[MedConnect] Vérification compte existant :', e); return false; }
+  }
+
+  async function getPatientAccessCode(patientId) {
+    if (firebaseReady && firebaseDB) {
+      try {
+        const doc = await firebaseDB.collection('mc_patients').doc(patientId).get();
+        if (doc.exists) return doc.data()?.firstAccessCode || null;
+      } catch (e) { console.warn('[MedConnect] Lecture du code d\'accès :', e); }
+    }
+    return getPatientById(patientId)?.firstAccessCode || null;
+  }
+
+  /* Variante async de addPatient() : attend la confirmation Firestore
+     réelle des 3 écritures avant de résoudre. addPatient() lance déjà
+     ces écritures en fire-and-forget (jamais attendu par ses
+     appelants historiques, ne pas changer son comportement) — ici on
+     les repousse explicitement en mode critique (_pushCritical, même
+     principe que pushAndReport) pour savoir si elles ont réellement
+     atteint le cloud. Nécessaire pour fermer la course où le code
+     d'accès (firstAccessCode) d'une fiche tout juste créée n'a pas
+     encore atteint Firestore au moment où le patient tente son
+     premier accès (voir firestore.rules patientFirstAccessOk). */
+  async function addPatientAndConfirm(data) {
+    const p = addPatient(data);
+    // Seul mc_patients est vérifié par patientFirstAccessOk() côté
+    // règles — inutile de re-pousser patients/medical_records ici,
+    // addPatient() les a déjà mis en route (fire-and-forget, comme
+    // pour tous ses autres appelants).
+    const ok = await pushAndReport([['mc_patients', p.id, p]]);
+    return { patient: p, confirmed: ok };
   }
 
   function updatePatient(id, data) {
@@ -591,15 +654,43 @@ const DB = (() => {
     return p;
   }
 
-  function updatePrescription(pid, data) {
+  /** Applique la mise à jour au store local uniquement (pas d'écriture
+      cloud ici) et retourne l'objet fusionné, ou null si introuvable. */
+  function _updatePrescriptionLocal(pid, data) {
     const list = getPrescriptions();
     const idx  = list.findIndex(p => p.pid === pid);
     if (idx === -1) return null;
     list[idx] = { ...list[idx], ...data, pid, updatedAt: new Date().toISOString() };
     store('mc_prescriptions', list);
-    _push('mc_prescriptions', pid, list[idx]);
-    _push('prescriptions', pid, list[idx]);
     return list[idx];
+  }
+
+  function updatePrescription(pid, data) {
+    const updated = _updatePrescriptionLocal(pid, data);
+    if (!updated) return null;
+    _push('mc_prescriptions', pid, updated);
+    _push('prescriptions', pid, updated);
+    return updated;
+  }
+
+  /** Comme updatePrescription, mais attend la confirmation Firestore
+      réelle avant de résoudre — utilisé quand l'appelant doit savoir
+      si le cloud a réellement accepté l'écriture (ex : avant d'afficher
+      "Ordonnance envoyée" à l'utilisateur) plutôt que de l'afficher de
+      façon optimiste sur une écriture fire-and-forget. Retourne
+      { ok, reason } plutôt qu'un simple booléen, pour que l'appelant
+      distingue "hors ligne, en file d'attente" de "refusé par le
+      serveur" (PARTIE H/K) — reason vaut 'offline' ou 'denied' quand
+      ok est false, sinon null. */
+  async function updatePrescriptionAndConfirm(pid, data) {
+    const updated = _updatePrescriptionLocal(pid, data);
+    if (!updated) return { ok: false, reason: 'not_found' };
+    const wasOffline = !firebaseReady || !firebaseDB;
+    const ok = await pushAndReport([
+      ['mc_prescriptions', pid, updated],
+      ['prescriptions', pid, updated],
+    ]);
+    return { ok, reason: ok ? null : (wasOffline ? 'offline' : 'denied') };
   }
 
   function getPatientPrescriptions(pid) {
@@ -825,11 +916,19 @@ const DB = (() => {
 
   return {
     init, syncFromFirebase, syncFromFirebaseInBackground, setupUserScopedListeners, generatePatientId, makeId, pushAndReport, flushOutbox, outboxCount, getLastSyncAt,
+    // pushCloud/deleteCloud : wrappers publics sur _push/_delete, à
+    // utiliser par tout module (access_control.js, hospitals_registry.js,
+    // affiliation-cleanup.js...) au lieu de réimplémenter un mini-push
+    // Firestore local avec .catch(() => {}) qui avale les échecs en
+    // silence. Ici, tout échec est loggé ET mis en file d'attente pour
+    // rejeu automatique (voir _push ci-dessus).
+    pushCloud: _push, deleteCloud: _delete, roleCollection,
     getAccounts, saveAccounts, getUsers, saveUsers, upsertUserProfile,
     getRegistrationRequests, saveRegistrationRequests, createRegistrationRequest,
-    getPatients, savePatients, addPatient, updatePatient, deletePatient, getPatientById, searchPatients,
+    getPatients, savePatients, addPatient, addPatientAndConfirm, updatePatient, deletePatient, getPatientById, searchPatients,
+    accountExistsForPatient, getPatientAccessCode,
     getConsultations, addConsultation, getPatientConsultations, deleteConsultation,
-    getPrescriptions, addPrescription, updatePrescription, getPatientPrescriptions,
+    getPrescriptions, addPrescription, updatePrescription, updatePrescriptionAndConfirm, getPatientPrescriptions,
     getEstablishmentDocuments, addEstablishmentDocument, getPatientEstablishmentDocuments,
     getAppointments, addAppointment, updateAppointment, deleteAppointment, getPatientAppointments,
     getVaccinations, addVaccination, getPatientVaccinations, deleteVaccination,
