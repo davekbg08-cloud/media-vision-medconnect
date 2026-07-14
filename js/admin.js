@@ -579,33 +579,55 @@ const AdminModule = (() => {
       suspended:    { t:'🚫 Suspendu',         c:'var(--danger)' },
     };
 
-    const rows = await Promise.all(hospitals.map(async h => {
+    // Un établissement fraîchement inscrit (souvent depuis le desktop,
+    // registeredFrom:'desktop') porte establishment.status === 'pending'
+    // et n'a PAS encore de document subscriptions/{id} : sans ce
+    // traitement il s'affichait comme "✅ Actif" (défaut permissif de
+    // getSubscriptionStatus) et se noyait dans la liste — invisible
+    // comme "nouvelle demande à valider". On le remonte en tête et on le
+    // signale distinctement. Aucune autre voie ne le surface (il n'écrit
+    // ni mc_accounts ni registration_requests, seules sources de la
+    // section "Demandes d'inscription").
+    const isPendingEstablishment = h => String(h.status || '').toLowerCase() === 'pending';
+    const sorted = [...hospitals].sort((a, b) =>
+      (isPendingEstablishment(a) ? 0 : 1) - (isPendingEstablishment(b) ? 0 : 1));
+    const pendingCount = hospitals.filter(isPendingEstablishment).length;
+
+    const rows = await Promise.all(sorted.map(async h => {
       const hid = h.establishmentId || h.hid;
+      const isPending = isPendingEstablishment(h);
       let sub = { status: 'active', endDate: null };
       try { sub = await window.ExchangeBridge?.getSubscriptionStatus?.(hid) || sub; } catch (_) {}
-      const st = STATUS_LABEL[sub.status] || STATUS_LABEL.active;
-      const isActive = sub.status === 'active' || sub.status === 'grace_period';
+      const st = isPending
+        ? { t:'🆕 Nouvelle inscription — à valider', c:'var(--accent)' }
+        : (STATUS_LABEL[sub.status] || STATUS_LABEL.active);
+      // Un établissement 'pending' n'est jamais traité comme "actif"
+      // (pas de bouton Désactiver, libellé d'action "Valider / activer").
+      const isActive = !isPending && (sub.status === 'active' || sub.status === 'grace_period');
       return `
-        <div class="record-card">
+        <div class="record-card"${isPending ? ' style="border-left:3px solid var(--accent)"' : ''}>
           <div class="record-header">
             <div style="flex:1;min-width:0">
               <strong>${esc(h.name || hid)}</strong>
               ${h.officialId ? `<br><small style="color:var(--text-muted);font-family:monospace">Matricule : ${esc(h.officialId)}</small>` : ''}
               <br><small style="color:${st.c};font-weight:600">${st.t}</small>
-              ${sub.endDate ? `<small style="color:${st.c}"> · jusqu'au <strong>${esc(String(sub.endDate).slice(0,10))}</strong></small>` : ''}
-              ${sub.activatedAt ? `<br><small style="color:var(--text-dim);font-size:.7rem">Dernière activation : ${esc(String(sub.activatedAt).slice(0,10))}</small>` : ''}
+              ${!isPending && sub.endDate ? `<small style="color:${st.c}"> · jusqu'au <strong>${esc(String(sub.endDate).slice(0,10))}</strong></small>` : ''}
+              ${!isPending && sub.activatedAt ? `<br><small style="color:var(--text-dim);font-size:.7rem">Dernière activation : ${esc(String(sub.activatedAt).slice(0,10))}</small>` : ''}
             </div>
           </div>
           <div style="display:flex;gap:.5rem;margin-top:.5rem;flex-wrap:wrap">
             <button class="btn btn-primary btn-sm" onclick="AdminModule.openSubscriptionActivator('${esc(hid)}')">
-              💳 ${isActive ? 'Renouveler / changer' : 'Activer'}
+              💳 ${isPending ? 'Valider / activer' : (isActive ? 'Renouveler / changer' : 'Activer')}
             </button>
             ${isActive ? `<button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="AdminModule.deactivateSubscription('${esc(hid)}')">Désactiver</button>` : ''}
           </div>
         </div>`;
     }));
 
-    box.innerHTML = rows.join('');
+    const banner = pendingCount
+      ? `<div class="auth-register-info" style="border-left:3px solid var(--accent);margin-bottom:.8rem">🆕 <strong>${pendingCount}</strong> nouvel(le)(s) établissement(s) en attente de validation.</div>`
+      : '';
+    box.innerHTML = banner + rows.join('');
   }
 
   /* ══ ABONNEMENTS HÔPITAUX (activation manuelle après paiement) ══

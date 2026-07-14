@@ -1,8 +1,15 @@
 {
-  "version": "2.9.13",
-  "build": "2026.07.13.14",
+  "version": "2.9.14",
+  "build": "2026.07.13.15",
   "buildDate": "2026-07-13",
   "changelog": [
+    {
+      "version": "2.9.14",
+      "date": "2026-07-13",
+      "notes": [
+        "Correctif : une inscription d'établissement faite depuis le desktop n'apparaissait pas clairement dans le Dashboard administrateur (elle s'affichait comme « Actif » dans la liste des abonnements, sans signal de nouvelle demande) — les établissements en attente de validation sont désormais remontés en tête, signalés distinctement et comptés dans une bannière"
+      ]
+    },
     {
       "version": "2.9.13",
       "date": "2026-07-13",
