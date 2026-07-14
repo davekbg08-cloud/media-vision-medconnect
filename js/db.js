@@ -845,6 +845,22 @@ const DB = (() => {
     _push('mc_admissions', a.aid, a);
     return a;
   }
+  /** Met à jour le miroir patient d'une admission (ex : sortie) en le
+      retrouvant par sourceAdmissionId — l'id de l'admission desktop posé
+      à la création. Sans ce lien, la Timeline du patient continuait à
+      afficher l'hospitalisation "en cours" après la sortie (le miroir ne
+      gérait que la création). Règle mc_admissions : allow write (update
+      couvert). */
+  function updateAdmissionRecord(sourceAdmissionId, patch) {
+    if (!sourceAdmissionId) return null;
+    const list = getAllAdmissions();
+    const idx = list.findIndex(a => a.sourceAdmissionId === sourceAdmissionId);
+    if (idx === -1) return null;
+    list[idx] = { ...list[idx], ...patch };
+    store('mc_admissions', list);
+    _push('mc_admissions', list[idx].aid, list[idx]);
+    return list[idx];
+  }
 
   function getPatientAdmissions(pid) {
     return getAllAdmissions().filter(a => a.patient_id === pid).sort((a,b) => b.date.localeCompare(a.date));
@@ -869,6 +885,19 @@ const DB = (() => {
     _push('mc_emergency_cases', e.eid, e);
     return e;
   }
+  /** Met à jour le miroir patient d'un passage aux urgences (ex :
+      clôture) par sourceCaseId — l'id du cas desktop posé à la création.
+      Garde le miroir cohérent avec le statut réel. */
+  function updateEmergencyCaseRecord(sourceCaseId, patch) {
+    if (!sourceCaseId) return null;
+    const list = getAllEmergencyCases();
+    const idx = list.findIndex(e => e.sourceCaseId === sourceCaseId);
+    if (idx === -1) return null;
+    list[idx] = { ...list[idx], ...patch };
+    store('mc_emergency_cases', list);
+    _push('mc_emergency_cases', list[idx].eid, list[idx]);
+    return list[idx];
+  }
 
   function getPatientEmergencyCases(pid) {
     return getAllEmergencyCases().filter(e => e.patient_id === pid).sort((a,b) => b.date.localeCompare(a.date));
@@ -882,6 +911,19 @@ const DB = (() => {
     list.push(m); store('mc_maternity_cases', list);
     _push('mc_maternity_cases', m.mid, m);
     return m;
+  }
+  /** Met à jour le miroir patient d'un dossier de maternité (accouchement,
+      clôture) par sourceCaseId — l'id du cas desktop posé à la création.
+      Garde le miroir cohérent avec le statut réel. */
+  function updateMaternityCaseRecord(sourceCaseId, patch) {
+    if (!sourceCaseId) return null;
+    const list = getAllMaternityCases();
+    const idx = list.findIndex(m => m.sourceCaseId === sourceCaseId);
+    if (idx === -1) return null;
+    list[idx] = { ...list[idx], ...patch };
+    store('mc_maternity_cases', list);
+    _push('mc_maternity_cases', list[idx].mid, list[idx]);
+    return list[idx];
   }
 
   function getPatientMaternityCases(pid) {
@@ -1015,9 +1057,9 @@ const DB = (() => {
     getAppointments, addAppointment, updateAppointment, deleteAppointment, getPatientAppointments,
     getVaccinations, addVaccination, getPatientVaccinations, deleteVaccination,
     getAllLabResults, addLabResult, getPatientLabResults, deleteLabResult,
-    getAllAdmissions, addAdmissionRecord, getPatientAdmissions,
-    getAllEmergencyCases, addEmergencyCaseRecord, getPatientEmergencyCases,
-    getAllMaternityCases, addMaternityCaseRecord, getPatientMaternityCases,
+    getAllAdmissions, addAdmissionRecord, updateAdmissionRecord, getPatientAdmissions,
+    getAllEmergencyCases, addEmergencyCaseRecord, updateEmergencyCaseRecord, getPatientEmergencyCases,
+    getAllMaternityCases, addMaternityCaseRecord, updateMaternityCaseRecord, getPatientMaternityCases,
     getMedicines, addMedicine, updateMedicine, deleteMedicine,
     getSales, addSale,
     getMessages, saveMessages,

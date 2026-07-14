@@ -243,6 +243,9 @@ const HospitalReceptionModule = (() => {
         // au patient.
         if (window.DB?.addAdmissionRecord) {
           DB.addAdmissionRecord({
+            // Lien vers l'admission desktop pour que la sortie mette à
+            // jour ce miroir (cf. DB.updateAdmissionRecord).
+            sourceAdmissionId: admissionId,
             patient_id: mc,
             patient_uid: patient?.patient_uid || patient?.patientAuthUid || '',
             bedId, ward: bedLabel, reason,

@@ -202,6 +202,9 @@ const HospitalEmergencyModule = (() => {
       // n'est lu que par ce module desktop).
       if (window.DB?.addEmergencyCaseRecord) {
         DB.addEmergencyCaseRecord({
+          // Lien vers le cas desktop pour que la clôture (closeCase) mette
+          // à jour ce miroir (cf. DB.updateEmergencyCaseRecord).
+          sourceCaseId: caseId,
           patient_id: mc,
           patient_uid: patient?.patient_uid || patient?.patientAuthUid || '',
           complaint, triageLevel, status: 'waiting',
@@ -243,10 +246,13 @@ const HospitalEmergencyModule = (() => {
   async function closeCase(caseId, outcome) {
     if (!window.HospitalCapabilities?.guardHospitalAction?.('create_consultation')) return;
     try {
+      const closedAt = new Date().toISOString();
       await CloudDB.updateDoc('emergencyCases', caseId, {
         status: outcome,
-        closedAt: new Date().toISOString(),
+        closedAt,
       });
+      // Miroir patient : reflète la clôture du passage aux urgences.
+      DB.updateEmergencyCaseRecord?.(caseId, { status: outcome, closedAt });
       App.toast(outcome === 'hospitalized' ? '🛏️ Patient hospitalisé.' : '✅ Sortie enregistrée.');
       HospitalDesktopUI.navigate('emergency');
     } catch (e) {

@@ -194,6 +194,9 @@ const HospitalMaternityModule = (() => {
       // (maternityCases n'est lu que par ce module desktop).
       if (window.DB?.addMaternityCaseRecord) {
         DB.addMaternityCaseRecord({
+          // Lien vers le cas desktop pour que l'accouchement/la clôture
+          // mette à jour ce miroir (cf. DB.updateMaternityCaseRecord).
+          sourceCaseId: caseId,
           patient_id: mc,
           patient_uid: patient?.patient_uid || patient?.patientAuthUid || '',
           lmpDate: lmp, dueDate: dueDate(lmp), prenatalVisits: 0, status: 'prenatal',
@@ -273,6 +276,8 @@ const HospitalMaternityModule = (() => {
         deliveredByUid: session.agentUid || '',
         deliveredByName: session.agentName || '',
       });
+      // Miroir patient : reflète l'accouchement.
+      DB.updateMaternityCaseRecord?.(caseId, { status: 'postpartum', bornAt: new Date(born).toISOString() });
       App.closeModal();
       App.toast('👶 Accouchement enregistré.');
       HospitalDesktopUI.navigate('maternity');
@@ -285,10 +290,13 @@ const HospitalMaternityModule = (() => {
   async function closeCase(caseId) {
     if (!window.HospitalCapabilities?.guardHospitalAction?.('view_patient')) return;
     try {
+      const closedAt = new Date().toISOString();
       await CloudDB.updateDoc('maternityCases', caseId, {
         status: 'closed',
-        closedAt: new Date().toISOString(),
+        closedAt,
       });
+      // Miroir patient : reflète la clôture du dossier de maternité.
+      DB.updateMaternityCaseRecord?.(caseId, { status: 'closed', closedAt });
       App.toast('✅ Dossier clôturé.');
       HospitalDesktopUI.navigate('maternity');
     } catch (e) {

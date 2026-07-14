@@ -1,8 +1,15 @@
 {
-  "version": "2.9.19",
-  "build": "2026.07.13.20",
+  "version": "2.9.20",
+  "build": "2026.07.13.21",
   "buildDate": "2026-07-13",
   "changelog": [
+    {
+      "version": "2.9.20",
+      "date": "2026-07-13",
+      "notes": [
+        "Correctif : une sortie d'hospitalisation (ainsi que la clôture d'un passage aux urgences ou d'un dossier de maternité) ne se reflétait pas dans le dossier du patient — la Timeline affichait l'hospitalisation comme toujours en cours. Le statut est désormais synchronisé côté patient (affichage « · Sortie »)"
+      ]
+    },
     {
       "version": "2.9.19",
       "date": "2026-07-13",
