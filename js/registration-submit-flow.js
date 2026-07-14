@@ -410,9 +410,7 @@
       </button>
 
       <div class="auth-orientation-box">
-        <p>🌍 <strong>Votre numéro n'est pas encore dans notre registre ?</strong></p>
-        <p>Soumettez quand même votre demande. L’administrateur vérifiera vos informations avant activation.</p>
-        <p>Pour accélérer la validation, envoyez votre numéro officiel + une photo de votre carte professionnelle à :</p>
+        <p>🌍 <strong>Pour accélérer la validation</strong>, envoyez votre numéro officiel + une photo de votre carte professionnelle à :</p>
         <p>📞 WhatsApp : <strong>+243 856 373 707</strong></p>
         <p>✉️ Email : <strong>hallo.mediavision.tech@gmail.com</strong></p>
         <p style="color:var(--text-dim);font-size:.72rem;margin-top:.4rem">Délai indicatif : 24 à 48h ouvrables</p>

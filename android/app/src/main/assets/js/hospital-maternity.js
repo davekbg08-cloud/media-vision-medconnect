@@ -146,7 +146,12 @@ const HospitalMaternityModule = (() => {
     }
   }
 
+  // Anti double-appui : évite un dossier (et une patiente) créé en
+  // double sur un double clic pendant les écritures awaitées.
+  let _savingNew = false;
   async function saveNew() {
+    if (_savingNew) return;
+    _savingNew = true;
     try {
       if (!window.HospitalCapabilities?.guardHospitalAction?.('view_patient')) return;
       const lmp = document.getElementById('mat-lmp').value;
@@ -211,7 +216,7 @@ const HospitalMaternityModule = (() => {
     } catch (e) {
       console.error('[Maternité] saveNew :', e);
       App.toast(e.message || 'Création impossible.', 'error');
-    }
+    } finally { _savingNew = false; }
   }
 
   /* ── SUIVI PRÉNATAL ────────────────────────────────── */

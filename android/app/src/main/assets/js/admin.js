@@ -659,7 +659,11 @@ const AdminModule = (() => {
   const SUBSCRIPTION_PAY_NUMBER = '0856373707';
   const SUB_PLANS = { essentiel:'Essentiel', pro:'Pro', institution:'Institution' };
 
+  // Anti double-appui : actions à plusieurs écritures cloud awaitées —
+  // un second clic pendant le traitement relançait tout le flux.
+  let _subActionBusy = false;
   async function activateSubscription(hospitalId, plan = 'pro', months = 1) {
+    if (_subActionBusy) return;
     if (typeof firebaseDB === 'undefined' || !firebaseDB) {
       App.toast('❌ Connexion requise pour activer un abonnement.', 'error'); return;
     }
@@ -669,6 +673,7 @@ const AdminModule = (() => {
 
     if (!confirm(`Activer l'abonnement « ${SUB_PLANS[plan] || plan} » pour ${h?.name || hospitalId} pendant ${months} mois ?\n\nÀ ne faire qu'après réception du paiement au ${SUBSCRIPTION_PAY_NUMBER}.`)) return;
 
+    _subActionBusy = true;
     try {
       await firebaseDB.collection('subscriptions').doc(hospitalId).set({
         hospitalId,
@@ -744,15 +749,17 @@ const AdminModule = (() => {
       } else {
         App.toast('❌ Activation impossible : ' + (e.message || e), 'error');
       }
-    }
+    } finally { _subActionBusy = false; }
   }
 
   async function deactivateSubscription(hospitalId) {
+    if (_subActionBusy) return;
     if (typeof firebaseDB === 'undefined' || !firebaseDB) {
       App.toast('❌ Connexion requise.', 'error'); return;
     }
     const h = window.HospitalsRegistry?.getHospitalById?.(hospitalId);
     if (!confirm(`Désactiver l'abonnement de ${h?.name || hospitalId} ? L'hôpital repassera en lecture seule sur desktop.`)) return;
+    _subActionBusy = true;
     try {
       await firebaseDB.collection('subscriptions').doc(hospitalId).set({
         hospitalId, establishmentId: hospitalId,
@@ -766,7 +773,7 @@ const AdminModule = (() => {
     } catch (e) {
       console.error('[Admin] deactivateSubscription :', e);
       App.toast('❌ ' + (e.message || e), 'error');
-    }
+    } finally { _subActionBusy = false; }
   }
 
   function openSubscriptionActivator(hospitalId) {

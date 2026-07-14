@@ -10,8 +10,8 @@
 (function () {
   'use strict';
 
-  const REG_NUMBER_IDS = { doctor: 'rd-num', pharmacist: 'rph-num', nurse: 'rn-num' };
-  const REG_EMAIL_IDS = { doctor: 'rd-num-email', pharmacist: 'rph-num-email', nurse: 'rn-num-email' };
+  const REG_NUMBER_IDS = { doctor: 'rd-num', pharmacist: 'rph-num', nurse: 'rn-num', lab: 'rl-num', reception: 'rc-num' };
+  const REG_EMAIL_IDS = { doctor: 'rd-num-email', pharmacist: 'rph-num-email', nurse: 'rn-num-email', lab: 'rl-num-email', reception: 'rc-num-email' };
   let lastPressedButton = null;
 
   function normalize(value) { return String(value || '').trim().toUpperCase(); }
@@ -118,6 +118,11 @@
     wrapAction('_regDoctor', 'Envoi…', () => explainExistingRegistration('doctor'));
     wrapAction('_regPharmacist', 'Envoi…', () => explainExistingRegistration('pharmacist'));
     wrapAction('_regNurse', 'Envoi…', () => explainExistingRegistration('nurse'));
+    // Correctif (audit) : labo/réception n'étaient PAS couverts par
+    // l'anti-double appui — leur bouton « Envoyer la demande » pouvait
+    // déclencher deux inscriptions sur un double clic.
+    wrapAction('_regLab', 'Envoi…', () => explainExistingRegistration('lab'));
+    wrapAction('_regReception', 'Envoi…', () => explainExistingRegistration('reception'));
 
     return true;
   }

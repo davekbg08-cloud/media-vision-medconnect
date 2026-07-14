@@ -1,8 +1,17 @@
 {
-  "version": "2.9.20",
-  "build": "2026.07.13.21",
-  "buildDate": "2026-07-13",
+  "version": "2.9.21",
+  "build": "2026.07.14.1",
+  "buildDate": "2026-07-14",
   "changelog": [
+    {
+      "version": "2.9.21",
+      "date": "2026-07-14",
+      "notes": [
+        "Interface : tous les boutons de l'application réagissent désormais visiblement à l'appui et ne peuvent plus déclencher deux fois la même action sur un double appui — protections renforcées sur les actions sensibles (validation/activation administrateur, inscriptions, créations de dossiers)",
+        "Connexion patient : le bouton dit simplement « Se connecter » (au lieu de « Se connecter à mon dossier existant ») et les textes non essentiels ont été allégés",
+        "Inscription : les rôles Laboratoire et Réception (postes desktop hôpital) ne sont plus proposés sur mobile — les résultats labo continuent d'atteindre le patient mobile"
+      ]
+    },
     {
       "version": "2.9.20",
       "date": "2026-07-13",

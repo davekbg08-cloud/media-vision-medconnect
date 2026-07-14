@@ -776,12 +776,18 @@ const HospitalsRegistry = (() => {
      updateHospital → saveHospitals → pushCloud establishments +
      mc_hospitals) ET le compte users/{authUid} pour autoriser la
      connexion desktop. */
+  // Anti double-appui : l'action s'étend sur plusieurs écritures cloud
+  // awaitées — un second clic pendant ce temps relançait tout le flux.
+  let _validateBusy = false;
   async function validateEstablishment(establishmentId, approve) {
+    if (_validateBusy) return;
     const h = getHospitalById(establishmentId);
     if (!h) { App?.toast?.('Établissement introuvable.', 'error'); return; }
     if (!confirm(approve
       ? `Valider l'établissement « ${h.name} » ? Il pourra se connecter.`
       : `Refuser l'établissement « ${h.name} » ?`)) return;
+    _validateBusy = true;
+    try {
 
     updateHospital(establishmentId, { status: approve ? 'active' : 'rejected' });
 
@@ -814,6 +820,8 @@ const HospitalsRegistry = (() => {
       : (approve ? '✅ Établissement validé.' : 'Établissement refusé.'), !confirmed ? 'warning' : undefined);
     if (window.App?.navigateTo) App.navigateTo('dashboard');
     else if (document.getElementById('main-content')) renderAdminPage(document.getElementById('main-content'), 'list');
+
+    } finally { _validateBusy = false; }
   }
 
   function renderAdminRequests() {

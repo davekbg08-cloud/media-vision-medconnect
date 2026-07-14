@@ -153,7 +153,13 @@ const HospitalReceptionModule = (() => {
     }
   }
 
+  // Anti double-appui : la fonction enchaîne plusieurs écritures cloud
+  // awaitées — un second clic pendant ce temps créait patient/visite en
+  // double.
+  let _savingIntake = false;
   async function saveIntake() {
+    if (_savingIntake) return;
+    _savingIntake = true;
     try {
       if (!window.HospitalCapabilities?.guardHospitalAction?.('view_patient')) return;
 
@@ -280,7 +286,7 @@ const HospitalReceptionModule = (() => {
     } catch (e) {
       console.error('[Reception] saveIntake :', e);
       App.toast(e.message || 'Erreur lors de l\'enregistrement.', 'error');
-    }
+    } finally { _savingIntake = false; }
   }
 
   async function closeVisit(visitId) {

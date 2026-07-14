@@ -156,7 +156,12 @@ const HospitalEmergencyModule = (() => {
     }
   }
 
+  // Anti double-appui : évite un passage aux urgences (et un patient)
+  // créé en double sur un double clic pendant les écritures awaitées.
+  let _savingIntake = false;
   async function saveIntake() {
+    if (_savingIntake) return;
+    _savingIntake = true;
     try {
       if (!window.HospitalCapabilities?.guardHospitalAction?.('view_patient')) return;
 
@@ -219,7 +224,7 @@ const HospitalEmergencyModule = (() => {
     } catch (e) {
       console.error('[Urgences] saveIntake :', e);
       App.toast(e.message || 'Enregistrement impossible.', 'error');
-    }
+    } finally { _savingIntake = false; }
   }
 
   /* ── PRISE EN CHARGE / CLÔTURE ─────────────────────── */
