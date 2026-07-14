@@ -139,8 +139,14 @@ const AppointmentsModule = (() => {
       </form>`);
   }
 
+  // Anti double-appui : le contrôle d'abonnement est awaité — un second
+  // envoi pendant cette attente créait le rendez-vous en double.
+  let _savingApt = false;
   async function save(e) {
     e.preventDefault();
+    if (_savingApt) return;
+    _savingApt = true;
+    try {
     try {
       // Pré-contrôle client (même pattern que js/hospital.js
       // saveConsult) : le serveur (hospitalCanWriteFromDevice,
@@ -173,6 +179,7 @@ const AppointmentsModule = (() => {
     App.closeModal();
     App.toast('✅ Rendez-vous créé');
     if (window.App?.navigateTo) App.navigateTo('appointments');
+    } finally { _savingApt = false; }
   }
 
   function setStatus(aid, status) {

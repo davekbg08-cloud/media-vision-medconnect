@@ -1,8 +1,15 @@
 {
-  "version": "2.9.21",
-  "build": "2026.07.14.1",
+  "version": "2.9.22",
+  "build": "2026.07.14.2",
   "buildDate": "2026-07-14",
   "changelog": [
+    {
+      "version": "2.9.22",
+      "date": "2026-07-14",
+      "notes": [
+        "Interface : verrou anti double-appui ajouté à la connexion administrateur et, après audit, à toutes les actions restantes qui créent des données (consultation, admission, demandes et résultats de laboratoire, rendez-vous, connexion et inscription d'établissement) — plus aucun doublon possible en cas d'appui répété pendant un traitement"
+      ]
+    },
     {
       "version": "2.9.21",
       "date": "2026-07-14",

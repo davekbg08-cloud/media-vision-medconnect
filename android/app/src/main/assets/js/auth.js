@@ -901,6 +901,14 @@ const Auth = (() => {
     if (!email || !pass) { showAdminError('Veuillez remplir l\'email et le mot de passe administrateur.'); return; }
     if (!_hasFirebaseAuth() || !_hasFirebaseDB()) { showAdminError('❌ Firebase indisponible. Vérifiez la connexion internet puis réessayez.'); return; }
 
+    // Verrou anti double-appui (clic ET touche Entrée passent par le
+    // submit du formulaire) : désactivé AVANT le premier await — une
+    // seconde soumission pendant la connexion relançait signOut +
+    // signInWithEmailAndPassword en parallèle.
+    const submitBtn = e.target?.querySelector?.('button[type="submit"]');
+    if (submitBtn?.disabled) return;
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = '⏳ Connexion…'; }
+
     try {
       // Nettoie une éventuelle session Firebase résiduelle (ex. un agent
       // hôpital connecté juste avant sur le même navigateur) pour éviter
@@ -931,6 +939,12 @@ const Auth = (() => {
     } catch (error) {
       console.warn('[MedConnect] Connexion administrateur cloud impossible :', error);
       showAdminError('❌ Connexion administrateur impossible. Vérifiez email, mot de passe et droits Firestore.');
+    } finally {
+      // Échec ou refus : le bouton redevient utilisable. Succès : le
+      // modal est fermé, la réactivation est sans effet.
+      if (submitBtn && document.body.contains(submitBtn)) {
+        submitBtn.disabled = false; submitBtn.textContent = 'Se connecter';
+      }
     }
   }
 

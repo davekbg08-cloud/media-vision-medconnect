@@ -531,12 +531,19 @@ const HospitalPortal = (() => {
     document.getElementById('smart-check-result').innerHTML = Network.renderSmartCheckResult(warns);
   }
 
+  // Anti double-appui : la création s'étend sur plusieurs écritures
+  // (consultation + ordonnance + documents) — un second envoi pendant
+  // ce temps dupliquait tout.
+  let _savingConsult = false;
   async function saveConsult(e, patientId) {
     e.preventDefault();
     // Garde de capacité (desktop hôpital) : créer une consultation +
     // prescrire est réservé au médecin. Un infirmier/labo/réception en
     // session hôpital ne peut pas exécuter cette action.
     if (!window.HospitalCapabilities?.guardHospitalAction?.('create_consultation')) return;
+    if (_savingConsult) return;
+    _savingConsult = true;
+    try {
     try {
       // Pré-contrôle client (audit, même pattern que
       // js/hospital-beds.js saveBed/admitPatient) : le serveur
@@ -661,6 +668,7 @@ const HospitalPortal = (() => {
     if (rxId) { openPrescriptionTarget(rxId); return; }
 
     App.toast(t('msg_saved')); App.navigateTo('consultations');
+    } finally { _savingConsult = false; }
   }
 
   /* ── PARTIE E/F — choix de la destination de l'ordonnance ── */

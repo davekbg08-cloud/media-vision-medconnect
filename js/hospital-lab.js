@@ -134,7 +134,12 @@ const HospitalLabModule = (() => {
     `);
   }
 
+  // Anti double-appui : écritures cloud awaitées — un second clic
+  // pendant ce temps créait la demande / le résultat en double.
+  let _savingOrder = false;
   async function saveOrder() {
+    if (_savingOrder) return;
+    _savingOrder = true;
     try {
       if (!window.HospitalCapabilities?.guardHospitalAction?.('request_lab')) return;
       await CloudDB.requireWritableSubscription('request_lab');
@@ -175,7 +180,7 @@ const HospitalLabModule = (() => {
     } catch (e) {
       console.error('[HospitalLab] saveOrder :', e);
       App.toast(e.message || 'Erreur lors de la demande.', 'error');
-    }
+    } finally { _savingOrder = false; }
   }
 
   /* ── Statut & résultat ──────────────────────────── */
@@ -206,7 +211,10 @@ const HospitalLabModule = (() => {
     `);
   }
 
+  let _savingResult = false;
   async function saveResult(requestId) {
+    if (_savingResult) return;
+    _savingResult = true;
     try {
       if (!window.HospitalCapabilities?.guardHospitalAction?.('enter_lab_result')) return;
       await CloudDB.requireWritableSubscription('add_lab_result');
@@ -271,7 +279,7 @@ const HospitalLabModule = (() => {
     } catch (e) {
       console.error('[HospitalLab] saveResult :', e);
       App.toast(e.message || 'Erreur lors de l\'enregistrement.', 'error');
-    }
+    } finally { _savingResult = false; }
   }
 
   return { render, openNew, saveOrder, setStatus, openResult, saveResult };
