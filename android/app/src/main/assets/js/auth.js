@@ -13,7 +13,34 @@ const Auth = (() => {
   function isLogged() { return !!getUser(); }
   function _save(u)   { sessionStorage.setItem('mc_user', JSON.stringify(u)); }
 
-  function logout() {
+  async function logout() {
+    // 1) Pousser les écritures encore en file AVANT toute purge :
+    //    les vider ensuite ne perdrait aucune donnée médicale.
+    try { await DB.flushOutbox?.(); } catch (_) {}
+
+    // 2) Vraie déconnexion Firebase (sinon la session serveur reste
+    //    active pour le prochain utilisateur du poste).
+    try {
+      if (typeof firebaseAuth !== 'undefined' && firebaseAuth?.signOut) {
+        await firebaseAuth.signOut();
+      }
+    } catch (e) { console.warn('[MedConnect] signOut :', e?.message || e); }
+
+    // 3) Purge des caches MÉDICAUX locaux : sur un poste partagé
+    //    (hôpital), l'agent suivant ne doit pas retrouver les patients,
+    //    consultations ou ordonnances du précédent. On ne touche qu'aux
+    //    données médicales/sensibles — pas aux préférences d'interface.
+    try {
+      const MEDICAL_KEYS = [
+        'mc_patients', 'mc_consultations', 'mc_prescriptions',
+        'mc_admissions', 'mc_appointments', 'mc_lab_results',
+        'mc_vaccinations', 'mc_messages', 'mc_medicines', 'mc_sales',
+        'mc_emergency_cases', 'mc_maternity_cases',
+        'mc_cloud_outbox',
+      ];
+      MEDICAL_KEYS.forEach(k => { try { localStorage.removeItem(k); } catch (_) {} });
+    } catch (e) { console.warn('[MedConnect] purge cache :', e?.message || e); }
+
     sessionStorage.clear();
     if (window.HospitalsRegistry) HospitalsRegistry.clearCurrentHospital?.();
     showLogin();

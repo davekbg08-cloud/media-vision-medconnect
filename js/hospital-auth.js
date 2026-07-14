@@ -485,11 +485,25 @@ const HospitalAuth = (() => {
     } finally { _registering = false; }
   }
 
-  function logout() {
+  async function logout() {
+    // Poste hospitalier PARTAGÉ : pousser la file d'écritures, fermer
+    // la session Firebase, puis purger les caches médicaux pour que
+    // l'agent suivant ne retrouve rien du précédent.
+    try { await window.DB?.flushOutbox?.(); } catch (_) {}
     clearSession();
     if (typeof firebaseAuth !== 'undefined' && firebaseAuth?.signOut) {
-      try { firebaseAuth.signOut(); } catch (_) {}
+      try { await firebaseAuth.signOut(); } catch (_) {}
     }
+    try {
+      const MEDICAL_KEYS = [
+        'mc_patients', 'mc_consultations', 'mc_prescriptions',
+        'mc_admissions', 'mc_appointments', 'mc_lab_results',
+        'mc_vaccinations', 'mc_messages', 'mc_medicines', 'mc_sales',
+        'mc_emergency_cases', 'mc_maternity_cases',
+        'mc_cloud_outbox',
+      ];
+      MEDICAL_KEYS.forEach(k => { try { localStorage.removeItem(k); } catch (_) {} });
+    } catch (e) { console.warn('[HospitalAuth] purge cache :', e?.message || e); }
     renderScreen();
   }
 
