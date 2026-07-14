@@ -366,6 +366,23 @@ const HospitalPortal = (() => {
   async function saveNewPatient(e) {
     e.preventDefault();
     if (!window.HospitalCapabilities?.guardHospitalAction?.('create_patient')) return;
+    // Anti double-appui : le bouton est désactivé AVANT le premier await
+    // (le contrôle d'abonnement ci-dessous) — sinon un double-clic pendant
+    // cette attente relançait toute la création (fiche en double).
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    if (submitBtn?.disabled) return;
+    const submitLabel = submitBtn?.textContent || '';
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = '⏳ Enregistrement…'; }
+    // Enregistrement normal (nouveau patient desktop) = action soumise à
+    // l'abonnement. Seul l'intake d'urgence (js/hospital-emergency.js)
+    // est exempté. Message clair au lieu d'un échec silencieux.
+    try {
+      await CloudDB.requireWritableSubscription('create_patient');
+    } catch (subErr) {
+      App.toast(subErr.message || "Enregistrement bloqué : abonnement de l'établissement expiré.", 'error');
+      if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = submitLabel; }
+      return;
+    }
     const user = Auth.getUser() || {};
     const isNurse = user.role === 'nurse';
     // Traçabilité + statut de complétion médicale. Une fiche créée par
@@ -386,8 +403,7 @@ const HospitalPortal = (() => {
           created_by_role: user.role || '',
           medical_completion_status: (user.role === 'doctor') ? 'completed' : 'pending',
         };
-    const submitBtn = e.target.querySelector('button[type="submit"]');
-    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = '⏳ Enregistrement…'; }
+    // (bouton déjà désactivé en tête de fonction — anti double-appui)
     // Correctif (course create-fiche / premier-accès) : on attend la
     // confirmation Firestore réelle de mc_patients avant d'afficher le
     // code d'accès — sinon un premier accès tenté trop tôt tombait sur

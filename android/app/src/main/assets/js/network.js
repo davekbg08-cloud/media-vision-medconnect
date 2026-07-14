@@ -224,9 +224,29 @@ const Network = (() => {
         : '❌ Échec de l\'envoi — droits ou connexion à vérifier.';
     }
 
+    // Envoi d'une ordonnance = action desktop soumise à l'abonnement
+    // (send_prescription_pharmacy ∈ DESKTOP_BLOCKED_ACTIONS). Décision
+    // produit : les DEUX chemins d'envoi — dépôt dans l'espace du
+    // patient ET dispatch vers une pharmacie précise — sont bloqués sur
+    // desktop expiré. Le mobile n'est jamais coupé
+    // (hospitalCanWriteFromDevice côté règles laisse toujours passer le
+    // mobile). Contrôle unique en tête, avant tout chemin d'écriture.
+    try {
+      await window.CloudDB?.requireWritableSubscription?.('send_prescription_pharmacy');
+    } catch (e) {
+      App.toast(e.message || "Envoi bloqué : abonnement de l'établissement expiré.", 'error');
+      return;
+    }
+
+    // sourceDevice courant, posé sur CHAQUE écriture : la règle serveur
+    // (hospitalCanWriteFromDevice) en dépend pour gater le bon device —
+    // sans lui elle lirait le device de CRÉATION persisté (piège déjà vu
+    // sur mc_appointments).
+    const sourceDevice = window.ExchangeBridge?.currentSourceDevice?.() || 'desktop';
+
     // "patient" seul : aucune pharmacie ne doit voir l'ordonnance
     if (!target || target === 'patient') {
-      const result = await DB.updatePrescriptionAndConfirm(rx.pid, { pharmacyUid: null, pharmacyName: null, status: 'sent' });
+      const result = await DB.updatePrescriptionAndConfirm(rx.pid, { pharmacyUid: null, pharmacyName: null, status: 'sent', sourceDevice });
       if (!result.ok) { App.toast(offlineOrDeniedMessage(result.reason), 'warning'); return; }
       notify({
         to_role: 'patient', to_id: patientId, recipientUid: patientUid, type: 'prescription',
@@ -245,6 +265,7 @@ const Network = (() => {
       pharmacyUid:  pharmacist.uid,
       pharmacyName: pharmacist.pharmacy || pharmacist.name,
       status:       'sent',
+      sourceDevice,
     });
     if (!result.ok) { App.toast(offlineOrDeniedMessage(result.reason), 'warning'); return; }
 

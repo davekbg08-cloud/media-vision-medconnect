@@ -579,33 +579,77 @@ const AdminModule = (() => {
       suspended:    { t:'🚫 Suspendu',         c:'var(--danger)' },
     };
 
-    const rows = await Promise.all(hospitals.map(async h => {
+    // Un établissement fraîchement inscrit (souvent depuis le desktop,
+    // registeredFrom:'desktop') porte establishment.status === 'pending'
+    // et n'a PAS encore de document subscriptions/{id} : sans ce
+    // traitement il s'affichait comme "✅ Actif" (défaut permissif de
+    // getSubscriptionStatus) et se noyait dans la liste — invisible
+    // comme "nouvelle demande à valider". On le remonte en tête et on le
+    // signale distinctement. Il n'écrit ni mc_accounts ni
+    // registration_requests (les seules sources de la section "Demandes
+    // d'inscription"), donc seul le gestionnaire de registre le
+    // surfaçait jusqu'ici. Pour un établissement 'pending', l'action est
+    // la VALIDATION de l'inscription (HospitalsRegistry.validateEstablishment,
+    // l'option existante qui active aussi le compte users/{authUid} et
+    // autorise la connexion), PAS l'activation d'abonnement (paiement),
+    // qui n'a de sens qu'une fois l'établissement validé.
+    const isPendingEstablishment = h => String(h.status || '').toLowerCase() === 'pending';
+    const sorted = [...hospitals].sort((a, b) =>
+      (isPendingEstablishment(a) ? 0 : 1) - (isPendingEstablishment(b) ? 0 : 1));
+    const pendingCount = hospitals.filter(isPendingEstablishment).length;
+
+    const rows = await Promise.all(sorted.map(async h => {
       const hid = h.establishmentId || h.hid;
+      const isPending = isPendingEstablishment(h);
       let sub = { status: 'active', endDate: null };
       try { sub = await window.ExchangeBridge?.getSubscriptionStatus?.(hid) || sub; } catch (_) {}
-      const st = STATUS_LABEL[sub.status] || STATUS_LABEL.active;
-      const isActive = sub.status === 'active' || sub.status === 'grace_period';
+      // Distingue un établissement VALIDÉ mais SANS abonnement payé (le
+      // document subscriptions/{id} n'existe pas → getSubscriptionStatus
+      // renvoie 'active' par DÉFAUT permissif) d'un abonnement réellement
+      // payé/actif (endDate/activatedAt/plan posés par activateSubscription).
+      // Sans cette distinction, un hôpital validé s'affichait "✅ Actif"
+      // et le RESTAIT après clic sur "Activer" — aucun changement visible,
+      // source de confusion (le statut ne changeait pas).
+      const hasPaidSub = !!(sub.endDate || sub.activatedAt || sub.plan);
+      const subActive = sub.status === 'active' || sub.status === 'grace_period';
+      // "Actif" n'est réel que si un abonnement payé existe. Un
+      // établissement 'pending' ou validé-sans-abonnement n'est jamais
+      // traité comme actif (pas de bouton Désactiver).
+      const isActive = !isPending && hasPaidSub && subActive;
+      const st = isPending
+        ? { t:'🆕 Nouvelle inscription — à valider', c:'var(--accent)' }
+        : (subActive && !hasPaidSub
+            ? { t:'⚠️ Validé — aucun abonnement actif', c:'var(--accent)' }
+            : (STATUS_LABEL[sub.status] || STATUS_LABEL.active));
       return `
-        <div class="record-card">
+        <div class="record-card"${isPending ? ' style="border-left:3px solid var(--accent)"' : ''}>
           <div class="record-header">
             <div style="flex:1;min-width:0">
               <strong>${esc(h.name || hid)}</strong>
               ${h.officialId ? `<br><small style="color:var(--text-muted);font-family:monospace">Matricule : ${esc(h.officialId)}</small>` : ''}
               <br><small style="color:${st.c};font-weight:600">${st.t}</small>
-              ${sub.endDate ? `<small style="color:${st.c}"> · jusqu'au <strong>${esc(String(sub.endDate).slice(0,10))}</strong></small>` : ''}
-              ${sub.activatedAt ? `<br><small style="color:var(--text-dim);font-size:.7rem">Dernière activation : ${esc(String(sub.activatedAt).slice(0,10))}</small>` : ''}
+              ${!isPending && sub.endDate ? `<small style="color:${st.c}"> · jusqu'au <strong>${esc(String(sub.endDate).slice(0,10))}</strong></small>` : ''}
+              ${!isPending && sub.activatedAt ? `<br><small style="color:var(--text-dim);font-size:.7rem">Dernière activation : ${esc(String(sub.activatedAt).slice(0,10))}</small>` : ''}
             </div>
           </div>
           <div style="display:flex;gap:.5rem;margin-top:.5rem;flex-wrap:wrap">
-            <button class="btn btn-primary btn-sm" onclick="AdminModule.openSubscriptionActivator('${esc(hid)}')">
-              💳 ${isActive ? 'Renouveler / changer' : 'Activer'}
-            </button>
-            ${isActive ? `<button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="AdminModule.deactivateSubscription('${esc(hid)}')">Désactiver</button>` : ''}
+            ${isPending ? `
+              <button class="btn btn-primary btn-sm" onclick="HospitalsRegistry.validateEstablishment('${esc(hid)}',true)">✅ Valider l'inscription</button>
+              <button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="HospitalsRegistry.validateEstablishment('${esc(hid)}',false)">❌ Refuser</button>
+            ` : `
+              <button class="btn btn-primary btn-sm" onclick="AdminModule.openSubscriptionActivator('${esc(hid)}')">
+                💳 ${isActive ? 'Renouveler / changer' : 'Activer'}
+              </button>
+              ${isActive ? `<button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="AdminModule.deactivateSubscription('${esc(hid)}')">Désactiver</button>` : ''}
+            `}
           </div>
         </div>`;
     }));
 
-    box.innerHTML = rows.join('');
+    const banner = pendingCount
+      ? `<div class="auth-register-info" style="border-left:3px solid var(--accent);margin-bottom:.8rem">🆕 <strong>${pendingCount}</strong> nouvel(le)(s) établissement(s) en attente de validation.</div>`
+      : '';
+    box.innerHTML = banner + rows.join('');
   }
 
   /* ══ ABONNEMENTS HÔPITAUX (activation manuelle après paiement) ══
@@ -615,7 +659,11 @@ const AdminModule = (() => {
   const SUBSCRIPTION_PAY_NUMBER = '0856373707';
   const SUB_PLANS = { essentiel:'Essentiel', pro:'Pro', institution:'Institution' };
 
+  // Anti double-appui : actions à plusieurs écritures cloud awaitées —
+  // un second clic pendant le traitement relançait tout le flux.
+  let _subActionBusy = false;
   async function activateSubscription(hospitalId, plan = 'pro', months = 1) {
+    if (_subActionBusy) return;
     if (typeof firebaseDB === 'undefined' || !firebaseDB) {
       App.toast('❌ Connexion requise pour activer un abonnement.', 'error'); return;
     }
@@ -625,6 +673,7 @@ const AdminModule = (() => {
 
     if (!confirm(`Activer l'abonnement « ${SUB_PLANS[plan] || plan} » pour ${h?.name || hospitalId} pendant ${months} mois ?\n\nÀ ne faire qu'après réception du paiement au ${SUBSCRIPTION_PAY_NUMBER}.`)) return;
 
+    _subActionBusy = true;
     try {
       await firebaseDB.collection('subscriptions').doc(hospitalId).set({
         hospitalId,
@@ -644,9 +693,20 @@ const AdminModule = (() => {
 
       // Valide aussi l'ÉTABLISSEMENT (status 'active') : sans ça la
       // connexion resterait bloquée (on refuse les hôpitaux 'pending').
+      // Écriture cloud AWAITÉE et confirmée (plus fire-and-forget) : la
+      // mise à jour locale seule (updateHospital → saveHospitals, push
+      // non attendu) pouvait être repoussée par l'écouteur establishments
+      // (remplacement intégral du snapshot) avec l'ancien statut
+      // 'pending' si la propagation cloud échouait — l'admin voyait alors
+      // le badge "🆕 à valider" persister et croyait que l'activation
+      // n'avait rien changé. On met à jour le local (affichage immédiat)
+      // PUIS on confirme réellement le cloud avant d'annoncer le succès.
+      let establishmentConfirmed = true;
       try {
         window.HospitalsRegistry?.updateHospital?.(hospitalId, { status: 'active' });
+        await firebaseDB.collection('establishments').doc(hospitalId).set({ status: 'active' }, { merge: true });
       } catch (estErr) {
+        establishmentConfirmed = false;
         console.warn('[Admin] Validation établissement :', estErr?.message || estErr);
       }
 
@@ -673,7 +733,11 @@ const AdminModule = (() => {
         body: `L'abonnement ${SUB_PLANS[plan] || plan} de ${h?.name || hospitalId} est actif jusqu'au ${end.toISOString().slice(0,10)}.`,
       });
 
-      App.toast(`✅ Abonnement ${SUB_PLANS[plan] || plan} de ${h?.name || hospitalId} — actif jusqu'au ${end.toISOString().slice(0,10)}.`);
+      if (establishmentConfirmed) {
+        App.toast(`✅ Abonnement ${SUB_PLANS[plan] || plan} de ${h?.name || hospitalId} — actif jusqu'au ${end.toISOString().slice(0,10)}.`);
+      } else {
+        App.toast(`⚠️ Abonnement activé, mais la validation de l'établissement n'a pas été confirmée — réessayez pour lever le statut « à valider ».`, 'warning');
+      }
       App.navigateTo('dashboard');
     } catch (e) {
       console.error('[Admin] activateSubscription :', e);
@@ -685,15 +749,17 @@ const AdminModule = (() => {
       } else {
         App.toast('❌ Activation impossible : ' + (e.message || e), 'error');
       }
-    }
+    } finally { _subActionBusy = false; }
   }
 
   async function deactivateSubscription(hospitalId) {
+    if (_subActionBusy) return;
     if (typeof firebaseDB === 'undefined' || !firebaseDB) {
       App.toast('❌ Connexion requise.', 'error'); return;
     }
     const h = window.HospitalsRegistry?.getHospitalById?.(hospitalId);
     if (!confirm(`Désactiver l'abonnement de ${h?.name || hospitalId} ? L'hôpital repassera en lecture seule sur desktop.`)) return;
+    _subActionBusy = true;
     try {
       await firebaseDB.collection('subscriptions').doc(hospitalId).set({
         hospitalId, establishmentId: hospitalId,
@@ -707,7 +773,7 @@ const AdminModule = (() => {
     } catch (e) {
       console.error('[Admin] deactivateSubscription :', e);
       App.toast('❌ ' + (e.message || e), 'error');
-    }
+    } finally { _subActionBusy = false; }
   }
 
   function openSubscriptionActivator(hospitalId) {

@@ -776,14 +776,34 @@ const HospitalsRegistry = (() => {
      updateHospital → saveHospitals → pushCloud establishments +
      mc_hospitals) ET le compte users/{authUid} pour autoriser la
      connexion desktop. */
+  // Anti double-appui : l'action s'étend sur plusieurs écritures cloud
+  // awaitées — un second clic pendant ce temps relançait tout le flux.
+  let _validateBusy = false;
   async function validateEstablishment(establishmentId, approve) {
+    if (_validateBusy) return;
     const h = getHospitalById(establishmentId);
     if (!h) { App?.toast?.('Établissement introuvable.', 'error'); return; }
     if (!confirm(approve
       ? `Valider l'établissement « ${h.name} » ? Il pourra se connecter.`
       : `Refuser l'établissement « ${h.name} » ?`)) return;
+    _validateBusy = true;
+    try {
 
     updateHospital(establishmentId, { status: approve ? 'active' : 'rejected' });
+
+    // Statut établissement confirmé côté cloud AVANT d'annoncer la
+    // validation : updateHospital ne fait qu'un push non attendu, que
+    // l'écouteur establishments (remplacement intégral du snapshot) peut
+    // écraser avec l'ancien 'pending' si la propagation échoue — le
+    // badge "à valider" persisterait alors et prêterait à confusion
+    // (même correctif que admin.js activateSubscription).
+    let confirmed = true;
+    try {
+      if (typeof firebaseDB !== 'undefined' && firebaseDB) {
+        await firebaseDB.collection('establishments').doc(establishmentId)
+          .set({ status: approve ? 'active' : 'rejected' }, { merge: true });
+      }
+    } catch (e) { confirmed = false; console.warn('[Registry] Confirmation statut établissement :', e?.message || e); }
 
     // Compte Firebase de l'établissement (rôle 'hospital') : actif si
     // validé, pour que la connexion desktop soit autorisée.
@@ -793,11 +813,15 @@ const HospitalsRegistry = (() => {
           status: approve ? 'active' : 'rejected', role: 'hospital',
         }, { merge: true });
       }
-    } catch (e) { console.warn('[Registry] MAJ compte établissement :', e?.message || e); }
+    } catch (e) { confirmed = false; console.warn('[Registry] MAJ compte établissement :', e?.message || e); }
 
-    App?.toast?.(approve ? '✅ Établissement validé.' : 'Établissement refusé.');
+    App?.toast?.(!confirmed
+      ? '⚠️ Action enregistrée localement, mais non confirmée côté serveur — réessayez.'
+      : (approve ? '✅ Établissement validé.' : 'Établissement refusé.'), !confirmed ? 'warning' : undefined);
     if (window.App?.navigateTo) App.navigateTo('dashboard');
     else if (document.getElementById('main-content')) renderAdminPage(document.getElementById('main-content'), 'list');
+
+    } finally { _validateBusy = false; }
   }
 
   function renderAdminRequests() {

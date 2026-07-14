@@ -146,7 +146,12 @@ const HospitalMaternityModule = (() => {
     }
   }
 
+  // Anti double-appui : évite un dossier (et une patiente) créé en
+  // double sur un double clic pendant les écritures awaitées.
+  let _savingNew = false;
   async function saveNew() {
+    if (_savingNew) return;
+    _savingNew = true;
     try {
       if (!window.HospitalCapabilities?.guardHospitalAction?.('view_patient')) return;
       const lmp = document.getElementById('mat-lmp').value;
@@ -162,6 +167,15 @@ const HospitalMaternityModule = (() => {
         const ln = document.getElementById('mat-ln').value.trim();
         if (!fn || !ln) { App.toast('Patiente introuvable : renseignez prénom et nom.', 'error'); return; }
         if (!window.HospitalCapabilities?.guardHospitalAction?.('create_patient')) return;
+        // Enregistrement normal (maternité) = action desktop soumise à
+        // l'abonnement. Seul l'intake d'urgence (js/hospital-emergency.js)
+        // est exempté. Message clair au lieu d'un échec silencieux.
+        try {
+          await CloudDB.requireWritableSubscription('create_patient');
+        } catch (subErr) {
+          App.toast(subErr.message || "Enregistrement bloqué : abonnement de l'établissement expiré.", 'error');
+          return;
+        }
         patient = window.DB?.addPatient?.({ firstname: fn, lastname: ln, gender: 'F', ...est });
         mc = patient.id;
       }
@@ -185,6 +199,9 @@ const HospitalMaternityModule = (() => {
       // (maternityCases n'est lu que par ce module desktop).
       if (window.DB?.addMaternityCaseRecord) {
         DB.addMaternityCaseRecord({
+          // Lien vers le cas desktop pour que l'accouchement/la clôture
+          // mette à jour ce miroir (cf. DB.updateMaternityCaseRecord).
+          sourceCaseId: caseId,
           patient_id: mc,
           patient_uid: patient?.patient_uid || patient?.patientAuthUid || '',
           lmpDate: lmp, dueDate: dueDate(lmp), prenatalVisits: 0, status: 'prenatal',
@@ -199,7 +216,7 @@ const HospitalMaternityModule = (() => {
     } catch (e) {
       console.error('[Maternité] saveNew :', e);
       App.toast(e.message || 'Création impossible.', 'error');
-    }
+    } finally { _savingNew = false; }
   }
 
   /* ── SUIVI PRÉNATAL ────────────────────────────────── */
@@ -264,6 +281,8 @@ const HospitalMaternityModule = (() => {
         deliveredByUid: session.agentUid || '',
         deliveredByName: session.agentName || '',
       });
+      // Miroir patient : reflète l'accouchement.
+      DB.updateMaternityCaseRecord?.(caseId, { status: 'postpartum', bornAt: new Date(born).toISOString() });
       App.closeModal();
       App.toast('👶 Accouchement enregistré.');
       HospitalDesktopUI.navigate('maternity');
@@ -276,10 +295,13 @@ const HospitalMaternityModule = (() => {
   async function closeCase(caseId) {
     if (!window.HospitalCapabilities?.guardHospitalAction?.('view_patient')) return;
     try {
+      const closedAt = new Date().toISOString();
       await CloudDB.updateDoc('maternityCases', caseId, {
         status: 'closed',
-        closedAt: new Date().toISOString(),
+        closedAt,
       });
+      // Miroir patient : reflète la clôture du dossier de maternité.
+      DB.updateMaternityCaseRecord?.(caseId, { status: 'closed', closedAt });
       App.toast('✅ Dossier clôturé.');
       HospitalDesktopUI.navigate('maternity');
     } catch (e) {

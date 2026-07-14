@@ -1,8 +1,74 @@
 {
-  "version": "2.9.11",
-  "build": "2026.07.13.12",
-  "buildDate": "2026-07-13",
+  "version": "2.9.21",
+  "build": "2026.07.14.1",
+  "buildDate": "2026-07-14",
   "changelog": [
+    {
+      "version": "2.9.21",
+      "date": "2026-07-14",
+      "notes": [
+        "Interface : tous les boutons de l'application réagissent désormais visiblement à l'appui et ne peuvent plus déclencher deux fois la même action sur un double appui — protections renforcées sur les actions sensibles (validation/activation administrateur, inscriptions, créations de dossiers)",
+        "Connexion patient : le bouton dit simplement « Se connecter » (au lieu de « Se connecter à mon dossier existant ») et les textes non essentiels ont été allégés",
+        "Inscription : les rôles Laboratoire et Réception (postes desktop hôpital) ne sont plus proposés sur mobile — les résultats labo continuent d'atteindre le patient mobile"
+      ]
+    },
+    {
+      "version": "2.9.20",
+      "date": "2026-07-13",
+      "notes": [
+        "Correctif : une sortie d'hospitalisation (ainsi que la clôture d'un passage aux urgences ou d'un dossier de maternité) ne se reflétait pas dans le dossier du patient — la Timeline affichait l'hospitalisation comme toujours en cours. Le statut est désormais synchronisé côté patient (affichage « · Sortie »)"
+      ]
+    },
+    {
+      "version": "2.9.19",
+      "date": "2026-07-13",
+      "notes": [
+        "Nettoyage (audit) : arrêt d'écritures Firestore mortes (mc_transfers/transfers depuis la messagerie ciblée, mc_settings depuis les réglages) — des collections sans règles, systématiquement rejetées en silence et jamais relues. Aucun impact fonctionnel (les messages et réglages continuent de fonctionner par leurs vrais chemins)"
+      ]
+    },
+    {
+      "version": "2.9.18",
+      "date": "2026-07-13",
+      "notes": [
+        "Sécurité/facturation : l'enregistrement d'un nouveau patient sur desktop est désormais bloqué (message clair) si l'abonnement de l'établissement est expiré — SAUF aux urgences, où l'enregistrement du patient reste toujours possible (le soin d'urgence n'est jamais coupé)",
+        "Correctif : dans le Dashboard admin, un établissement validé mais sans abonnement payé s'affichait « Actif » et le restait après clic sur « Activer » (aucun changement visible) — il affiche désormais « Validé — aucun abonnement actif », et l'activation produit un changement de statut clair"
+      ]
+    },
+    {
+      "version": "2.9.17",
+      "date": "2026-07-13",
+      "notes": [
+        "Amélioration : dans le Dashboard admin, un établissement en attente utilise désormais l'option de validation d'inscription existante (qui autorise la connexion), au lieu de l'activation d'abonnement — et cette validation confirme réellement le statut côté serveur avant de l'annoncer"
+      ]
+    },
+    {
+      "version": "2.9.16",
+      "date": "2026-07-13",
+      "notes": [
+        "Nettoyage : le filtre « Document » de la Timeline médicale n'était jamais alimenté (purement décoratif) — retiré de la barre de filtres"
+      ]
+    },
+    {
+      "version": "2.9.15",
+      "date": "2026-07-13",
+      "notes": [
+        "Correctif : l'activation d'un abonnement hôpital ne confirmait pas réellement la validation de l'établissement (écriture non attendue) — le statut pouvait rester « à valider » et prêter à confusion. La validation est désormais confirmée avant d'annoncer le succès, avec un avertissement clair si elle échoue"
+      ]
+    },
+    {
+      "version": "2.9.14",
+      "date": "2026-07-13",
+      "notes": [
+        "Correctif : une inscription d'établissement faite depuis le desktop n'apparaissait pas clairement dans le Dashboard administrateur (elle s'affichait comme « Actif » dans la liste des abonnements, sans signal de nouvelle demande) — les établissements en attente de validation sont désormais remontés en tête, signalés distinctement et comptés dans une bannière"
+      ]
+    },
+    {
+      "version": "2.9.13",
+      "date": "2026-07-13",
+      "notes": [
+        "Correctif : l'envoi d'une ordonnance depuis le desktop hôpital n'appliquait aucun contrôle d'abonnement (contrairement aux consultations/ordonnances) — désormais bloqué si l'abonnement de l'établissement est expiré, aussi bien pour l'envoi vers une pharmacie partenaire que pour le dépôt dans l'espace du patient. L'envoi reste toujours possible depuis le mobile."
+      ]
+    },
     {
       "version": "2.9.11",
       "date": "2026-07-13",

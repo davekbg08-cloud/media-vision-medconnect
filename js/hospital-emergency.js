@@ -156,7 +156,12 @@ const HospitalEmergencyModule = (() => {
     }
   }
 
+  // Anti double-appui : évite un passage aux urgences (et un patient)
+  // créé en double sur un double clic pendant les écritures awaitées.
+  let _savingIntake = false;
   async function saveIntake() {
+    if (_savingIntake) return;
+    _savingIntake = true;
     try {
       if (!window.HospitalCapabilities?.guardHospitalAction?.('view_patient')) return;
 
@@ -174,7 +179,13 @@ const HospitalEmergencyModule = (() => {
         const ln = document.getElementById('er-ln').value.trim();
         if (!fn || !ln) { App.toast('Patient introuvable : renseignez prénom et nom.', 'error'); return; }
         if (!window.HospitalCapabilities?.guardHospitalAction?.('create_patient')) return;
-        patient = window.DB?.addPatient?.({ firstname: fn, lastname: ln, ...est });
+        // Intake d'URGENCE : JAMAIS soumis au contrôle d'abonnement — le
+        // soin d'urgence n'est pas coupé pour une facture desktop
+        // impayée (décision produit, même principe qu'emergency-transfer).
+        // emergencyIntake:true exempte la création côté règles Firestore
+        // (isEmergencyIntake) ; le patient porte ce marqueur de façon
+        // permanente (traçable).
+        patient = window.DB?.addPatient?.({ firstname: fn, lastname: ln, ...est, emergencyIntake: true });
         mc = patient.id;
       }
 
@@ -196,6 +207,9 @@ const HospitalEmergencyModule = (() => {
       // n'est lu que par ce module desktop).
       if (window.DB?.addEmergencyCaseRecord) {
         DB.addEmergencyCaseRecord({
+          // Lien vers le cas desktop pour que la clôture (closeCase) mette
+          // à jour ce miroir (cf. DB.updateEmergencyCaseRecord).
+          sourceCaseId: caseId,
           patient_id: mc,
           patient_uid: patient?.patient_uid || patient?.patientAuthUid || '',
           complaint, triageLevel, status: 'waiting',
@@ -210,7 +224,7 @@ const HospitalEmergencyModule = (() => {
     } catch (e) {
       console.error('[Urgences] saveIntake :', e);
       App.toast(e.message || 'Enregistrement impossible.', 'error');
-    }
+    } finally { _savingIntake = false; }
   }
 
   /* ── PRISE EN CHARGE / CLÔTURE ─────────────────────── */
@@ -237,10 +251,13 @@ const HospitalEmergencyModule = (() => {
   async function closeCase(caseId, outcome) {
     if (!window.HospitalCapabilities?.guardHospitalAction?.('create_consultation')) return;
     try {
+      const closedAt = new Date().toISOString();
       await CloudDB.updateDoc('emergencyCases', caseId, {
         status: outcome,
-        closedAt: new Date().toISOString(),
+        closedAt,
       });
+      // Miroir patient : reflète la clôture du passage aux urgences.
+      DB.updateEmergencyCaseRecord?.(caseId, { status: outcome, closedAt });
       App.toast(outcome === 'hospitalized' ? '🛏️ Patient hospitalisé.' : '✅ Sortie enregistrée.');
       HospitalDesktopUI.navigate('emergency');
     } catch (e) {

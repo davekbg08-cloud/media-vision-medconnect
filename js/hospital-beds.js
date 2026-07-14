@@ -237,6 +237,10 @@ const HospitalBedsModule = (() => {
       if (window.DB?.addAdmissionRecord) {
         const patient = window.DB.getPatients?.().find(p => p.id === mc);
         DB.addAdmissionRecord({
+          // sourceAdmissionId : lien vers l'admission desktop, pour que
+          // la sortie (discharge) puisse retrouver et mettre à jour ce
+          // miroir (sinon le patient voit l'hospitalisation "en cours").
+          sourceAdmissionId: admissionId,
           patient_id: mc,
           patient_uid: patient?.patient_uid || patient?.patientAuthUid || '',
           bedId, ward: bed.ward || '', reason,
@@ -262,10 +266,15 @@ const HospitalBedsModule = (() => {
       if (!adm) return;
       if (!confirm(`Confirmer la sortie de ${adm.patientName || adm.patientMc} ?`)) return;
 
+      const dischargedAt = new Date().toISOString();
       await CloudDB.updateDoc('admissions', admissionId, {
         status: 'discharged',
-        dischargedAt: new Date().toISOString(),
+        dischargedAt,
       });
+      // Miroir patient : reflète la sortie dans mc_admissions pour que la
+      // Timeline du patient affiche "· Sortie" au lieu d'une
+      // hospitalisation perpétuellement "en cours".
+      DB.updateAdmissionRecord?.(admissionId, { status: 'discharged', dischargedAt });
       if (adm.bedId) {
         await CloudDB.updateDoc('beds', adm.bedId, { status: 'free' });
       }

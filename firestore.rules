@@ -137,6 +137,21 @@ service cloud.firestore {
     function hospitalCanWrite(hospitalId) {
       return hospitalSubscriptionOk(hospitalId);
     }
+    // Intake d'URGENCE (js/hospital-emergency.js) : la création d'un
+    // nouveau patient aux urgences n'est JAMAIS coupée pour un
+    // abonnement expiré — le soin d'urgence prime sur la facturation
+    // (même principe que emergency-transfer). Le marqueur emergencyIntake
+    // est posé par le flux urgence ; le patient le porte de façon
+    // permanente (traçable).
+    // ⚠️ LIMITE CONNUE — emergencyIntake est DÉCLARÉ par le client :
+    // comme sourceDevice, un client desktop malveillant pourrait le poser
+    // pour contourner le blocage d'abonnement à la création de patient.
+    // Fermer réellement cette faille exige un custom claim serveur (Cloud
+    // Function). Accepté comme limite connue, cohérent avec le reste du
+    // durcissement sans backend. NE PAS présenter ce contrôle comme fort.
+    function isEmergencyIntake(data) {
+      return data.get('emergencyIntake', false) == true;
+    }
     // Utilisée pour consultations/prescriptions/labRequests/
     // labResults/appointments/messages/hospitalMembers : le mobile/PWA
     // reste autorisé à écrire même hôpital expiré (le soin courant ne
@@ -420,9 +435,10 @@ service cloud.firestore {
       // hospitalCanWrite, sans distinction de plateforme ici).
       allow create: if isAdmin() ||
         ((currentRoleIs('doctor') || currentRoleIs('nurse')) &&
-         hospitalCanWrite(request.resource.data.establishmentId != null
-           ? request.resource.data.establishmentId
-           : request.resource.data.hospital_id));
+         (isEmergencyIntake(request.resource.data) ||
+          hospitalCanWrite(request.resource.data.establishmentId != null
+            ? request.resource.data.establishmentId
+            : request.resource.data.hospital_id)));
       allow update, delete: if isAdmin() || doctorCanRead(resource.data);
     }
 
@@ -519,8 +535,12 @@ service cloud.firestore {
          hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
       // La pharmacie ciblée peut toujours mettre à jour le statut
       // même abonnement expiré/suspendu (une ordonnance déjà envoyée
-      // doit pouvoir être honorée) ; le médecin auteur reste soumis
-      // à la même règle desktop/mobile que la création.
+      // doit pouvoir être honorée). Le médecin auteur reste soumis au
+      // contrôle desktop/mobile pour tout envoi (dépôt patient comme
+      // dispatch pharmacie) — décision produit : sur desktop expiré
+      // l'envoi est bloqué des deux côtés ; le mobile n'est jamais
+      // coupé (hospitalCanWriteFromDevice). Périmètre aligné sur la
+      // collection canonique mc_prescriptions.
       // PARTIE H — le pharmacien ne peut modifier QUE le statut et les
       // métadonnées de traitement, jamais le contenu médical
       // (patient_id, doctor_uid, diagnosis, medicines, establishmentId,
@@ -532,7 +552,7 @@ service cloud.firestore {
          request.resource.data.diff(resource.data).affectedKeys()
            .hasOnly(['status', 'updatedAt', 'updatedByUid', 'updatedByRole', 'cancelReason'])) ||
         (doctorCanRead(resource.data) &&
-         hospitalCanWriteFromDevice(resolveHospitalId(resource.data), request.resource.data.sourceDevice));
+         hospitalCanWriteFromDevice(resolveHospitalId(resource.data), request.resource.data.get('sourceDevice', null)));
       allow delete: if isAdmin();
     }
 
@@ -810,9 +830,10 @@ service cloud.firestore {
       // collection sœur /patients (ligne ~389).
       allow create: if isAdmin() ||
         ((currentRoleIs('doctor') || currentRoleIs('nurse')) &&
-         hospitalCanWrite(request.resource.data.establishmentId != null
-           ? request.resource.data.establishmentId
-           : request.resource.data.hospital_id));
+         (isEmergencyIntake(request.resource.data) ||
+          hospitalCanWrite(request.resource.data.establishmentId != null
+            ? request.resource.data.establishmentId
+            : request.resource.data.hospital_id)));
       allow update, delete: if isAdmin();
     }
 
@@ -836,8 +857,18 @@ service cloud.firestore {
       // PARTIE H — même restriction de champs que /prescriptions : le
       // pharmacien ne modifie jamais le contenu médical, uniquement le
       // statut et ses métadonnées de traitement.
+      // Correctif (audit — dérive canonique/legacy) : le médecin auteur
+      // pouvait modifier mc_prescriptions (collection réellement lue)
+      // sans AUCUN contrôle d'abonnement, alors que la collection
+      // jumelle /prescriptions gate déjà cette mise à jour via
+      // hospitalCanWriteFromDevice. On aligne les deux : tout envoi
+      // d'ordonnance par le médecin (dépôt patient comme dispatch
+      // pharmacie) est soumis au contrôle desktop/mobile — décision
+      // produit : sur desktop expiré l'envoi est bloqué des deux côtés,
+      // le mobile n'est jamais coupé.
       allow update: if isAdmin()
-        || doctorCanRead(resource.data)
+        || (doctorCanRead(resource.data) &&
+            hospitalCanWriteFromDevice(resolveHospitalId(resource.data), request.resource.data.get('sourceDevice', null)))
         || (pharmacyCanReadPrescription(resource.data) &&
             request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(['status', 'updatedAt', 'updatedByUid', 'updatedByRole', 'cancelReason']));

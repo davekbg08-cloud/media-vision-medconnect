@@ -65,6 +65,18 @@ const Auth = (() => {
     <div id="login-form"></div>
     <div id="auth-err" class="auth-error" style="display:none"></div>`; }
 
+  /* Rôles proposés à l'inscription selon la plateforme (demande client) :
+     Laboratoire et Réception sont des postes DESKTOP hôpital — ils n'ont
+     aucun usage sur mobile et n'y sont plus proposés. Le labo continue
+     de « communiquer » avec le mobile : ses résultats atteignent déjà la
+     vue patient mobile via le miroir mc_lab_results. */
+  function _registerRolesForDevice() {
+    const desktop = window.ExchangeBridge?.currentSourceDevice?.() === 'desktop';
+    return desktop
+      ? ['doctor','pharmacist','nurse','lab','reception']
+      : ['doctor','pharmacist','nurse'];
+  }
+
   function _htmlRegister() { return `
     <div class="auth-register-info">
       🩺 <strong>Patient ?</strong> Votre médecin crée votre fiche.
@@ -72,7 +84,7 @@ const Auth = (() => {
     </div>
     <p style="font-size:.8rem;color:var(--text-muted);margin:.75rem 0 .5rem">Choisissez votre rôle :</p>
     <div class="role-selector" id="register-roles">
-      ${['doctor','pharmacist','nurse','lab','reception'].map(r=>`
+      ${_registerRolesForDevice().map(r=>`
         <button class="role-btn" data-role="${r}" onclick="Auth._registerRole('${r}')">
           <span>${ICONS[r]}</span><span>${LABELS[r]}</span>
         </button>`).join('')}
@@ -100,9 +112,6 @@ const Auth = (() => {
 
     const forms = {
       patient: `
-        <div class="auth-register-info" style="margin-top:.75rem">
-          🔁 <strong>Compte existant :</strong> connectez-vous à votre dossier déjà sauvegardé. Le premier accès est séparé pour éviter les doublons.
-        </div>
         <div class="form-group" style="margin-top:.75rem">
           <label class="inp-lbl">Numéro de fiche unique *</label>
           <input type="text" id="lp-id" class="inp" maxlength="20"
@@ -120,7 +129,7 @@ const Auth = (() => {
             style="letter-spacing:2px;text-transform:uppercase;font-family:monospace"
             oninput="this.value=this.value.toUpperCase()">
         </div>
-        <button class="btn-p" onclick="Auth._doPatient()">🔐 Se connecter à mon dossier existant</button>
+        <button class="btn-p" onclick="Auth._doPatient()">🔐 Se connecter</button>
         <button class="btn btn-ghost" style="width:100%;margin-top:.6rem" onclick="Auth._createPatientPin()">🆕 Premier accès : créer mon PIN</button>`,
 
       doctor: `
@@ -567,7 +576,7 @@ const Auth = (() => {
     const accounts = DB.getAccounts();
     const existing = _findPatientAccount(id);
     if (existing) {
-      _err('auth-err', '⚠️ Un compte existe déjà pour cette fiche. Utilisez “Se connecter à mon dossier existant”.');
+      _err('auth-err', '⚠️ Un compte existe déjà pour cette fiche. Utilisez “Se connecter”.');
       return;
     }
     // PARTIE B — jamais de PIN en clair (ni de hash) dans mc_accounts,

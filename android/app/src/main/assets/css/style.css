@@ -1491,3 +1491,15 @@ body.rtl .tl-connector { left: auto; right: -1.1rem; }
   padding: .12rem .5rem;
   margin-right: .4rem;
 }
+
+/* ── Retour visuel universel des boutons (js/button-feedback.js) ──
+   Tous les boutons « répondent » à l'appui : l'utilisateur voit que
+   son action est passée. L'anti double-appui est géré côté JS. */
+@keyframes btn-press-pulse {
+  0%   { transform: scale(1);    filter: brightness(1); }
+  35%  { transform: scale(.96);  filter: brightness(1.25); }
+  100% { transform: scale(1);    filter: brightness(1); }
+}
+.btn-pressed {
+  animation: btn-press-pulse .3s ease-out;
+}

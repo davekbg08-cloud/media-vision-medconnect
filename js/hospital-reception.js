@@ -153,7 +153,13 @@ const HospitalReceptionModule = (() => {
     }
   }
 
+  // Anti double-appui : la fonction enchaîne plusieurs écritures cloud
+  // awaitées — un second clic pendant ce temps créait patient/visite en
+  // double.
+  let _savingIntake = false;
   async function saveIntake() {
+    if (_savingIntake) return;
+    _savingIntake = true;
     try {
       if (!window.HospitalCapabilities?.guardHospitalAction?.('view_patient')) return;
 
@@ -168,6 +174,15 @@ const HospitalReceptionModule = (() => {
         const ln = document.getElementById('rc-ln').value.trim();
         if (!fn || !ln) { App.toast('Patient introuvable : renseignez au moins prénom et nom.', 'error'); return; }
         if (!window.HospitalCapabilities?.guardHospitalAction?.('create_patient')) return;
+        // Enregistrement normal (réception) = action desktop soumise à
+        // l'abonnement. Seul l'intake d'urgence (js/hospital-emergency.js)
+        // est exempté. Message clair au lieu d'un échec silencieux.
+        try {
+          await CloudDB.requireWritableSubscription('create_patient');
+        } catch (subErr) {
+          App.toast(subErr.message || "Enregistrement bloqué : abonnement de l'établissement expiré.", 'error');
+          return;
+        }
         patient = window.DB?.addPatient?.({
           firstname: fn, lastname: ln,
           dob: document.getElementById('rc-dob').value,
@@ -234,6 +249,9 @@ const HospitalReceptionModule = (() => {
         // au patient.
         if (window.DB?.addAdmissionRecord) {
           DB.addAdmissionRecord({
+            // Lien vers l'admission desktop pour que la sortie mette à
+            // jour ce miroir (cf. DB.updateAdmissionRecord).
+            sourceAdmissionId: admissionId,
             patient_id: mc,
             patient_uid: patient?.patient_uid || patient?.patientAuthUid || '',
             bedId, ward: bedLabel, reason,
@@ -268,7 +286,7 @@ const HospitalReceptionModule = (() => {
     } catch (e) {
       console.error('[Reception] saveIntake :', e);
       App.toast(e.message || 'Erreur lors de l\'enregistrement.', 'error');
-    }
+    } finally { _savingIntake = false; }
   }
 
   async function closeVisit(visitId) {
