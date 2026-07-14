@@ -53,9 +53,14 @@ test('une bannière signale le nombre de nouvelles inscriptions en attente', () 
   assert.match(body, /en attente de validation/, 'une bannière doit signaler les inscriptions en attente');
 });
 
-test("un établissement 'pending' n'est jamais présenté comme actif (pas de bouton Désactiver, libellé Valider/activer)", () => {
+test("un établissement 'pending' déclenche la VALIDATION via l'option de registre existante (validateEstablishment), pas l'activation d'abonnement", () => {
   const body = sectionBody();
   // isActive doit exclure les établissements pending.
   assert.match(body, /const isActive = !isPending/, "isActive doit exclure explicitement les établissements pending");
-  assert.match(body, /Valider \/ activer/, "le bouton d'un établissement pending doit inviter à valider/activer");
+  // Le bouton d'un établissement pending appelle l'option existante
+  // HospitalsRegistry.validateEstablishment (valide l'inscription +
+  // active le compte), pas openSubscriptionActivator (paiement).
+  assert.match(body, /validateEstablishment\('\$\{esc\(hid\)\}',true\)/,
+    "le bouton d'un établissement pending doit appeler validateEstablishment (option existante)");
+  assert.match(body, /Valider l'inscription/, "le libellé d'un établissement pending doit inviter à valider l'inscription");
 });

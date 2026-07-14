@@ -585,9 +585,14 @@ const AdminModule = (() => {
     // traitement il s'affichait comme "✅ Actif" (défaut permissif de
     // getSubscriptionStatus) et se noyait dans la liste — invisible
     // comme "nouvelle demande à valider". On le remonte en tête et on le
-    // signale distinctement. Aucune autre voie ne le surface (il n'écrit
-    // ni mc_accounts ni registration_requests, seules sources de la
-    // section "Demandes d'inscription").
+    // signale distinctement. Il n'écrit ni mc_accounts ni
+    // registration_requests (les seules sources de la section "Demandes
+    // d'inscription"), donc seul le gestionnaire de registre le
+    // surfaçait jusqu'ici. Pour un établissement 'pending', l'action est
+    // la VALIDATION de l'inscription (HospitalsRegistry.validateEstablishment,
+    // l'option existante qui active aussi le compte users/{authUid} et
+    // autorise la connexion), PAS l'activation d'abonnement (paiement),
+    // qui n'a de sens qu'une fois l'établissement validé.
     const isPendingEstablishment = h => String(h.status || '').toLowerCase() === 'pending';
     const sorted = [...hospitals].sort((a, b) =>
       (isPendingEstablishment(a) ? 0 : 1) - (isPendingEstablishment(b) ? 0 : 1));
@@ -616,10 +621,15 @@ const AdminModule = (() => {
             </div>
           </div>
           <div style="display:flex;gap:.5rem;margin-top:.5rem;flex-wrap:wrap">
-            <button class="btn btn-primary btn-sm" onclick="AdminModule.openSubscriptionActivator('${esc(hid)}')">
-              💳 ${isPending ? 'Valider / activer' : (isActive ? 'Renouveler / changer' : 'Activer')}
-            </button>
-            ${isActive ? `<button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="AdminModule.deactivateSubscription('${esc(hid)}')">Désactiver</button>` : ''}
+            ${isPending ? `
+              <button class="btn btn-primary btn-sm" onclick="HospitalsRegistry.validateEstablishment('${esc(hid)}',true)">✅ Valider l'inscription</button>
+              <button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="HospitalsRegistry.validateEstablishment('${esc(hid)}',false)">❌ Refuser</button>
+            ` : `
+              <button class="btn btn-primary btn-sm" onclick="AdminModule.openSubscriptionActivator('${esc(hid)}')">
+                💳 ${isActive ? 'Renouveler / changer' : 'Activer'}
+              </button>
+              ${isActive ? `<button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="AdminModule.deactivateSubscription('${esc(hid)}')">Désactiver</button>` : ''}
+            `}
           </div>
         </div>`;
     }));

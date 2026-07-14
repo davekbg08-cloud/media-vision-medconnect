@@ -1,8 +1,15 @@
 {
-  "version": "2.9.16",
-  "build": "2026.07.13.17",
+  "version": "2.9.17",
+  "build": "2026.07.13.18",
   "buildDate": "2026-07-13",
   "changelog": [
+    {
+      "version": "2.9.17",
+      "date": "2026-07-13",
+      "notes": [
+        "Amélioration : dans le Dashboard admin, un établissement en attente utilise désormais l'option de validation d'inscription existante (qui autorise la connexion), au lieu de l'activation d'abonnement — et cette validation confirme réellement le statut côté serveur avant de l'annoncer"
+      ]
+    },
     {
       "version": "2.9.16",
       "date": "2026-07-13",
