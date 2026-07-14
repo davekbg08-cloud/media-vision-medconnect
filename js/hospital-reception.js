@@ -168,6 +168,15 @@ const HospitalReceptionModule = (() => {
         const ln = document.getElementById('rc-ln').value.trim();
         if (!fn || !ln) { App.toast('Patient introuvable : renseignez au moins prénom et nom.', 'error'); return; }
         if (!window.HospitalCapabilities?.guardHospitalAction?.('create_patient')) return;
+        // Enregistrement normal (réception) = action desktop soumise à
+        // l'abonnement. Seul l'intake d'urgence (js/hospital-emergency.js)
+        // est exempté. Message clair au lieu d'un échec silencieux.
+        try {
+          await CloudDB.requireWritableSubscription('create_patient');
+        } catch (subErr) {
+          App.toast(subErr.message || "Enregistrement bloqué : abonnement de l'établissement expiré.", 'error');
+          return;
+        }
         patient = window.DB?.addPatient?.({
           firstname: fn, lastname: ln,
           dob: document.getElementById('rc-dob').value,

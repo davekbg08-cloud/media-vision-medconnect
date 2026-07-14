@@ -174,7 +174,13 @@ const HospitalEmergencyModule = (() => {
         const ln = document.getElementById('er-ln').value.trim();
         if (!fn || !ln) { App.toast('Patient introuvable : renseignez prénom et nom.', 'error'); return; }
         if (!window.HospitalCapabilities?.guardHospitalAction?.('create_patient')) return;
-        patient = window.DB?.addPatient?.({ firstname: fn, lastname: ln, ...est });
+        // Intake d'URGENCE : JAMAIS soumis au contrôle d'abonnement — le
+        // soin d'urgence n'est pas coupé pour une facture desktop
+        // impayée (décision produit, même principe qu'emergency-transfer).
+        // emergencyIntake:true exempte la création côté règles Firestore
+        // (isEmergencyIntake) ; le patient porte ce marqueur de façon
+        // permanente (traçable).
+        patient = window.DB?.addPatient?.({ firstname: fn, lastname: ln, ...est, emergencyIntake: true });
         mc = patient.id;
       }
 

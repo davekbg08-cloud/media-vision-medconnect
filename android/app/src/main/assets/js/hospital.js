@@ -366,6 +366,15 @@ const HospitalPortal = (() => {
   async function saveNewPatient(e) {
     e.preventDefault();
     if (!window.HospitalCapabilities?.guardHospitalAction?.('create_patient')) return;
+    // Enregistrement normal (nouveau patient desktop) = action soumise à
+    // l'abonnement. Seul l'intake d'urgence (js/hospital-emergency.js)
+    // est exempté. Message clair au lieu d'un échec silencieux.
+    try {
+      await CloudDB.requireWritableSubscription('create_patient');
+    } catch (subErr) {
+      App.toast(subErr.message || "Enregistrement bloqué : abonnement de l'établissement expiré.", 'error');
+      return;
+    }
     const user = Auth.getUser() || {};
     const isNurse = user.role === 'nurse';
     // Traçabilité + statut de complétion médicale. Une fiche créée par

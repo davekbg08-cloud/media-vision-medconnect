@@ -137,6 +137,21 @@ service cloud.firestore {
     function hospitalCanWrite(hospitalId) {
       return hospitalSubscriptionOk(hospitalId);
     }
+    // Intake d'URGENCE (js/hospital-emergency.js) : la création d'un
+    // nouveau patient aux urgences n'est JAMAIS coupée pour un
+    // abonnement expiré — le soin d'urgence prime sur la facturation
+    // (même principe que emergency-transfer). Le marqueur emergencyIntake
+    // est posé par le flux urgence ; le patient le porte de façon
+    // permanente (traçable).
+    // ⚠️ LIMITE CONNUE — emergencyIntake est DÉCLARÉ par le client :
+    // comme sourceDevice, un client desktop malveillant pourrait le poser
+    // pour contourner le blocage d'abonnement à la création de patient.
+    // Fermer réellement cette faille exige un custom claim serveur (Cloud
+    // Function). Accepté comme limite connue, cohérent avec le reste du
+    // durcissement sans backend. NE PAS présenter ce contrôle comme fort.
+    function isEmergencyIntake(data) {
+      return data.get('emergencyIntake', false) == true;
+    }
     // Utilisée pour consultations/prescriptions/labRequests/
     // labResults/appointments/messages/hospitalMembers : le mobile/PWA
     // reste autorisé à écrire même hôpital expiré (le soin courant ne
@@ -420,9 +435,10 @@ service cloud.firestore {
       // hospitalCanWrite, sans distinction de plateforme ici).
       allow create: if isAdmin() ||
         ((currentRoleIs('doctor') || currentRoleIs('nurse')) &&
-         hospitalCanWrite(request.resource.data.establishmentId != null
-           ? request.resource.data.establishmentId
-           : request.resource.data.hospital_id));
+         (isEmergencyIntake(request.resource.data) ||
+          hospitalCanWrite(request.resource.data.establishmentId != null
+            ? request.resource.data.establishmentId
+            : request.resource.data.hospital_id)));
       allow update, delete: if isAdmin() || doctorCanRead(resource.data);
     }
 
@@ -814,9 +830,10 @@ service cloud.firestore {
       // collection sœur /patients (ligne ~389).
       allow create: if isAdmin() ||
         ((currentRoleIs('doctor') || currentRoleIs('nurse')) &&
-         hospitalCanWrite(request.resource.data.establishmentId != null
-           ? request.resource.data.establishmentId
-           : request.resource.data.hospital_id));
+         (isEmergencyIntake(request.resource.data) ||
+          hospitalCanWrite(request.resource.data.establishmentId != null
+            ? request.resource.data.establishmentId
+            : request.resource.data.hospital_id)));
       allow update, delete: if isAdmin();
     }
 

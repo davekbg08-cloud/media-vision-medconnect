@@ -603,12 +603,24 @@ const AdminModule = (() => {
       const isPending = isPendingEstablishment(h);
       let sub = { status: 'active', endDate: null };
       try { sub = await window.ExchangeBridge?.getSubscriptionStatus?.(hid) || sub; } catch (_) {}
+      // Distingue un établissement VALIDÉ mais SANS abonnement payé (le
+      // document subscriptions/{id} n'existe pas → getSubscriptionStatus
+      // renvoie 'active' par DÉFAUT permissif) d'un abonnement réellement
+      // payé/actif (endDate/activatedAt/plan posés par activateSubscription).
+      // Sans cette distinction, un hôpital validé s'affichait "✅ Actif"
+      // et le RESTAIT après clic sur "Activer" — aucun changement visible,
+      // source de confusion (le statut ne changeait pas).
+      const hasPaidSub = !!(sub.endDate || sub.activatedAt || sub.plan);
+      const subActive = sub.status === 'active' || sub.status === 'grace_period';
+      // "Actif" n'est réel que si un abonnement payé existe. Un
+      // établissement 'pending' ou validé-sans-abonnement n'est jamais
+      // traité comme actif (pas de bouton Désactiver).
+      const isActive = !isPending && hasPaidSub && subActive;
       const st = isPending
         ? { t:'🆕 Nouvelle inscription — à valider', c:'var(--accent)' }
-        : (STATUS_LABEL[sub.status] || STATUS_LABEL.active);
-      // Un établissement 'pending' n'est jamais traité comme "actif"
-      // (pas de bouton Désactiver, libellé d'action "Valider / activer").
-      const isActive = !isPending && (sub.status === 'active' || sub.status === 'grace_period');
+        : (subActive && !hasPaidSub
+            ? { t:'⚠️ Validé — aucun abonnement actif', c:'var(--accent)' }
+            : (STATUS_LABEL[sub.status] || STATUS_LABEL.active));
       return `
         <div class="record-card"${isPending ? ' style="border-left:3px solid var(--accent)"' : ''}>
           <div class="record-header">

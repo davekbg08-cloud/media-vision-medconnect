@@ -162,6 +162,15 @@ const HospitalMaternityModule = (() => {
         const ln = document.getElementById('mat-ln').value.trim();
         if (!fn || !ln) { App.toast('Patiente introuvable : renseignez prénom et nom.', 'error'); return; }
         if (!window.HospitalCapabilities?.guardHospitalAction?.('create_patient')) return;
+        // Enregistrement normal (maternité) = action desktop soumise à
+        // l'abonnement. Seul l'intake d'urgence (js/hospital-emergency.js)
+        // est exempté. Message clair au lieu d'un échec silencieux.
+        try {
+          await CloudDB.requireWritableSubscription('create_patient');
+        } catch (subErr) {
+          App.toast(subErr.message || "Enregistrement bloqué : abonnement de l'établissement expiré.", 'error');
+          return;
+        }
         patient = window.DB?.addPatient?.({ firstname: fn, lastname: ln, gender: 'F', ...est });
         mc = patient.id;
       }

@@ -1,8 +1,16 @@
 {
-  "version": "2.9.17",
-  "build": "2026.07.13.18",
+  "version": "2.9.18",
+  "build": "2026.07.13.19",
   "buildDate": "2026-07-13",
   "changelog": [
+    {
+      "version": "2.9.18",
+      "date": "2026-07-13",
+      "notes": [
+        "Sécurité/facturation : l'enregistrement d'un nouveau patient sur desktop est désormais bloqué (message clair) si l'abonnement de l'établissement est expiré — SAUF aux urgences, où l'enregistrement du patient reste toujours possible (le soin d'urgence n'est jamais coupé)",
+        "Correctif : dans le Dashboard admin, un établissement validé mais sans abonnement payé s'affichait « Actif » et le restait après clic sur « Activer » (aucun changement visible) — il affiche désormais « Validé — aucun abonnement actif », et l'activation produit un changement de statut clair"
+      ]
+    },
     {
       "version": "2.9.17",
       "date": "2026-07-13",
