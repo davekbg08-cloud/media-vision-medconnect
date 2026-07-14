@@ -1,8 +1,15 @@
 {
-  "version": "2.9.18",
-  "build": "2026.07.13.19",
+  "version": "2.9.19",
+  "build": "2026.07.13.20",
   "buildDate": "2026-07-13",
   "changelog": [
+    {
+      "version": "2.9.19",
+      "date": "2026-07-13",
+      "notes": [
+        "Nettoyage (audit) : arrêt d'écritures Firestore mortes (mc_transfers/transfers depuis la messagerie ciblée, mc_settings depuis les réglages) — des collections sans règles, systématiquement rejetées en silence et jamais relues. Aucun impact fonctionnel (les messages et réglages continuent de fonctionner par leurs vrais chemins)"
+      ]
+    },
     {
       "version": "2.9.18",
       "date": "2026-07-13",

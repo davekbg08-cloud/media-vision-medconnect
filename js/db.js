@@ -961,8 +961,14 @@ const DB = (() => {
   function saveSettings(data) {
     const s = { ...getSettings(), ...data };
     store('mc_settings', s);
-    const user = Auth?.getUser?.();
-    if (user) _push('mc_settings', user.uid, s);
+    // Nettoyage (audit) : l'ancienne écriture cloud des réglages visait
+    // une collection SANS aucune règle Firestore — systématiquement
+    // rejetée par la clause catch-all (allow write: if false) — et jamais
+    // relue côté cloud (getSettings lit le localStorage local, aucune
+    // synchronisation des réglages). Écriture morte retirée : les réglages
+    // restent locaux à l'appareil, comme c'était déjà le cas en pratique.
+    // (Une vraie synchro cross-appareil nécessiterait règles + listener +
+    // lecture cloud — hors périmètre.)
   }
 
   /* ══════════════════════════════════════════════════

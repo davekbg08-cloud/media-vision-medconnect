@@ -140,15 +140,15 @@
     setTimeout(refreshComposeRecipients, 0);
   }
 
-  function syncTransferToCloud(transfer) {
-    try {
-      const ready = typeof firebaseReady !== 'undefined' ? firebaseReady : window.firebaseReady;
-      const db = typeof firebaseDB !== 'undefined' ? firebaseDB : window.firebaseDB;
-      if (!ready || !db || !transfer?.transferId) return;
-      db.collection('mc_transfers').doc(String(transfer.transferId)).set(transfer, { merge: true });
-      db.collection('transfers').doc(String(transfer.transferId)).set(transfer, { merge: true });
-    } catch (_) {}
-  }
+  // Nettoyage (audit) : l'ancienne synchronisation cloud écrivait le
+  // transfert dans deux collections legacy (mc-transfers, transfers) SANS
+  // aucune règle Firestore, donc systématiquement rejetées par la clause
+  // catch-all (allow read, write: if false), et jamais relues côté cloud
+  // (TransferService.getTransfers lit le localStorage local ; la page
+  // Transferts lit emergencyTransfers). Le message part réellement via
+  // createNotificationForTransfer → Network.notify → mc_messages (réglé).
+  // Écriture morte supprimée (même motif que les écritures mc_affiliations
+  // retirées précédemment).
 
   async function sendMessage(event) {
     event.preventDefault();
@@ -199,7 +199,6 @@
           metadata: { source: 'network_compose', hospitalId },
         });
 
-        syncTransferToCloud(transfer);
         window.TransferService.createNotificationForTransfer(transfer, { subject, body });
       } else {
         window.Network.notify({
