@@ -8,12 +8,13 @@
    auteur à mettre à jour une ordonnance SANS aucun contrôle
    d'abonnement, alors que la collection jumelle /prescriptions gate
    déjà cette écriture (hospitalCanWriteFromDevice) — dérive
-   canonique/legacy. Correctif : on aligne les deux, mais le contrôle
-   ne s'applique QUE lorsqu'une pharmacie précise est ciblée
-   (pharmacyUid non nul). L'envoi au patient (pharmacyUid null) reste
-   toujours ouvert : le soin du patient n'est jamais coupé pour une
-   facture desktop impayée. js/network.js pose désormais aussi
-   sourceDevice sur le dispatch pour que la règle voie le device réel.
+   canonique/legacy. Correctif : on aligne les deux. Décision produit —
+   TOUT envoi d'ordonnance par le médecin (dépôt dans l'espace du
+   patient comme dispatch vers une pharmacie précise) est soumis au
+   contrôle desktop/mobile : sur desktop expiré l'envoi est bloqué des
+   deux côtés ; le mobile n'est jamais coupé. js/network.js pose
+   désormais sourceDevice sur CHAQUE écriture pour que la règle voie le
+   device réel.
    ===================================================== */
 const { test } = require('node:test');
 const { assertSucceeds, assertFails } = require('@firebase/rules-unit-testing');
@@ -75,7 +76,7 @@ for (const collection of ['mc_prescriptions', 'prescriptions']) {
     }));
   });
 
-  test(`${collection} : envoi au patient (pharmacyUid null) ACCEPTÉ sur desktop même abonnement expiré (chemin patient jamais coupé)`, async () => {
+  test(`${collection} : envoi au patient (pharmacyUid null) REFUSÉ sur desktop si l'abonnement est expiré (décision produit : les deux chemins bloqués)`, async () => {
     const env = await getTestEnv();
     await clearAll(env);
     await seedExpiredSubscription(env, 'HOSP-RXD-4');
@@ -84,8 +85,22 @@ for (const collection of ['mc_prescriptions', 'prescriptions']) {
       status: 'draft', medicines: [],
     });
     const doctor = env.authenticatedContext('doc-rxd-4', { role: 'doctor' }).firestore();
-    await assertSucceeds(updateDoc(doc(doctor, collection, 'RXD-4'), {
+    await assertFails(updateDoc(doc(doctor, collection, 'RXD-4'), {
       pharmacyUid: null, pharmacyName: null, status: 'sent', sourceDevice: 'desktop',
+    }));
+  });
+
+  test(`${collection} : envoi au patient (pharmacyUid null) ACCEPTÉ sur mobile même abonnement expiré (le mobile n'est jamais coupé)`, async () => {
+    const env = await getTestEnv();
+    await clearAll(env);
+    await seedExpiredSubscription(env, 'HOSP-RXD-5');
+    await seedRx(env, collection, 'RXD-5', {
+      patient_id: 'MC-RXD-5', doctor_uid: 'doc-rxd-5', establishmentId: 'HOSP-RXD-5',
+      status: 'draft', medicines: [],
+    });
+    const doctor = env.authenticatedContext('doc-rxd-5', { role: 'doctor' }).firestore();
+    await assertSucceeds(updateDoc(doc(doctor, collection, 'RXD-5'), {
+      pharmacyUid: null, pharmacyName: null, status: 'sent', sourceDevice: 'mobile',
     }));
   });
 }

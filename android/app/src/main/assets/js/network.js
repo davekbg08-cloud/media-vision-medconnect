@@ -224,9 +224,29 @@ const Network = (() => {
         : '❌ Échec de l\'envoi — droits ou connexion à vérifier.';
     }
 
+    // Envoi d'une ordonnance = action desktop soumise à l'abonnement
+    // (send_prescription_pharmacy ∈ DESKTOP_BLOCKED_ACTIONS). Décision
+    // produit : les DEUX chemins d'envoi — dépôt dans l'espace du
+    // patient ET dispatch vers une pharmacie précise — sont bloqués sur
+    // desktop expiré. Le mobile n'est jamais coupé
+    // (hospitalCanWriteFromDevice côté règles laisse toujours passer le
+    // mobile). Contrôle unique en tête, avant tout chemin d'écriture.
+    try {
+      await window.CloudDB?.requireWritableSubscription?.('send_prescription_pharmacy');
+    } catch (e) {
+      App.toast(e.message || "Envoi bloqué : abonnement de l'établissement expiré.", 'error');
+      return;
+    }
+
+    // sourceDevice courant, posé sur CHAQUE écriture : la règle serveur
+    // (hospitalCanWriteFromDevice) en dépend pour gater le bon device —
+    // sans lui elle lirait le device de CRÉATION persisté (piège déjà vu
+    // sur mc_appointments).
+    const sourceDevice = window.ExchangeBridge?.currentSourceDevice?.() || 'desktop';
+
     // "patient" seul : aucune pharmacie ne doit voir l'ordonnance
     if (!target || target === 'patient') {
-      const result = await DB.updatePrescriptionAndConfirm(rx.pid, { pharmacyUid: null, pharmacyName: null, status: 'sent' });
+      const result = await DB.updatePrescriptionAndConfirm(rx.pid, { pharmacyUid: null, pharmacyName: null, status: 'sent', sourceDevice });
       if (!result.ok) { App.toast(offlineOrDeniedMessage(result.reason), 'warning'); return; }
       notify({
         to_role: 'patient', to_id: patientId, recipientUid: patientUid, type: 'prescription',
@@ -241,28 +261,11 @@ const Network = (() => {
     const pharmacist = getAvailablePharmacies().find(p => p.uid === target);
     if (!pharmacist) { App.toast('Pharmacie introuvable ou non validée.', 'error'); return; }
 
-    // Dispatch vers une pharmacie précise = action desktop soumise à
-    // l'abonnement (send_prescription_pharmacy ∈ DESKTOP_BLOCKED_ACTIONS).
-    // Le chemin "patient" ci-dessus n'est jamais soumis à ce contrôle :
-    // le soin du patient n'est pas coupé pour une facture desktop
-    // impayée — seul le dispatch vers un partenaire pharmacie l'est.
-    try {
-      await window.CloudDB?.requireWritableSubscription?.('send_prescription_pharmacy');
-    } catch (e) {
-      App.toast(e.message || "Envoi bloqué : abonnement de l'établissement expiré.", 'error');
-      return;
-    }
-
     const result = await DB.updatePrescriptionAndConfirm(rx.pid, {
       pharmacyUid:  pharmacist.uid,
       pharmacyName: pharmacist.pharmacy || pharmacist.name,
       status:       'sent',
-      // sourceDevice courant : hospitalCanWriteFromDevice() (règles) en
-      // dépend pour gater ce dispatch sur desktop expiré. Sans lui, la
-      // règle lirait le device de CRÉATION persisté (piège déjà vu sur
-      // mc_appointments) — une ordonnance créée sur mobile puis
-      // dispatchée depuis un desktop expiré passerait à tort.
-      sourceDevice: window.ExchangeBridge?.currentSourceDevice?.() || 'desktop',
+      sourceDevice,
     });
     if (!result.ok) { App.toast(offlineOrDeniedMessage(result.reason), 'warning'); return; }
 
