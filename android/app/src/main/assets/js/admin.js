@@ -666,9 +666,20 @@ const AdminModule = (() => {
 
       // Valide aussi l'ÉTABLISSEMENT (status 'active') : sans ça la
       // connexion resterait bloquée (on refuse les hôpitaux 'pending').
+      // Écriture cloud AWAITÉE et confirmée (plus fire-and-forget) : la
+      // mise à jour locale seule (updateHospital → saveHospitals, push
+      // non attendu) pouvait être repoussée par l'écouteur establishments
+      // (remplacement intégral du snapshot) avec l'ancien statut
+      // 'pending' si la propagation cloud échouait — l'admin voyait alors
+      // le badge "🆕 à valider" persister et croyait que l'activation
+      // n'avait rien changé. On met à jour le local (affichage immédiat)
+      // PUIS on confirme réellement le cloud avant d'annoncer le succès.
+      let establishmentConfirmed = true;
       try {
         window.HospitalsRegistry?.updateHospital?.(hospitalId, { status: 'active' });
+        await firebaseDB.collection('establishments').doc(hospitalId).set({ status: 'active' }, { merge: true });
       } catch (estErr) {
+        establishmentConfirmed = false;
         console.warn('[Admin] Validation établissement :', estErr?.message || estErr);
       }
 
@@ -695,7 +706,11 @@ const AdminModule = (() => {
         body: `L'abonnement ${SUB_PLANS[plan] || plan} de ${h?.name || hospitalId} est actif jusqu'au ${end.toISOString().slice(0,10)}.`,
       });
 
-      App.toast(`✅ Abonnement ${SUB_PLANS[plan] || plan} de ${h?.name || hospitalId} — actif jusqu'au ${end.toISOString().slice(0,10)}.`);
+      if (establishmentConfirmed) {
+        App.toast(`✅ Abonnement ${SUB_PLANS[plan] || plan} de ${h?.name || hospitalId} — actif jusqu'au ${end.toISOString().slice(0,10)}.`);
+      } else {
+        App.toast(`⚠️ Abonnement activé, mais la validation de l'établissement n'a pas été confirmée — réessayez pour lever le statut « à valider ».`, 'warning');
+      }
       App.navigateTo('dashboard');
     } catch (e) {
       console.error('[Admin] activateSubscription :', e);

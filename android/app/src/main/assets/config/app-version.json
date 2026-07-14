@@ -1,8 +1,15 @@
 {
-  "version": "2.9.14",
-  "build": "2026.07.13.15",
+  "version": "2.9.15",
+  "build": "2026.07.13.16",
   "buildDate": "2026-07-13",
   "changelog": [
+    {
+      "version": "2.9.15",
+      "date": "2026-07-13",
+      "notes": [
+        "Correctif : l'activation d'un abonnement hôpital ne confirmait pas réellement la validation de l'établissement (écriture non attendue) — le statut pouvait rester « à valider » et prêter à confusion. La validation est désormais confirmée avant d'annoncer le succès, avec un avertissement clair si elle échoue"
+      ]
+    },
     {
       "version": "2.9.14",
       "date": "2026-07-13",
