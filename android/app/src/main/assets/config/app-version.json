@@ -1,8 +1,15 @@
 {
-  "version": "2.9.15",
-  "build": "2026.07.13.16",
+  "version": "2.9.16",
+  "build": "2026.07.13.17",
   "buildDate": "2026-07-13",
   "changelog": [
+    {
+      "version": "2.9.16",
+      "date": "2026-07-13",
+      "notes": [
+        "Nettoyage : le filtre « Document » de la Timeline médicale n'était jamais alimenté (purement décoratif) — retiré de la barre de filtres"
+      ]
+    },
     {
       "version": "2.9.15",
       "date": "2026-07-13",

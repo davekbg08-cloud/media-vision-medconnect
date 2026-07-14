@@ -12,6 +12,13 @@ const Timeline = (() => {
     lab:          { icon:'🧪', label:'Analyse laboratoire',  color:'#F59E0B' },
     vaccination:  { icon:'💉', label:'Vaccination',          color:'#A855F7' },
     appointment:  { icon:'📅', label:'Rendez-vous',          color:'#06B6D4' },
+    // 'document' sert UNIQUEMENT de repli de rendu (renderEvents :
+    // TYPE_META[ev.type] || TYPE_META.document) ; ce n'est pas un filtre.
+    // buildEvents() ne produit jamais d'événement de type 'document' :
+    // la seule source (establishment_documents) ne contient que des
+    // copies d'audit de consultations/ordonnances déjà affichées sous
+    // leur propre type — l'afficher en filtre était décoratif (jamais
+    // alimenté) et créerait des doublons s'il l'était. Exclu des chips.
     document:     { icon:'📄', label:'Document',             color:'var(--text-muted)' },
     admission:    { icon:'🏥', label:'Hospitalisation',      color:'var(--danger)' },
     emergency:    { icon:'🚑', label:'Urgences',             color:'var(--danger)' },
@@ -24,7 +31,7 @@ const Timeline = (() => {
       <div class="page-header">
         <h2>🗓️ Timeline Médicale</h2>
         <div class="header-actions">
-          ${Object.entries(TYPE_META).map(([k,v])=>`
+          ${Object.entries(TYPE_META).filter(([k]) => k !== 'document').map(([k,v])=>`
             <button class="chip-filter active" data-type="${k}"
               onclick="Timeline.toggleFilter(this,'${k}','${patientId}')"
               style="border-color:${v.color};color:${v.color}">
