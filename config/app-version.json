@@ -1,8 +1,15 @@
 {
-  "version": "2.9.22",
-  "build": "2026.07.14.2",
+  "version": "2.9.23",
+  "build": "2026.07.14.3",
   "buildDate": "2026-07-14",
   "changelog": [
+    {
+      "version": "2.9.23",
+      "date": "2026-07-14",
+      "notes": [
+        "Sécurité/facturation : le blocage d'abonnement des workflows desktop (lits, admissions, réception, laboratoire, urgences, maternité, IA médicale) est désormais appliqué côté serveur de façon infalsifiable — un client modifié ne peut plus le contourner en se faisant passer pour un mobile"
+      ]
+    },
     {
       "version": "2.9.22",
       "date": "2026-07-14",

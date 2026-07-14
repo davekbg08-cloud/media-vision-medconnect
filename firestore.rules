@@ -169,10 +169,34 @@ service cloud.firestore {
     // du champ du document. Tant que ce backend n'existe pas, le gating
     // desktop reste dissuasif mais non infalsifiable. NE PAS présenter
     // ce contrôle comme une sécurité forte.
+    // PORTÉE RÉDUITE (correctif abonnement) : ce risque ne concerne
+    // plus que les collections cliniques PARTAGÉES avec le mobile
+    // (consultations, ordonnances, rendez-vous, messages). Les
+    // collections des workflows desktop-only sont désormais gatées
+    // inconditionnellement par l'abonnement, sans lire sourceDevice —
+    // voir desktopWorkflowCanWrite ci-dessous.
     // Migration future : remplacer `deviceValue` par
     // `request.auth.token.deviceType` ici, sans toucher aux appelants.
     function hospitalCanWriteFromDevice(hospitalId, deviceValue) {
       return hospitalSubscriptionOk(hospitalId) || deviceValue != 'desktop';
+    }
+    // Collections des WORKFLOWS DESKTOP (beds / admissions /
+    // receptionVisits / labRequests / labResults / emergencyCases /
+    // maternityCases / aiQueries) : elles ne sont JAMAIS écrites par la
+    // version mobile (seuls les modules js/hospital-*.js et
+    // js/medical-ai.js du portail desktop y écrivent) — le repli
+    // « mobile jamais coupé » n'a donc aucun sens ici, et AUCUNE
+    // dépendance au champ sourceDevice déclaré par le client n'est
+    // nécessaire. L'abonnement est exigé INCONDITIONNELLEMENT :
+    // contrairement à hospitalCanWriteFromDevice, ce contrôle est
+    // infalsifiable côté client. Il ferme, pour tout le cœur du produit
+    // desktop payant, le contournement documenté ci-dessus (spoof de
+    // sourceDevice). Le risque résiduel ne concerne plus que les
+    // collections cliniques PARTAGÉES avec le mobile (consultations,
+    // ordonnances, rendez-vous, messages), où le champ déclaré reste le
+    // seul signal possible sans backend.
+    function desktopWorkflowCanWrite(hospitalId) {
+      return hospitalSubscriptionOk(hospitalId);
     }
     // Le code applicatif écrit establishmentId (parfois hospital_id
     // en repli historique) — jamais un champ "hospitalId" littéral.
@@ -944,19 +968,21 @@ service cloud.firestore {
       allow read: if canReadMedicalData(resource.data) ||
         belongsToSameEstablishment(resource.data);
       allow create: if isAdmin() ||
-        (signedIn() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
+        (signedIn() && desktopWorkflowCanWrite(resolveHospitalId(request.resource.data)));
       allow update: if isAdmin() ||
-        (signedIn() && hospitalCanWriteFromDevice(resolveHospitalId(resource.data), request.resource.data.sourceDevice));
+        (signedIn() && desktopWorkflowCanWrite(resolveHospitalId(resource.data)));
       allow delete: if isAdmin();
     }
 
     match /labResults/{docId} {
       allow read: if isAdmin() || canReadMedicalData(resource.data);
-      // Saisir un résultat = capacité labo/médecin ET gating device.
+      // Saisir un résultat = capacité labo/médecin ET abonnement actif
+      // (collection desktop-only : contrôle infalsifiable, sans
+      // dépendance au champ sourceDevice — voir desktopWorkflowCanWrite).
       allow create: if isAdmin() ||
-        (canEnterLabResult() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
+        (canEnterLabResult() && desktopWorkflowCanWrite(resolveHospitalId(request.resource.data)));
       allow update: if isAdmin() ||
-        (canEnterLabResult() && hospitalCanWriteFromDevice(resolveHospitalId(resource.data), request.resource.data.sourceDevice));
+        (canEnterLabResult() && desktopWorkflowCanWrite(resolveHospitalId(resource.data)));
       allow delete: if isAdmin();
     }
 
@@ -1012,7 +1038,7 @@ service cloud.firestore {
     match /beds/{docId} {
       allow read: if isAdmin() || signedIn();
       allow create, update: if isAdmin() ||
-        (signedIn() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
+        (signedIn() && desktopWorkflowCanWrite(resolveHospitalId(request.resource.data)));
       allow delete: if isAdmin();
     }
 
@@ -1023,7 +1049,7 @@ service cloud.firestore {
       allow read: if canReadMedicalData(resource.data) ||
         belongsToSameEstablishment(resource.data);
       allow create, update: if isAdmin() ||
-        (canManageCare() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
+        (canManageCare() && desktopWorkflowCanWrite(resolveHospitalId(request.resource.data)));
       allow delete: if isAdmin();
     }
 
@@ -1032,7 +1058,7 @@ service cloud.firestore {
       allow read: if canReadMedicalData(resource.data) ||
         belongsToSameEstablishment(resource.data);
       allow create, update: if isAdmin() ||
-        (canRegisterPatient() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
+        (canRegisterPatient() && desktopWorkflowCanWrite(resolveHospitalId(request.resource.data)));
       allow delete: if isAdmin();
     }
 
@@ -1041,7 +1067,7 @@ service cloud.firestore {
       allow read: if canReadMedicalData(resource.data) ||
         belongsToSameEstablishment(resource.data);
       allow create, update: if isAdmin() ||
-        (canRegisterPatient() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
+        (canRegisterPatient() && desktopWorkflowCanWrite(resolveHospitalId(request.resource.data)));
       allow delete: if isAdmin();
     }
 
@@ -1050,7 +1076,7 @@ service cloud.firestore {
       allow read: if canReadMedicalData(resource.data) ||
         belongsToSameEstablishment(resource.data);
       allow create, update: if isAdmin() ||
-        (canRegisterPatient() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
+        (canRegisterPatient() && desktopWorkflowCanWrite(resolveHospitalId(request.resource.data)));
       allow delete: if isAdmin();
     }
 
@@ -1059,7 +1085,7 @@ service cloud.firestore {
       // l'auteur et à l'admin (peut contenir du contexte clinique).
       allow read: if isAdmin() || (signedIn() && resource.data.userId == request.auth.uid);
       allow create: if isAdmin() ||
-        (signedIn() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
+        (signedIn() && desktopWorkflowCanWrite(resolveHospitalId(request.resource.data)));
       allow update, delete: if isAdmin();
     }
 
