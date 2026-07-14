@@ -71,6 +71,14 @@ for (const [label, file, flag] of [
   ['réception saveIntake', 'js/hospital-reception.js', '_savingIntake'],
   ['urgences saveIntake', 'js/hospital-emergency.js', '_savingIntake'],
   ['maternité saveNew', 'js/hospital-maternity.js', '_savingNew'],
+  // Audit (2.9.22) : tous les créateurs de données async restants.
+  ['consultation saveConsult', 'js/hospital.js', '_savingConsult'],
+  ['admission saveAdmission', 'js/hospital-beds.js', '_savingAdmission'],
+  ['labo saveOrder', 'js/hospital-lab.js', '_savingOrder'],
+  ['labo saveResult', 'js/hospital-lab.js', '_savingResult'],
+  ['rendez-vous save', 'js/appointments.js', '_savingApt'],
+  ['connexion établissement login', 'js/hospital-auth.js', '_loggingIn'],
+  ['inscription établissement register', 'js/hospital-auth.js', '_registering'],
 ]) {
   test(`${label} : verrou de réentrance (${flag}) posé et relâché dans finally`, () => {
     const src = read(file);
@@ -79,6 +87,23 @@ for (const [label, file, flag] of [
     assert.match(src, new RegExp(`finally \\{ ${flag} = false; \\}`), 'relâché dans finally (jamais bloqué)');
   });
 }
+
+test('connexion administrateur (_doAdmin) : bouton verrouillé AVANT le premier await, libéré en cas d\'échec', () => {
+  const src = read('js/auth.js');
+  const start = src.indexOf('async function _doAdmin(');
+  const end = src.indexOf('function _launch(', start);
+  const body = src.slice(start, end);
+  const disableIdx = body.indexOf('submitBtn.disabled = true');
+  // Premier await RÉEL (pas le mot « await » d'un commentaire) : le
+  // nettoyage de session puis la connexion Firebase.
+  const firstAwaitIdx = body.indexOf('await firebaseAuth');
+  assert.ok(disableIdx !== -1, 'le bouton doit être désactivé');
+  assert.ok(firstAwaitIdx !== -1, 'la connexion Firebase doit être awaitée');
+  assert.ok(disableIdx < firstAwaitIdx, 'la désactivation doit précéder le premier await (couvre clic ET touche Entrée)');
+  assert.match(body, /if \(submitBtn\?\.disabled\) return;/, 'une seconde soumission pendant la connexion doit être ignorée');
+  assert.match(body, /finally \{/, 'le verrou doit être libéré dans finally');
+  assert.match(body, /submitBtn\.disabled = false/, "le bouton doit redevenir utilisable après un échec");
+});
 
 test('saveNewPatient (hospital.js) : le bouton est désactivé AVANT le premier await (contrôle d\'abonnement)', () => {
   const src = read('js/hospital.js');

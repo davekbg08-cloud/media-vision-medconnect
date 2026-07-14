@@ -147,7 +147,12 @@ const HospitalAuth = (() => {
   }
 
   /* ── CONNEXION ─────────────────────────────────────── */
+  // Anti double-appui : la connexion enchaîne recherche cloud +
+  // signIn Firebase awaités — un second clic relançait tout en parallèle.
+  let _loggingIn = false;
   async function login() {
+    if (_loggingIn) return;
+    _loggingIn = true;
     try {
       const mat = document.getElementById('ha-login-mat').value.trim();
       const pw  = document.getElementById('ha-login-pw').value;
@@ -206,7 +211,7 @@ const HospitalAuth = (() => {
     } catch (e) {
       console.error('[HospitalAuth] login :', e);
       App.toast(e.message || 'Connexion impossible.', 'error');
-    }
+    } finally { _loggingIn = false; }
   }
 
   /* Migration organique (même principe que le PIN patient) : crée le
@@ -374,7 +379,13 @@ const HospitalAuth = (() => {
   }
 
   /* ── INSCRIPTION D'UN ÉTABLISSEMENT ────────────────── */
+  // Anti double-appui : l'inscription crée un compte Firebase Auth puis
+  // plusieurs documents — un second clic pendant ce temps déclenchait
+  // une seconde création (auth/email-already-in-use trompeur).
+  let _registering = false;
   async function register() {
+    if (_registering) return;
+    _registering = true;
     try {
       const name = document.getElementById('ha-reg-name').value.trim();
       const mat  = document.getElementById('ha-reg-mat').value.trim();
@@ -471,7 +482,7 @@ const HospitalAuth = (() => {
     } catch (e) {
       console.error('[HospitalAuth] register :', e);
       App.toast(e.message || 'Inscription impossible.', 'error');
-    }
+    } finally { _registering = false; }
   }
 
   function logout() {

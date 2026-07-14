@@ -191,7 +191,12 @@ const HospitalBedsModule = (() => {
     `);
   }
 
+  // Anti double-appui : plusieurs écritures cloud awaitées — un second
+  // clic pendant ce temps créait l'admission en double.
+  let _savingAdmission = false;
   async function saveAdmission() {
+    if (_savingAdmission) return;
+    _savingAdmission = true;
     try {
       if (!window.HospitalCapabilities?.guardHospitalAction?.('admit_patient')) return;
       // Admission = acte desktop sous abonnement (même gating que
@@ -256,7 +261,7 @@ const HospitalBedsModule = (() => {
     } catch (e) {
       console.error('[Beds] saveAdmission :', e);
       App.toast(e.message || 'Erreur lors de l\'admission.', 'error');
-    }
+    } finally { _savingAdmission = false; }
   }
 
   async function discharge(admissionId) {
