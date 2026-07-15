@@ -1,8 +1,17 @@
 {
-  "version": "2.9.23",
-  "build": "2026.07.14.3",
-  "buildDate": "2026-07-14",
+  "version": "2.9.24",
+  "build": "2026.07.15.1",
+  "buildDate": "2026-07-15",
   "changelog": [
+    {
+      "version": "2.9.24",
+      "date": "2026-07-15",
+      "notes": [
+        "IA médicale : la réponse simulée est remplacée par une vraie recherche dans la littérature médicale mondiale (Europe PMC / PubMed) avec articles sourcés et cliquables — et, si l'établissement configure sa propre clé API Claude (stockée uniquement sur son poste), une synthèse en français citant ses sources",
+        "Android : la version affichée par l'application (fiche Android) est alignée sur la version réelle (2.6.0 → 2.9.23) — nécessite de reconstruire l'APK ; le contenu, lui, était déjà à jour (l'APK charge la PWA en ligne)",
+        "Déploiement : nouveau workflow manuel pour publier le miroir Firebase Hosting (medconnect-e81ba.web.app)"
+      ]
+    },
     {
       "version": "2.9.23",
       "date": "2026-07-14",

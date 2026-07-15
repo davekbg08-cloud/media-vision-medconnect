@@ -2,7 +2,7 @@
    MedConnect 2.0 — Service Worker
    Optimisation chargement / PWA
    ===================================================== */
-const CACHE = 'medconnect-v4.28';
+const CACHE = 'medconnect-v4.29';
 
 const ASSETS = [
   './', './index.html', './css/style.css', './css/establishments-balance.css',
@@ -83,6 +83,11 @@ function shouldBypassCache(request) {
     url.includes('firebase') ||
     url.includes('googleapis.com/identitytoolkit') ||
     url.includes('securetoken.googleapis.com') ||
+    // API de recherche médicale (js/medical-ai.js) : jamais de cache —
+    // fraîcheur des résultats ET confidentialité (les requêtes d'un
+    // professionnel ne doivent pas rester en cache sur l'appareil).
+    url.includes('ebi.ac.uk') ||
+    url.includes('api.anthropic.com') ||
     url.endsWith('.apk') ||
     url.includes('/downloads/');
 }
