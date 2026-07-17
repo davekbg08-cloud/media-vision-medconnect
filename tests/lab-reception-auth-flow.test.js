@@ -310,7 +310,11 @@ for (const role of ROLES) {
     const firebaseAuthImpl = { createUserWithEmailAndPassword: async () => { createCalls++; return { user: { uid: `${role}-uid-17b` } }; }, signOut: async () => {} };
     const { win, getEl } = setup({
       firebaseAuthImpl,
-      firestoreSeed: { registration_requests: { REQ1: { requestId: 'REQ1', requesterRole: role, professionalNumber: 'LAB-17', email: 'other@x.com', status: 'pending' } } },
+      // mc_accounts : seule collection publiquement lisible (allow read:
+      // if true) — la seule que _checkAgentDuplicates peut interroger
+      // avant que le candidat ait une session Firebase (voir le
+      // correctif dans js/auth.js _checkAgentDuplicates).
+      firestoreSeed: { mc_accounts: { U17: { uid: 'U17', role, matricule: 'LAB-17', authUid: 'U17', status: 'pending' } } },
     });
     fillAgentRegisterForm(getEl, { email: `${role}17@test.com`, matricule: 'lab-17' });
     await regFn(win, role).call(win.Auth);
@@ -323,7 +327,7 @@ for (const role of ROLES) {
     const firebaseAuthImpl = { createUserWithEmailAndPassword: async () => { createCalls++; return { user: { uid: `${role}-uid-18b` } }; }, signOut: async () => {} };
     const { win, getEl } = setup({
       firebaseAuthImpl,
-      firestoreSeed: { users: { U1: { uid: 'U1', role, matricule: 'LAB-18', authUid: 'U1', status: 'approved' } } },
+      firestoreSeed: { mc_accounts: { U1: { uid: 'U1', role, matricule: 'LAB-18', authUid: 'U1', status: 'approved' } } },
     });
     fillAgentRegisterForm(getEl, { email: `${role}18@test.com`, matricule: 'lab-18' });
     await regFn(win, role).call(win.Auth);
@@ -336,7 +340,7 @@ for (const role of ROLES) {
     const firebaseAuthImpl = { createUserWithEmailAndPassword: async () => { createCalls++; return { user: { uid: `${role}-uid-19b` } }; }, signOut: async () => {} };
     const { win, getEl } = setup({
       firebaseAuthImpl,
-      firestoreSeed: { users: { U2: { uid: 'U2', role, matricule: 'LAB-19', authUid: 'U2', status: 'rejected' } } },
+      firestoreSeed: { mc_accounts: { U2: { uid: 'U2', role, matricule: 'LAB-19', authUid: 'U2', status: 'rejected' } } },
     });
     fillAgentRegisterForm(getEl, { email: `${role}19@test.com`, matricule: 'lab-19' });
     await regFn(win, role).call(win.Auth);

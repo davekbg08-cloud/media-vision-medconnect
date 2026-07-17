@@ -937,27 +937,31 @@ const Auth = (() => {
   let _registrationContext = null;
   function _setRegistrationContext(ctx) { _registrationContext = ctx || null; }
 
+  // Correctif (bug signalé en usage réel — desktop) : cette vérification
+  // s'exécute AVANT toute authentification Firebase du candidat (il n'a
+  // pas encore de compte). `users/{uid}` (allow read: si admin OU
+  // propriétaire) et `registration_requests` (allow read: si admin OU
+  // demandeur) refusent donc systématiquement ces requêtes — un candidat
+  // anonyme ne peut lire ni l'une ni l'autre — et toute tentative
+  // d'inscription lab/reception échouait avec "Vérification impossible"
+  // avant même d'atteindre createUserWithEmailAndPassword. Seule
+  // mc_accounts (allow read: if true, volontairement publique — c'est le
+  // même document que celui déjà écrit ici à l'inscription) est
+  // interrogeable sans session : la détection de doublons repose
+  // désormais uniquement dessus, ce qui reste suffisant puisque
+  // _regAgentStrict écrit mc_accounts/users/registration_request dans le
+  // même batch atomique (un doublon pending y est donc toujours visible).
   async function _checkAgentDuplicates(role, matricule, email) {
     if (!_hasFirebaseDB()) return { conflict: 'offline' };
     const num = _normalizeMatricule(matricule);
     const mail = _normalizeEmail(email);
     try {
-      for (const col of ['users', 'mc_accounts']) {
-        for (const field of ['matricule', 'professionalNumber']) {
-          const snap = await firebaseDB.collection(col).where('role', '==', role).where(field, '==', num).limit(1).get();
-          if (!snap.empty) return { conflict: 'account', account: snap.docs[0].data() };
-        }
-        const bySnapEmail = await firebaseDB.collection(col).where('role', '==', role).where('email', '==', mail).limit(1).get();
-        if (!bySnapEmail.empty) return { conflict: 'account', account: bySnapEmail.docs[0].data() };
+      for (const field of ['matricule', 'professionalNumber']) {
+        const snap = await firebaseDB.collection('mc_accounts').where('role', '==', role).where(field, '==', num).limit(1).get();
+        if (!snap.empty) return { conflict: 'account', account: snap.docs[0].data() };
       }
-      const reqSnap = await firebaseDB.collection('registration_requests')
-        .where('requesterRole', '==', role).where('status', '==', 'pending').limit(50).get();
-      for (const d of reqSnap.docs) {
-        const r = d.data();
-        if (_normalizeMatricule(r.professionalNumber) === num || (mail && _normalizeEmail(r.email) === mail)) {
-          return { conflict: 'pending_request', request: r };
-        }
-      }
+      const bySnapEmail = await firebaseDB.collection('mc_accounts').where('role', '==', role).where('email', '==', mail).limit(1).get();
+      if (!bySnapEmail.empty) return { conflict: 'account', account: bySnapEmail.docs[0].data() };
     } catch (e) {
       console.warn('[MedConnect] Vérification doublons agent :', e?.message || e);
       return { conflict: 'error' };
@@ -997,10 +1001,6 @@ const Auth = (() => {
       const dup = await _checkAgentDuplicates(role, matricule, email);
       if (dup.conflict === 'offline' || dup.conflict === 'error') {
         _err('reg-err', '❌ Vérification impossible — vérifiez votre connexion et réessayez.');
-        return;
-      }
-      if (dup.conflict === 'pending_request') {
-        _err('reg-err', 'Une demande existe déjà et attend la validation.');
         return;
       }
       if (dup.conflict === 'account') {
@@ -1289,15 +1289,23 @@ const Auth = (() => {
   /* Résolution lab/reception, partagée entre l'inscription (détection
      de doublons) et la connexion (loginProfessionalSilently) — ces deux
      rôles n'ont pas de registre officiel dédié (contrairement à
-     doctor/nurse/pharmacist) : on cherche directement dans users puis
-     mc_accounts, par rôle + matricule normalisé. Fonction PURE (ne
+     doctor/nurse/pharmacist) : on cherche directement dans mc_accounts
+     puis users, par rôle + matricule normalisé. Fonction PURE (ne
      vérifie aucun statut, ne tente aucune authentification) : c'est à
-     l'appelant de décider quoi faire du résultat. */
+     l'appelant de décider quoi faire du résultat.
+     Ordre volontaire (bug réel corrigé) : mc_accounts est lisible
+     publiquement (allow read: if true), alors que users exige d'être
+     admin ou propriétaire du document — un appelant pas encore
+     authentifié comme CE compte précis (précontrôle avant signIn,
+     détection de doublons à l'inscription) voit donc systématiquement
+     ses requêtes sur `users` rejetées. mc_accounts en premier évite des
+     appels voués à l'échec ; `users` reste tenté en repli (utile aux
+     appelants déjà authentifiés, ex. un admin). */
   async function _resolveAgentAccountFromFirestore(role, num) {
     if (!_hasFirebaseDB()) return null;
     const N = _normalizeMatricule(num);
     let data = null;
-    for (const col of ['users', 'mc_accounts']) {
+    for (const col of ['mc_accounts', 'users']) {
       for (const field of ['matricule', 'professionalNumber', 'order_num', 'username']) {
         try {
           const snap = await firebaseDB.collection(col)
