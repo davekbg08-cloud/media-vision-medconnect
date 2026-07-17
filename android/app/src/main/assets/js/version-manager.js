@@ -174,15 +174,58 @@ const VersionManager = (() => {
   }
 
   /* ── 4. Android (APK sideload) ──────────────────────
-     L'APK n'est qu'une WebView qui charge cette même PWA (cf.
-     CODEX_APK_RELEASE_TASK.md) : aucun store, aucun mécanisme de
-     mise à jour natif possible. "Télécharger / Installer" renvoie
-     donc vers le lien APK déjà publié — l'installation reste gérée
-     par Android (sideload), rien de scriptable de plus depuis le web. */
+     L'APK est une WebView qui charge cette même PWA. Quand l'app native
+     expose le pont AndroidUpdater (voir MainActivity.java), on télécharge
+     l'APK via DownloadManager et on ouvre directement l'écran d'installation
+     Android — plus besoin de sortir vers le navigateur. Sans ce pont (PWA
+     desktop/mobile, ou ancien APK sans le pont), on garde le lien direct. */
   function openApkDownload() {
-    App.closeModal?.();
     const version = _current?.version || '';
-    window.open(`downloads/medconnect-v${version}.apk`, '_blank');
+    const relativeUrl = `downloads/medconnect-v${version}.apk`;
+    if (window.AndroidUpdater && typeof window.AndroidUpdater.downloadAndInstall === 'function') {
+      App.closeModal?.();
+      const absoluteUrl = new URL(relativeUrl, location.href).href;
+      showNativeUpdateProgress(version);
+      window.AndroidUpdater.downloadAndInstall(absoluteUrl, version);
+      return;
+    }
+    App.closeModal?.();
+    window.open(relativeUrl, '_blank');
+  }
+
+  function showNativeUpdateProgress(version) {
+    if (!window.App?.openModal) return;
+    App.openModal('⬇️ Téléchargement en cours', `
+      <p>Téléchargement de MedConnect ${esc(version)}…</p>
+      <p class="muted" style="font-size:.85rem">Une notification Android indique la progression. L'installation s'ouvrira automatiquement à la fin du téléchargement.</p>
+      <div class="form-actions">
+        <button class="btn btn-ghost" onclick="App.closeModal()">Fermer</button>
+      </div>`);
+  }
+
+  /* Appelé depuis MainActivity.java (evaluateJavascript) pour refléter
+     l'état du téléchargement/de l'installation natifs côté interface. */
+  function onNativeUpdateStatus(status) {
+    if (!window.App?.openModal) return;
+    if (status === 'install_launched') { App.closeModal?.(); return; }
+    if (status === 'unknown_sources_required') {
+      App.openModal('🔐 Autorisation requise', `
+        <p>Pour installer la mise à jour, Android demande d'autoriser MedConnect à installer des applications.</p>
+        <p>Active l'autorisation dans l'écran qui vient de s'ouvrir, puis relance la mise à jour.</p>
+        <div class="form-actions">
+          <button class="btn btn-primary" onclick="App.closeModal()">Compris</button>
+        </div>`);
+      return;
+    }
+    if (status === 'download_failed' || status === 'install_failed') {
+      const version = esc(_current?.version || '');
+      App.openModal('⚠️ Mise à jour impossible', `
+        <p>Le téléchargement ou l'installation a échoué. Réessaie, ou télécharge l'APK manuellement.</p>
+        <div class="form-actions">
+          <button class="btn btn-ghost" onclick="App.closeModal()">Fermer</button>
+          <button class="btn btn-primary" onclick="window.open('downloads/medconnect-v${version}.apk','_blank')">⬇️ Téléchargement manuel</button>
+        </div>`);
+    }
   }
 
   /* ── 9. Journal des versions (CHANGELOG.md, miroir applicatif) ── */
@@ -260,7 +303,7 @@ const VersionManager = (() => {
   return {
     init, getCurrent, compareVersions,
     dismissUpdate, applyUpdate, reloadNow, openApkDownload, openChangelog,
-    checkMaintenanceAndMinimumVersion,
+    checkMaintenanceAndMinimumVersion, onNativeUpdateStatus,
   };
 })();
 

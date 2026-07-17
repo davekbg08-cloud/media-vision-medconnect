@@ -34,15 +34,20 @@ function loadVersionManager({ firebaseDoc = null, adminRole = null } = {}) {
     addEventListener: () => {},
   };
 
+  // App est référencé sans préfixe "window." dans plusieurs fonctions de
+  // version-manager.js (comme dans un vrai navigateur, où window EST le
+  // global) : exposé aussi en global du sandbox, pas seulement sur window.
+  const fakeApp = {
+    openModal: (title, html) => modals.push({ title, html }),
+    closeModal: () => {},
+  };
   const sandbox = {
     console,
     document: fakeDoc,
+    App: fakeApp,
     window: {
       Auth: adminRole ? { getUser: () => ({ role: adminRole }) } : undefined,
-      App: {
-        openModal: (title, html) => modals.push({ title, html }),
-        closeModal: () => {},
-      },
+      App: fakeApp,
     },
     navigator: {}, // volontairement sans 'serviceWorker' : la garde `'serviceWorker' in navigator` doit rester fausse (le SW est testé via lecture de source, plus bas)
     localStorage: (() => {
@@ -177,4 +182,53 @@ test('firestore.rules : system/maintenance lisible publiquement, écriture rése
   const block = src.slice(src.indexOf('match /system/{docId}'), src.indexOf('match /system/{docId}') + 300);
   assert.match(block, /allow read: if true/);
   assert.match(block, /allow write: if isAdmin\(\)/);
+});
+
+/* ── Mise à jour native APK (pont AndroidUpdater) ──
+   Quand l'app native (WebView) expose window.AndroidUpdater, openApkDownload()
+   doit déclencher le téléchargement + l'installation natifs au lieu du lien
+   navigateur — et onNativeUpdateStatus() doit refléter les états possibles. */
+test('openApkDownload() : utilise le pont AndroidUpdater.downloadAndInstall() quand il est exposé (APK natif)', async () => {
+  const calls = [];
+  const modals2 = [];
+  // App est référencé sans préfixe "window." dans plusieurs fonctions de
+  // version-manager.js (comme dans un vrai navigateur, où window EST le
+  // global) : on l'expose donc aussi en global du sandbox, pas seulement
+  // sur window, pour reproduire fidèlement ce contexte.
+  const fakeApp = { openModal: (title, html) => modals2.push({ title, html }), closeModal: () => {} };
+  const sandbox = {
+    console,
+    document: { getElementById: () => ({ style: {}, innerHTML: '' }), createElement: () => ({ style: {}, innerHTML: '' }), body: { appendChild: () => {} }, readyState: 'complete', addEventListener: () => {} },
+    App: fakeApp,
+    window: {
+      App: fakeApp,
+      AndroidUpdater: { downloadAndInstall: (url, version) => calls.push({ url, version }) },
+    },
+    navigator: {},
+    location: { href: 'https://davekbg08-cloud.github.io/media-vision-medconnect/?apk=v2.9.25' },
+    URL,
+    localStorage: (() => { const m = new Map(); return { getItem: k => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: k => m.delete(k) }; })(),
+    fetch: async () => ({ ok: true, json: async () => ({ version: '2.9.25', build: '2026.07.17.1', buildDate: '2026-07-17', changelog: [] }) }),
+    setTimeout: () => 0,
+    Date, JSON,
+  };
+  vm.createContext(sandbox);
+  const code = fs.readFileSync(path.resolve(__dirname, '..', 'js/version-manager.js'), 'utf8');
+  vm.runInContext(code, sandbox, { filename: 'js/version-manager.js' });
+  await sandbox.window.VersionManager.init();
+  sandbox.window.VersionManager.openApkDownload();
+  assert.strictEqual(calls.length, 1, 'AndroidUpdater.downloadAndInstall doit être appelé');
+  assert.strictEqual(calls[0].version, '2.9.25');
+  assert.match(calls[0].url, /^https:\/\/davekbg08-cloud\.github\.io\/media-vision-medconnect\/downloads\/medconnect-v2\.9\.25\.apk$/, 'URL absolue attendue par le pont natif');
+  assert.ok(modals2.some(m => /Téléchargement en cours/.test(m.title)), 'un retour visuel de progression doit être affiché');
+});
+
+test('onNativeUpdateStatus() : affiche un message clair pour chaque état natif (autorisation requise, échec)', () => {
+  const { VM, modals } = loadVersionManager({ firebaseDoc: null });
+  VM.onNativeUpdateStatus('unknown_sources_required');
+  assert.ok(modals.some(m => /Autorisation requise/.test(m.title)));
+
+  VM.onNativeUpdateStatus('download_failed');
+  assert.ok(modals.some(m => /impossible/i.test(m.title)));
+  assert.ok(modals.some(m => /Téléchargement manuel/.test(m.html)), 'une solution de repli (lien manuel) doit rester proposée');
 });
