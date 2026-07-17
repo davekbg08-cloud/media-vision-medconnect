@@ -1,8 +1,15 @@
 {
-  "version": "2.9.24",
-  "build": "2026.07.15.1",
-  "buildDate": "2026-07-15",
+  "version": "2.9.25",
+  "build": "2026.07.17.1",
+  "buildDate": "2026-07-17",
   "changelog": [
+    {
+      "version": "2.9.25",
+      "date": "2026-07-17",
+      "notes": [
+        "Android : vraie mise à jour intégrée à l'application — au lieu d'ouvrir un lien de téléchargement dans le navigateur, l'app télécharge l'APK et ouvre directement l'écran d'installation Android (un seul appui, avec autorisation « sources inconnues » demandée automatiquement si besoin)"
+      ]
+    },
     {
       "version": "2.9.24",
       "date": "2026-07-15",

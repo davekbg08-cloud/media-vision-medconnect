@@ -1,10 +1,18 @@
 package com.mediavision.medconnect;
 
 import android.Manifest;
+import android.app.DownloadManager;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.webkit.GeolocationPermissions;
+import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
@@ -14,11 +22,14 @@ import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.core.content.FileProvider;
+import java.io.File;
 import java.util.Arrays;
 
 public class MainActivity extends AppCompatActivity {
 
-    private static final String MEDCONNECT_PWA_URL = "https://davekbg08-cloud.github.io/media-vision-medconnect/?apk=v2.9.24";
+    private static final String MEDCONNECT_PWA_URL = "https://davekbg08-cloud.github.io/media-vision-medconnect/?apk=v2.9.25";
+    private static final String TRUSTED_APK_URL_PREFIX = "https://davekbg08-cloud.github.io/media-vision-medconnect/downloads/";
 
     private WebView myWebView;
     private static final int LOCATION_PERMISSION_REQUEST_CODE = 100;
@@ -26,6 +37,8 @@ public class MainActivity extends AppCompatActivity {
     private GeolocationPermissions.Callback locationCallback;
     private String locationOrigin;
     private PermissionRequest pendingPermissionRequest;
+    private long updateDownloadId = -1L;
+    private BroadcastReceiver updateDownloadReceiver;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -92,7 +105,113 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
+        myWebView.addJavascriptInterface(new AndroidUpdateBridge(), "AndroidUpdater");
+
         myWebView.loadUrl(MEDCONNECT_PWA_URL);
+    }
+
+    /* Pont JS <-> natif pour la mise à jour de l'APK : la PWA (version-manager.js)
+       détecte la nouvelle version via config/app-version.json et appelle ce pont
+       pour télécharger puis lancer l'installation, au lieu d'un simple lien
+       navigateur. Seule une URL du domaine officiel de téléchargement est acceptée
+       (le WebView peut charger des liens externes dans certains cas). */
+    private class AndroidUpdateBridge {
+        @JavascriptInterface
+        public void downloadAndInstall(final String apkUrl, final String version) {
+            runOnUiThread(() -> startApkDownload(apkUrl, version));
+        }
+    }
+
+    private void startApkDownload(String apkUrl, String version) {
+        if (apkUrl == null || !apkUrl.startsWith(TRUSTED_APK_URL_PREFIX)) {
+            notifyWeb("download_failed");
+            return;
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !getPackageManager().canRequestPackageInstalls()) {
+            notifyWeb("unknown_sources_required");
+            Intent settingsIntent = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:" + getPackageName()));
+            startActivity(settingsIntent);
+            return;
+        }
+
+        File updatesDir = new File(getCacheDir(), "apk-updates");
+        if (!updatesDir.exists()) updatesDir.mkdirs();
+        final File apkFile = new File(updatesDir, "medconnect-update.apk");
+        if (apkFile.exists()) apkFile.delete();
+
+        DownloadManager dm = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
+        if (dm == null) {
+            notifyWeb("download_failed");
+            return;
+        }
+
+        DownloadManager.Request request = new DownloadManager.Request(Uri.parse(apkUrl));
+        request.setTitle("MedConnect " + version);
+        request.setDescription("Téléchargement de la mise à jour");
+        request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+        request.setDestinationUri(Uri.fromFile(apkFile));
+        request.setMimeType("application/vnd.android.package-archive");
+
+        registerDownloadReceiver(apkFile);
+        updateDownloadId = dm.enqueue(request);
+        notifyWeb("download_started");
+    }
+
+    private void registerDownloadReceiver(final File apkFile) {
+        if (updateDownloadReceiver != null) {
+            try { unregisterReceiver(updateDownloadReceiver); } catch (IllegalArgumentException ignored) { }
+        }
+        updateDownloadReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                long id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L);
+                if (id != updateDownloadId) return;
+                try { unregisterReceiver(this); } catch (IllegalArgumentException ignored) { }
+                updateDownloadReceiver = null;
+                installApk(apkFile);
+            }
+        };
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(updateDownloadReceiver,
+                    new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE),
+                    Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(updateDownloadReceiver, new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE));
+        }
+    }
+
+    private void installApk(File apkFile) {
+        if (!apkFile.exists()) {
+            notifyWeb("download_failed");
+            return;
+        }
+        Uri apkUri = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", apkFile);
+        Intent installIntent = new Intent(Intent.ACTION_VIEW);
+        installIntent.setDataAndType(apkUri, "application/vnd.android.package-archive");
+        installIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+        try {
+            startActivity(installIntent);
+            notifyWeb("install_launched");
+        } catch (Exception e) {
+            notifyWeb("install_failed");
+        }
+    }
+
+    private void notifyWeb(final String status) {
+        runOnUiThread(() -> myWebView.evaluateJavascript(
+                "window.VersionManager && window.VersionManager.onNativeUpdateStatus && window.VersionManager.onNativeUpdateStatus('" + status + "');",
+                null));
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (updateDownloadReceiver != null) {
+            try { unregisterReceiver(updateDownloadReceiver); } catch (IllegalArgumentException ignored) { }
+            updateDownloadReceiver = null;
+        }
     }
 
     @Override
