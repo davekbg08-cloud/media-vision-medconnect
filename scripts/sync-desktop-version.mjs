@@ -13,8 +13,15 @@
    ===================================================== */
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const REPO_ROOT = path.resolve(new URL('.', import.meta.url).pathname, '..');
+// fileURLToPath() (pas new URL(...).pathname) : sur Windows, .pathname
+// d'une URL file:// garde un "/" devant la lettre de lecteur
+// (/D:/a/...), que path.resolve() ne normalise pas correctement
+// (produit un chemin doublé "D:\D:\..." — constaté sur le runner
+// windows-latest du workflow desktop).
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(__dirname, '..');
 const rootPkgPath = path.join(REPO_ROOT, 'package.json');
 const electronPkgPath = path.join(REPO_ROOT, 'electron', 'package.json');
 

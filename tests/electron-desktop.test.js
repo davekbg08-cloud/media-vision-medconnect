@@ -154,6 +154,13 @@ test('scripts/sync-desktop-version.mjs existe et synchronise electron/package.js
   assert.match(src, /rootPkg\.version/);
 });
 
+test('scripts/sync-desktop-version.mjs résout son chemin via fileURLToPath (pas new URL(...).pathname, qui double le lecteur sur Windows — régression constatée en CI windows-latest)', () => {
+  const scriptPath = path.resolve(__dirname, '..', 'scripts/sync-desktop-version.mjs');
+  const src = fs.readFileSync(scriptPath, 'utf8');
+  assert.match(src, /fileURLToPath/, 'doit utiliser fileURLToPath pour un chemin correct sur Windows et Linux');
+  assert.doesNotMatch(src, /new URL\(['"]\.['"],\s*import\.meta\.url\)\.pathname/, 'ce pattern produit un chemin invalide sur Windows (ex: D:\\D:\\a\\...)');
+});
+
 test('le workflow desktop génère SHA256SUMS.txt pour Windows et pour Linux', () => {
   const matches = workflowSrc.match(/sha256sum \* > SHA256SUMS\.txt/g) || [];
   assert.ok(matches.length >= 2, 'SHA256SUMS.txt doit être généré pour les deux plateformes');
