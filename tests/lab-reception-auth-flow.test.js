@@ -56,6 +56,7 @@ function makeFirestoreMock(seedData = {}) {
     return Object.assign(query(name, []), {
       doc(id) {
         return {
+          _col: name, _id: String(id),
           async get() { const d = col.get(id); return { exists: !!d, data: () => d, id }; },
           async set(data, opts) {
             const existing = col.get(id) || {};
@@ -66,7 +67,19 @@ function makeFirestoreMock(seedData = {}) {
       },
     });
   }
-  return { collection, _store: store };
+  // Batch Firestore (compat SDK) minimal : accumule des set(docRef, data)
+  // et les applique tous d'un coup à commit() — suffisant pour simuler
+  // l'atomicité réelle de pushBatchAndReport(Detailed) (js/db.js).
+  function batch() {
+    const ops = [];
+    return {
+      set(docRef, data) {
+        ops.push(() => { ensureCol(docRef._col).set(docRef._id, data); });
+      },
+      async commit() { ops.forEach(op => op()); },
+    };
+  }
+  return { collection, batch, _store: store };
 }
 
 /**
@@ -271,12 +284,8 @@ for (const role of ROLES) {
       currentUser: { delete: async () => { deleteCalls++; } },
     };
     const { win, getEl, firestore } = setup({ firebaseAuthImpl });
-    // Simule une panne Firestore : toute écriture .set() échoue.
-    const originalCollection = firestore.collection;
-    firestore.collection = (name) => {
-      const c = originalCollection(name);
-      return { ...c, doc: (id) => ({ ...c.doc(id), set: async () => { throw new Error('firestore down'); } }) };
-    };
+    // Simule une panne Firestore : le commit du batch atomique échoue.
+    firestore.batch = () => ({ set(){}, async commit() { throw new Error('firestore down'); } });
     fillAgentRegisterForm(getEl, { email: `${role}15@test.com` });
     await regFn(win, role).call(win.Auth);
     assert.strictEqual(deleteCalls, 1, 'le compte Firebase Auth orphelin doit être supprimé');
@@ -548,7 +557,7 @@ for (const role of ROLES) {
     win.HospitalsRegistry.requestAffiliation(`${role}-u38`, 'Agent 38', 'EST-38', { role, professionalNumber: 'LAB-38' });
 
     // Simule une panne Firestore sur toute écriture.
-    sandbox.window.DB.pushAndReportDetailed = async () => ({ ok: false, succeeded: [], failed: [['affiliation_requests', 'x']], timedOut: false, error: new Error('down') });
+    sandbox.window.DB.pushBatchAndReportDetailed = async () => ({ ok: false, succeeded: [], failed: [['affiliation_requests', 'x']], timedOut: false, error: new Error('down') });
 
     await win.HospitalsRegistry.respondAffiliation(`AFF_${role}-u38_EST-38`, true);
 
@@ -624,7 +633,7 @@ function fakeEvent(btn) { return { target: { closest: () => btn } }; }
 
 test('14.I.1-3. approve() désactive le bouton immédiatement et affiche "Validation en cours…"', async () => {
   const { win } = setupAdmin({ accounts: [{ uid: 'lab-btn-1', authUid: 'lab-btn-1', role: 'lab', status: 'pending', email: 'a@b.com', matricule: 'L1' }] });
-  win.DB.pushAndReportDetailed = async () => new Promise(r => setTimeout(() => r({ ok: true, succeeded: [], failed: [], timedOut: false, error: null }), 5));
+  win.DB.pushBatchAndReportDetailed = async () => new Promise(r => setTimeout(() => r({ ok: true, succeeded: [], failed: [], timedOut: false, error: null }), 5));
   const btn = fakeButton();
   const p = win.AdminModule.approve('lab-btn-1', fakeEvent(btn));
   assert.strictEqual(btn.disabled, true, 'le bouton doit être désactivé immédiatement (avant le premier await)');
@@ -635,7 +644,7 @@ test('14.I.1-3. approve() désactive le bouton immédiatement et affiche "Valida
 test('14.I.2. un double clic ne lance qu\'une seule validation', async () => {
   const { win } = setupAdmin({ accounts: [{ uid: 'lab-btn-2', authUid: 'lab-btn-2', role: 'lab', status: 'pending', email: 'a@b.com', matricule: 'L2' }] });
   let calls = 0;
-  win.DB.pushAndReportDetailed = async () => { calls++; return { ok: true, succeeded: [], failed: [], timedOut: false, error: null }; };
+  win.DB.pushBatchAndReportDetailed = async () => { calls++; return { ok: true, succeeded: [], failed: [], timedOut: false, error: null }; };
   const btn = fakeButton();
   const event = fakeEvent(btn);
   const p1 = win.AdminModule.approve('lab-btn-2', event);
@@ -646,7 +655,7 @@ test('14.I.2. un double clic ne lance qu\'une seule validation', async () => {
 
 test('14.I.4. le bouton est restauré après une erreur', async () => {
   const { win } = setupAdmin({ accounts: [{ uid: 'lab-btn-4', authUid: 'lab-btn-4', role: 'lab', status: 'pending', email: 'a@b.com', matricule: 'L4' }] });
-  win.DB.pushAndReportDetailed = async () => { throw new Error('boom'); };
+  win.DB.pushBatchAndReportDetailed = async () => { throw new Error('boom'); };
   const btn = fakeButton();
   await win.AdminModule.approve('lab-btn-4', fakeEvent(btn));
   assert.strictEqual(btn.disabled, false);
@@ -656,7 +665,7 @@ test('14.I.4. le bouton est restauré après une erreur', async () => {
 
 test('14.I.5-6. une écriture lente (timeout) ne bloque pas indéfiniment et restaure le bouton', async () => {
   const { win } = setupAdmin({ accounts: [{ uid: 'lab-btn-5', authUid: 'lab-btn-5', role: 'lab', status: 'pending', email: 'a@b.com', matricule: 'L5' }] });
-  win.DB.pushAndReportDetailed = async () => ({ ok: false, succeeded: [], failed: [['users', 'lab-btn-5']], timedOut: true, error: new Error('Validation : délai dépassé') });
+  win.DB.pushBatchAndReportDetailed = async () => ({ ok: false, succeeded: [], failed: [['users', 'lab-btn-5']], timedOut: true, error: new Error('Validation : délai dépassé') });
   const btn = fakeButton();
   await win.AdminModule.approve('lab-btn-5', fakeEvent(btn));
   assert.strictEqual(btn.disabled, false, 'le bouton doit être restauré même après un timeout');
@@ -664,7 +673,7 @@ test('14.I.5-6. une écriture lente (timeout) ne bloque pas indéfiniment et res
 
 test('14.I.7-9. un échec Firestore conserve le statut pending, n\'envoie aucune notification de succès et n\'affiche jamais "Compte approuvé"', async () => {
   const { win, App: adminApp } = setupAdmin({ accounts: [{ uid: 'lab-btn-7', authUid: 'lab-btn-7', role: 'lab', status: 'pending', email: 'a@b.com', matricule: 'L7' }] });
-  win.DB.pushAndReportDetailed = async () => ({ ok: false, succeeded: [], failed: [['users', 'lab-btn-7']], timedOut: false, error: new Error('down') });
+  win.DB.pushBatchAndReportDetailed = async () => ({ ok: false, succeeded: [], failed: [['users', 'lab-btn-7']], timedOut: false, error: new Error('down') });
   await win.AdminModule.approve('lab-btn-7');
   const acc = win.DB.getAccounts().find(a => a.uid === 'lab-btn-7');
   assert.strictEqual(acc.status, 'pending');
@@ -673,7 +682,7 @@ test('14.I.7-9. un échec Firestore conserve le statut pending, n\'envoie aucune
 
 test('14.I.10. une réussite confirmée met à jour le statut et ferme la fenêtre', async () => {
   const { win, App: adminApp } = setupAdmin({ accounts: [{ uid: 'lab-btn-10', authUid: 'lab-btn-10', role: 'lab', status: 'pending', email: 'a@b.com', matricule: 'L10' }] });
-  win.DB.pushAndReportDetailed = async () => ({ ok: true, succeeded: [['users', 'lab-btn-10'], ['mc_accounts', 'lab-btn-10']], failed: [], timedOut: false, error: null });
+  win.DB.pushBatchAndReportDetailed = async () => ({ ok: true, succeeded: [['users', 'lab-btn-10'], ['mc_accounts', 'lab-btn-10']], failed: [], timedOut: false, error: null });
   await win.AdminModule.approve('lab-btn-10');
   const acc = win.DB.getAccounts().find(a => a.uid === 'lab-btn-10');
   assert.strictEqual(acc.status, 'approved');
@@ -689,7 +698,7 @@ test('14.I.11-12. une demande sans compte mc_accounts (fantôme) ne peut pas êt
 
 test('14.I : reject() conserve le statut et n\'affiche pas de succès en cas d\'échec', async () => {
   const { win, App: adminApp } = setupAdmin({ accounts: [{ uid: 'lab-btn-r1', authUid: 'lab-btn-r1', role: 'lab', status: 'pending', email: 'a@b.com', matricule: 'LR1' }] });
-  win.DB.pushAndReportDetailed = async () => ({ ok: false, succeeded: [], failed: [], timedOut: false, error: null });
+  win.DB.pushBatchAndReportDetailed = async () => ({ ok: false, succeeded: [], failed: [], timedOut: false, error: null });
   const btn = fakeButton();
   await win.AdminModule.reject('lab-btn-r1', fakeEvent(btn));
   const acc = win.DB.getAccounts().find(a => a.uid === 'lab-btn-r1');
@@ -700,7 +709,7 @@ test('14.I : reject() conserve le statut et n\'affiche pas de succès en cas d\'
 
 test('14.I : suspend() confirmé passe le statut à suspended', async () => {
   const { win, App: adminApp } = setupAdmin({ accounts: [{ uid: 'lab-btn-s1', authUid: 'lab-btn-s1', role: 'lab', status: 'approved', email: 'a@b.com', matricule: 'LS1' }] });
-  win.DB.pushAndReportDetailed = async () => ({ ok: true, succeeded: [], failed: [], timedOut: false, error: null });
+  win.DB.pushBatchAndReportDetailed = async () => ({ ok: true, succeeded: [], failed: [], timedOut: false, error: null });
   await win.AdminModule.suspend('lab-btn-s1');
   const acc = win.DB.getAccounts().find(a => a.uid === 'lab-btn-s1');
   assert.strictEqual(acc.status, 'suspended');
@@ -713,7 +722,7 @@ test('14.H : hors ligne, aucune validation admin n\'est tentée', async () => {
     onLine: false,
   });
   let calls = 0;
-  win.DB.pushAndReportDetailed = async () => { calls++; return { ok: true, succeeded: [], failed: [], timedOut: false, error: null }; };
+  win.DB.pushBatchAndReportDetailed = async () => { calls++; return { ok: true, succeeded: [], failed: [], timedOut: false, error: null }; };
   await win.AdminModule.approve('lab-btn-off');
   assert.strictEqual(calls, 0, 'aucune écriture ne doit être tentée hors ligne');
   const acc = win.DB.getAccounts().find(a => a.uid === 'lab-btn-off');

@@ -513,8 +513,16 @@ const HospitalsRegistry = (() => {
         }]);
       }
 
-      const result = DB.pushAndReportDetailed
-        ? await DB.pushAndReportDetailed(writes, { timeoutMs: 20000, label: 'Approbation affiliation' })
+      // Revue Codex (P1, PR #39) : affiliation_requests + establishments/
+      // hospitals/mc_hospitals + hospitalMembers sont écrits en un seul
+      // batch ATOMIQUE (js/db.js pushBatchAndReportDetailed) plutôt qu'en
+      // écritures indépendantes — sinon un échec partiel pouvait laisser
+      // hospitalMembers actif sans que establishments.staff soit à jour
+      // (ou l'inverse), et une pièce en échec repartait en file pour un
+      // rejeu automatique ultérieur, potentiellement en conflit avec une
+      // décision opposée prise entre-temps.
+      const result = DB.pushBatchAndReportDetailed
+        ? await DB.pushBatchAndReportDetailed(writes, { timeoutMs: 20000, label: 'Approbation affiliation' })
         : { ok: DB.pushAndReport ? await DB.pushAndReport(writes) : false };
 
       if (!result.ok) {

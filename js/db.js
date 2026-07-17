@@ -192,6 +192,63 @@ const DB = (() => {
     return { ok: failed.length === 0, succeeded, failed, timedOut, error };
   }
 
+  /* ── ÉCRITURES ATOMIQUES (batch Firestore) ─────────────
+     Revue Codex (P1, PR #39) : pushAndReport()/pushAndReportDetailed()
+     poussent chaque document en parallèle et indépendamment — si l'un
+     échoue après qu'un autre a réussi, le booléen/rapport final dit
+     "échec", mais les documents déjà écrits restent en place (et
+     _push() remet même le document en échec en file pour un rejeu
+     automatique ultérieur). Pour un groupe de documents qui doivent
+     TOUS exister ensemble ou PAS DU TOUT (inscription lab/reception :
+     mc_accounts+users+registration_request ; validation admin :
+     users+mc_accounts+registration_requests ; approbation
+     d'affiliation : affiliation_requests+establishments+
+     hospitalMembers), on utilise un vrai batch Firestore — atomique
+     par construction (tout ou rien), disponible sur le SDK client
+     compat sans Cloud Function ni plan Blaze. Volontairement SANS
+     repli sur l'outbox en cas d'échec : un batch qui échoue ne doit
+     jamais être rejoué pièce par pièce (ça romprait l'atomicité) —
+     l'appelant doit réessayer l'opération complète (bouton "Réessayer"). */
+  function _hasBatchSupport() {
+    return !!(firebaseReady && firebaseDB && typeof firebaseDB.batch === 'function');
+  }
+
+  async function pushBatchAndReport(entries) {
+    if (!_hasBatchSupport()) return false;
+    try {
+      const batch = firebaseDB.batch();
+      entries.forEach(([col, id, data]) => {
+        batch.set(firebaseDB.collection(col).doc(String(id)), data);
+      });
+      await batch.commit();
+      return true;
+    } catch (e) {
+      console.warn('[MedConnect] Écriture atomique (batch) échouée :', e?.message || e);
+      return false;
+    }
+  }
+
+  async function pushBatchAndReportDetailed(entries, options = {}) {
+    const timeoutMs = options.timeoutMs || 15000;
+    const label = options.label || 'Écriture';
+    const ids = entries.map(([col, id]) => [col, id]);
+    if (!_hasBatchSupport()) {
+      return { ok: false, succeeded: [], failed: ids, timedOut: false, error: new Error('Firestore indisponible') };
+    }
+    try {
+      const batch = firebaseDB.batch();
+      entries.forEach(([col, id, data]) => {
+        batch.set(firebaseDB.collection(col).doc(String(id)), data);
+      });
+      await withTimeout(batch.commit(), timeoutMs, label);
+      return { ok: true, succeeded: ids, failed: [], timedOut: false, error: null };
+    } catch (e) {
+      const timedOut = /délai dépassé/.test(e?.message || '');
+      console.warn('[MedConnect] Écriture atomique détaillée (batch) échouée :', e?.message || e);
+      return { ok: false, succeeded: [], failed: ids, timedOut, error: e };
+    }
+  }
+
   async function _delete(collection, docId) {
     if (!firebaseReady || !firebaseDB) return false;
     try {
@@ -1091,7 +1148,7 @@ const DB = (() => {
   }
 
   return {
-    init, syncFromFirebase, syncFromFirebaseInBackground, setupUserScopedListeners, generatePatientId, makeId, pushAndReport, pushAndReportDetailed, withTimeout, flushOutbox, outboxCount, getLastSyncAt,
+    init, syncFromFirebase, syncFromFirebaseInBackground, setupUserScopedListeners, generatePatientId, makeId, pushAndReport, pushAndReportDetailed, pushBatchAndReport, pushBatchAndReportDetailed, withTimeout, flushOutbox, outboxCount, getLastSyncAt,
     // pushCloud/deleteCloud : wrappers publics sur _push/_delete, à
     // utiliser par tout module (access_control.js, hospitals_registry.js,
     // affiliation-cleanup.js...) au lieu de réimplémenter un mini-push

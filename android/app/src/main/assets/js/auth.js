@@ -1058,7 +1058,14 @@ const Auth = (() => {
 
       // Écritures critiques d'abord — AUCUN document local n'est créé
       // avant confirmation cloud réelle (jamais de "mode dégradé").
-      const criticalOk = DB.pushAndReport ? await DB.pushAndReport([
+      // Revue Codex (P1) : un batch Firestore ATOMIQUE (tout ou rien)
+      // est utilisé ici plutôt que 3 écritures indépendantes en
+      // parallèle — sinon un échec partiel (ex. mc_accounts réussi,
+      // users échoué) laissait un document orphelin référençant un
+      // authUid ensuite supprimé, et _push() remettait la pièce en
+      // échec dans l'outbox pour un rejeu automatique ultérieur,
+      // recréant exactement le compte fantôme que ce chantier corrige.
+      const criticalOk = DB.pushBatchAndReport ? await DB.pushBatchAndReport([
         ['mc_accounts', authUid, account],
         ['users', authUid, account],
         ['registration_requests', regRequest.requestId, regRequest],
@@ -1339,7 +1346,16 @@ const Auth = (() => {
           // Cohérence : si le profil portait déjà un authUid connu, l'identité
           // Firebase fraîchement confirmée DOIT correspondre — un ancien uid
           // incohérent ne doit jamais être accepté silencieusement.
-          if (previousAuthUid && previousAuthUid !== confirmedUid) return null;
+          // Revue Codex (P2) : signInWithEmailAndPassword vient de réussir et
+          // a déjà remplacé firebaseAuth.currentUser AVANT ce refus — sans
+          // signOut explicite ici, une session Firebase authentifiée mais
+          // orpheline (aucun mc_user correspondant) restait active sur un
+          // poste hospitalier partagé, HospitalAuth.verifyAgent() se
+          // contentant d'afficher une erreur pour un compte null.
+          if (previousAuthUid && previousAuthUid !== confirmedUid) {
+            try { await firebaseAuth.signOut(); } catch (_) {}
+            return null;
+          }
           data.uid = confirmedUid;
           data.authUid = confirmedUid;
         } else if (data.password && data.password !== pass) {

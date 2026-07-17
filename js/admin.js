@@ -191,7 +191,15 @@ const AdminModule = (() => {
       utilisée par approve()/reject()/suspend() : un bouton de validation
       administrative ne doit jamais rester bloqué indéfiniment, et ne
       doit jamais annoncer un succès tant que Firestore n'a pas
-      réellement confirmé l'écriture (voir js/db.js pushAndReportDetailed). */
+      réellement confirmé l'écriture.
+      Revue Codex (P1, PR #39) : users/{uid}, mc_accounts/{uid} et les
+      registration_requests associées sont écrits en un seul batch
+      ATOMIQUE (js/db.js pushBatchAndReportDetailed) — avec des écritures
+      indépendantes, users pouvait passer "approved" pendant que
+      mc_accounts échouait (connexion possible via users alors que le
+      tableau de bord admin affichait encore "pending"), et un échec
+      remettait la pièce manquante dans l'outbox pour un rejeu
+      automatique pouvant écraser une décision opposée prise ensuite. */
   async function pushRegistrationCloudDetailed(uid, account, status, timeoutMs = 20000) {
     if (!uid) return { ok: false, succeeded: [], failed: [], timedOut: false, error: null };
     const reviewedAt = now();
@@ -207,8 +215,8 @@ const AdminModule = (() => {
         approvedAt: status === 'approved' ? reviewedAt : r.approvedAt || null,
         rejectedAt: status === 'rejected' ? reviewedAt : r.rejectedAt || null,
       }]));
-    if (DB.pushAndReportDetailed) {
-      return DB.pushAndReportDetailed(writes, { timeoutMs, label: `Validation (${status})` });
+    if (DB.pushBatchAndReportDetailed) {
+      return DB.pushBatchAndReportDetailed(writes, { timeoutMs, label: `Validation (${status})` });
     }
     const ok = DB.pushAndReport ? await DB.pushAndReport(writes) : false;
     return { ok, succeeded: [], failed: [], timedOut: false, error: null };
