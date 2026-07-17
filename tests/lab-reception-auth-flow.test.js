@@ -348,6 +348,30 @@ for (const role of ROLES) {
     assert.match(getEl('auth-screen').innerHTML, /Demande refusée/);
   });
 
+  test(`[${role}] Sécurité (revue Codex, PR #40) : un document mc_accounts forgé sans authUid (griefing) ne bloque pas l'inscription légitime`, async () => {
+    // mc_accounts.create autorise quiconque (même non authentifié) à créer
+    // un document sans authUid — un tiers pourrait donc y planter un faux
+    // compte portant le matricule/email d'une victime pour bloquer
+    // durablement son inscription. Un document SANS authUid ne peut être
+    // qu'un faux (une vraie inscription lab/reception en pose toujours
+    // un) : il ne doit jamais être traité comme un doublon bloquant.
+    let createCalls = 0;
+    const firebaseAuthImpl = {
+      createUserWithEmailAndPassword: async () => { createCalls++; return { user: { uid: `${role}-uid-forged` } }; },
+      signOut: async () => {},
+    };
+    const { win, getEl } = setup({
+      firebaseAuthImpl,
+      firestoreSeed: {
+        mc_accounts: { FORGED: { role, matricule: 'LAB-FORGED', email: `${role}forged@test.com`, status: 'pending' } }, // pas d'authUid
+      },
+    });
+    fillAgentRegisterForm(getEl, { email: `${role}forged@test.com`, matricule: 'lab-forged' });
+    await regFn(win, role).call(win.Auth);
+    assert.strictEqual(createCalls, 1, 'un document mc_accounts sans authUid ne doit jamais bloquer une inscription légitime');
+    assert.ok(win.DB.getAccounts().find(a => a.uid === `${role}-uid-forged`), 'le compte légitime doit avoir été créé');
+  });
+
   test(`[${role}] 20. un compte sans authUid ne peut pas être approuvé (AdminModule.approve)`, async () => {
     const { win, App: adminApp } = setupAdmin({
       accounts: [{ uid: `${role}-noauth-1`, role, status: 'pending', email: 'x@y.com', matricule: 'LAB-20' }],

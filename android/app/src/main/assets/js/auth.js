@@ -951,17 +951,35 @@ const Auth = (() => {
   // désormais uniquement dessus, ce qui reste suffisant puisque
   // _regAgentStrict écrit mc_accounts/users/registration_request dans le
   // même batch atomique (un doublon pending y est donc toujours visible).
+  // Revue Codex (P1, PR #40) : mc_accounts.create autorise QUICONQUE (même
+  // non authentifié) à créer un document sans authUid dès lors qu'il
+  // n'existe pas déjà (firestore.rules mc_accounts.create — nécessaire
+  // par ailleurs au premier accès patient et au mode dégradé
+  // doctor/pharmacist/nurse, hors du périmètre de ce chantier). Sans
+  // garde-fou, un tiers pourrait donc y planter un faux compte
+  // lab/reception portant le matricule/email d'une victime pour bloquer
+  // durablement son inscription. _regAgentStrict() ne pose JAMAIS
+  // mc_accounts pour lab/reception sans un authUid Firebase réel déjà
+  // confirmé (createUserWithEmailAndPassword réussi) : un document
+  // correspondant SANS authUid ne peut donc être qu'un faux, jamais un
+  // vrai compte lab/reception — on ne le traite alors jamais comme un
+  // doublon bloquant. .limit(5) (plutôt que 1) pour ne pas laisser un
+  // faux document masquer un vrai s'ils portent la même clé de recherche.
+  function _hasRealAuthUid(doc) { return !!doc?.authUid; }
+
   async function _checkAgentDuplicates(role, matricule, email) {
     if (!_hasFirebaseDB()) return { conflict: 'offline' };
     const num = _normalizeMatricule(matricule);
     const mail = _normalizeEmail(email);
     try {
       for (const field of ['matricule', 'professionalNumber']) {
-        const snap = await firebaseDB.collection('mc_accounts').where('role', '==', role).where(field, '==', num).limit(1).get();
-        if (!snap.empty) return { conflict: 'account', account: snap.docs[0].data() };
+        const snap = await firebaseDB.collection('mc_accounts').where('role', '==', role).where(field, '==', num).limit(5).get();
+        const real = snap.docs.map(d => d.data()).find(_hasRealAuthUid);
+        if (real) return { conflict: 'account', account: real };
       }
-      const bySnapEmail = await firebaseDB.collection('mc_accounts').where('role', '==', role).where('email', '==', mail).limit(1).get();
-      if (!bySnapEmail.empty) return { conflict: 'account', account: bySnapEmail.docs[0].data() };
+      const bySnapEmail = await firebaseDB.collection('mc_accounts').where('role', '==', role).where('email', '==', mail).limit(5).get();
+      const realByEmail = bySnapEmail.docs.map(d => d.data()).find(_hasRealAuthUid);
+      if (realByEmail) return { conflict: 'account', account: realByEmail };
     } catch (e) {
       console.warn('[MedConnect] Vérification doublons agent :', e?.message || e);
       return { conflict: 'error' };
@@ -1013,9 +1031,10 @@ const Auth = (() => {
           _err('reg-err', 'Ce compte existe déjà mais il est suspendu. Contactez l\'administrateur.');
         } else if (status === 'pending') {
           _err('reg-err', 'Une demande existe déjà et attend la validation.');
-        } else if (!dup.account.authUid) {
-          _err('reg-err', 'Un compte incohérent existe déjà pour ce matricule. Contactez l\'administration.');
         } else {
+          // dup.account a toujours un authUid réel ici (voir
+          // _checkAgentDuplicates) : ce repli ne couvre plus qu'un statut
+          // imprévu, jamais un compte incohérent sans identité Firebase.
           _err('reg-err', 'Une demande existe déjà et attend la validation.');
         }
         return;
