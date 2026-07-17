@@ -390,11 +390,21 @@ const App = (() => {
     // mobile d'inscription médecin/patient/infirmier/pharmacien.
     const isDesktop = window.ExchangeBridge?.currentSourceDevice?.() === 'desktop';
     if (isDesktop && window.HospitalAuth) {
+      // Correctif (audit "session fantôme") : restaurer le shell desktop
+      // sur la seule foi de mc_hospital_session (sans attendre Firebase
+      // Auth ni revérifier l'affiliation) pouvait rouvrir un ancien
+      // tableau de bord invalide. On attend d'abord la restauration
+      // Firebase Auth, puis on revérifie la cohérence complète de la
+      // session avant d'ouvrir quoi que ce soit.
+      try { await window.firebaseAuthReadyPromise; } catch (_) {}
+
       const hs = HospitalAuth.getSession();
-      if (hs && window.HospitalDesktopUI?.openForSession) {
+      const consistent = hs ? await HospitalAuth.isSessionConsistent(hs) : false;
+      if (hs && consistent && window.HospitalDesktopUI?.openForSession) {
         document.getElementById('auth-screen').style.display = 'none';
         HospitalDesktopUI.openForSession(hs);
       } else {
+        if (hs) await HospitalAuth.invalidateSession();
         HospitalAuth.renderScreen();
       }
       return;

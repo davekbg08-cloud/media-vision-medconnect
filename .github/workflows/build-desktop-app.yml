@@ -2,18 +2,79 @@ name: Build MedConnect Desktop App (Windows + Linux)
 
 # Déclenchement manuel uniquement pour l'instant, le temps de stabiliser
 # le packaging Electron — même prudence initiale que pour
-# build-medconnect-apk.yml, pour éviter un coût CI récurrent tant que ce
-# n'est pas validé. Aucun impact sur le pipeline Android existant :
-# workflow entièrement séparé, package.json séparé dans electron/.
+# build-medconnect-apk.yml. Aucun impact sur le pipeline Android
+# existant : workflow entièrement séparé, package.json séparé dans
+# electron/.
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Version à construire (vide = version de package.json racine)"
+        required: false
+        type: string
+      publish_release:
+        description: "Publier une GitHub Release avec les installateurs"
+        required: false
+        type: boolean
+        default: false
+      release_tag:
+        description: "Tag de la release (vide = v<version>-desktop)"
+        required: false
+        type: string
 
 permissions:
   contents: read
 
+env:
+  MEDCONNECT_HOSTING_URL: https://medconnect-e81ba.web.app/
+
 jobs:
+  test:
+    name: Tests web MedConnect
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Scan de secrets
+        run: npm run security:scan
+
+      - name: Run test suite
+        run: npm test
+
+  # Correctif (audit) : l'app desktop charge désormais le miroir Firebase
+  # Hosting dédié (electron/main.js, MEDCONNECT_APP_URL) au lieu de
+  # l'origine GitHub Pages partagée. Si ce miroir n'est pas déployé (ou
+  # indisponible), on préfère annuler le build avec un message clair
+  # plutôt que produire un installateur qui pointerait vers une origine
+  # injoignable en production.
+  verify-hosting:
+    name: Vérifier le miroir Firebase Hosting
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Vérifier que MEDCONNECT_HOSTING_URL répond"
+        run: |
+          status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "$MEDCONNECT_HOSTING_URL" || echo "000")
+          if [ "$status" != "200" ]; then
+            echo "::error::Le miroir Firebase Hosting ($MEDCONNECT_HOSTING_URL) ne répond pas correctement (HTTP $status)."
+            echo "::error::L'app desktop chargerait un installateur pointant vers une origine indisponible — build annulé."
+            echo "::error::Déployez d'abord le miroir (workflow deploy-firebase-hosting.yml) puis relancez ce build."
+            exit 1
+          fi
+          echo "OK : $MEDCONNECT_HOSTING_URL répond (HTTP $status)."
+
   build:
     name: Build (${{ matrix.os }})
+    needs: [test, verify-hosting]
     strategy:
       fail-fast: false
       matrix:
@@ -29,34 +90,240 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install Electron dependencies
-        working-directory: electron
-        run: npm install
+      - name: Résoudre la version à construire
+        id: ver
+        shell: bash
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          if [ -z "$VERSION" ]; then
+            VERSION=$(node -p "require('./package.json').version")
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
+      - name: Appliquer la version demandée à package.json racine (si fournie)
+        if: github.event.inputs.version != ''
+        shell: bash
+        run: |
+          node -e "
+            const fs = require('fs');
+            const p = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            p.version = '${{ steps.ver.outputs.version }}';
+            fs.writeFileSync('package.json', JSON.stringify(p, null, 2) + '\n');
+          "
+
+      - name: Synchroniser la version Electron sur la version racine
+        run: node scripts/sync-desktop-version.mjs
+
+      - name: Installer les dépendances Electron
+        working-directory: electron
+        run: npm ci
+
+      - name: Détecter si la signature Windows est configurée
+        if: matrix.os == 'windows-latest'
+        id: sign
+        shell: bash
+        run: |
+          if [ -n "${{ secrets.CSC_LINK }}" ] && [ -n "${{ secrets.CSC_KEY_PASSWORD }}" ]; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # electron-builder signe automatiquement si CSC_LINK/CSC_KEY_PASSWORD
+      # sont présents dans l'environnement, et continue en mode non signé
+      # sinon. Important : ces secrets ne doivent être exportés QUE s'ils
+      # sont réellement configurés — un secret absent est substitué par
+      # GitHub Actions en chaîne VIDE (jamais "non défini"), et
+      # electron-builder traite CSC_LINK="" comme un chemin de fichier à
+      # résoudre (échec "not a file") plutôt que comme une absence de
+      # certificat. Jamais de certificat auto-signé : sans secret, le
+      # build reste simplement non signé (voir renommage "-unsigned-beta"
+      # plus bas).
       - name: Build Windows installer
         if: matrix.os == 'windows-latest'
         working-directory: electron
-        run: npx electron-builder --win
+        shell: bash
+        env:
+          CSC_LINK_SECRET: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD_SECRET: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: |
+          if [ -n "$CSC_LINK_SECRET" ] && [ -n "$CSC_KEY_PASSWORD_SECRET" ]; then
+            export CSC_LINK="$CSC_LINK_SECRET"
+            export CSC_KEY_PASSWORD="$CSC_KEY_PASSWORD_SECRET"
+          fi
+          npm run dist:win
 
       - name: Build Linux packages
         if: matrix.os == 'ubuntu-latest'
         working-directory: electron
-        run: npx electron-builder --linux
+        run: npm run dist:linux
 
-      - name: Upload Windows artifact
+      - name: Préparer l'artefact Windows (nom, statut signature)
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          mkdir -p build-output
+          SRC="electron/dist/MedConnect-Setup-${{ steps.ver.outputs.version }}.exe"
+          if [ ! -f "$SRC" ]; then
+            echo "::error::Installateur Windows introuvable : $SRC"
+            ls -la electron/dist || true
+            exit 1
+          fi
+          if [ "${{ steps.sign.outputs.signed }}" = "true" ]; then
+            DEST="build-output/MedConnect-Setup-${{ steps.ver.outputs.version }}.exe"
+          else
+            # Jamais prétendre qu'un installateur non signé l'est : le
+            # nom du fichier porte lui-même le statut, visible partout
+            # où il circule (téléchargement, release, transfert manuel).
+            DEST="build-output/MedConnect-Setup-${{ steps.ver.outputs.version }}-unsigned-beta.exe"
+          fi
+          cp "$SRC" "$DEST"
+          echo "DEST=$DEST" >> "$GITHUB_ENV"
+
+      - name: Vérifier le fichier produit (taille, extension, en-tête PE) — Windows
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          FILE="$DEST"
+          SIZE=$(stat -c%s "$FILE")
+          MIN=$((20*1024*1024))
+          if [ "$SIZE" -lt "$MIN" ]; then
+            echo "::error::Fichier produit anormalement petit ($SIZE octets) : $FILE"
+            exit 1
+          fi
+          case "$FILE" in
+            *.exe) ;;
+            *) echo "::error::Extension inattendue pour $FILE"; exit 1 ;;
+          esac
+          MAGIC=$(head -c2 "$FILE")
+          if [ "$MAGIC" != "MZ" ]; then
+            echo "::error::En-tête PE invalide (pas un exécutable Windows valide) : $FILE"
+            exit 1
+          fi
+          echo "OK : $FILE ($SIZE octets, en-tête PE valide)."
+
+      - name: Générer SHA256SUMS.txt — Windows
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        working-directory: build-output
+        run: sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+
+      - name: Upload artefact Windows
         if: matrix.os == 'windows-latest'
         uses: actions/upload-artifact@v4
         with:
           name: medconnect-desktop-windows
-          path: electron/dist/*.exe
+          path: |
+            build-output/*.exe
+            build-output/SHA256SUMS.txt
           if-no-files-found: error
 
-      - name: Upload Linux artifacts
+      - name: Préparer les artefacts Linux
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          mkdir -p build-output
+          shopt -s nullglob
+          files=(electron/dist/*.AppImage electron/dist/*.deb)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::Aucun installateur Linux trouvé dans electron/dist"
+            ls -la electron/dist || true
+            exit 1
+          fi
+          cp "${files[@]}" build-output/
+
+      - name: Vérifier les fichiers produits (taille, extensions) — Linux
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        working-directory: build-output
+        run: |
+          MIN=$((20*1024*1024))
+          for f in *; do
+            SIZE=$(stat -c%s "$f")
+            if [ "$SIZE" -lt "$MIN" ]; then
+              echo "::error::Fichier produit anormalement petit ($SIZE octets) : $f"
+              exit 1
+            fi
+            case "$f" in
+              *.AppImage|*.deb) ;;
+              *) echo "::error::Extension inattendue : $f"; exit 1 ;;
+            esac
+          done
+          echo "OK : $(ls | wc -l) fichier(s) vérifié(s)."
+
+      - name: Générer SHA256SUMS.txt — Linux
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        working-directory: build-output
+        run: sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+
+      - name: Upload artefacts Linux
         if: matrix.os == 'ubuntu-latest'
         uses: actions/upload-artifact@v4
         with:
           name: medconnect-desktop-linux
           path: |
-            electron/dist/*.AppImage
-            electron/dist/*.deb
+            build-output/*.AppImage
+            build-output/*.deb
+            build-output/SHA256SUMS.txt
           if-no-files-found: error
+
+  release:
+    name: Publier la GitHub Release
+    needs: build
+    if: github.event.inputs.publish_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: medconnect-desktop-windows
+          path: release-assets/windows
+
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: medconnect-desktop-linux
+          path: release-assets/linux
+
+      - name: Résoudre la version et le tag
+        id: rel
+        shell: bash
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          if [ -z "$VERSION" ]; then
+            VERSION=$(node -p "require('./package.json').version")
+          fi
+          TAG="${{ github.event.inputs.release_tag }}"
+          if [ -z "$TAG" ]; then
+            TAG="v${VERSION}-desktop"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Fusionner les checksums (Windows + Linux)
+        shell: bash
+        run: |
+          mkdir -p release-assets/final
+          cp release-assets/windows/*.exe release-assets/final/
+          cp release-assets/linux/*.AppImage release-assets/linux/*.deb release-assets/final/ 2>/dev/null || true
+          {
+            echo "# MedConnect Desktop ${{ steps.rel.outputs.version }} — SHA-256"
+            cat release-assets/windows/SHA256SUMS.txt
+            cat release-assets/linux/SHA256SUMS.txt
+          } > release-assets/final/SHA256SUMS.txt
+          cat release-assets/final/SHA256SUMS.txt
+
+      - name: Créer la GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.rel.outputs.tag }}" \
+            --title "MedConnect Desktop ${{ steps.rel.outputs.version }}" \
+            --notes "Installateurs desktop MedConnect (Windows + Linux). Voir SHA256SUMS.txt pour vérifier l'intégrité des fichiers. Statut de signature : voir le nom des fichiers (\"-unsigned-beta\" = non signé)." \
+            release-assets/final/*

@@ -59,6 +59,66 @@ const HospitalAuth = (() => {
   function saveSession(s) { sessionStorage.setItem(SESSION_KEY, JSON.stringify(s)); }
   function clearSession()  { sessionStorage.removeItem(SESSION_KEY); }
 
+  /* ── Validité de session (âge max + verrou d'inactivité) ──
+     Poste hospitalier PARTAGÉ : une session desktop restaurée (page
+     rechargée, ou onglet resté ouvert) ne doit jamais rester valide
+     indéfiniment. Deux durées distinctes, documentées et testables :
+     - SESSION_MAX_AGE_MS : âge absolu depuis loggedAt, au-delà duquel
+       une session restaurée (ex. au rechargement de la page) est
+       refusée d'office — 8h, la durée d'une garde hospitalière typique.
+     - INACTIVITY_TIMEOUT_MS : verrou glissant pendant que l'onglet reste
+       ouvert, réinitialisé à chaque interaction (clic/touche) — 30 min,
+       délai usuel de verrouillage sur un poste partagé. Vérifié par
+       HospitalDesktopUI, JAMAIS déclenché s'il existe une écriture
+       encore en file (DB.outboxCount() > 0) : on ne coupe jamais une
+       session pendant une écriture médicale en cours. */
+  const SESSION_MAX_AGE_MS = 8 * 60 * 60 * 1000;
+  const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000;
+
+  function isSessionExpired(session, now = Date.now()) {
+    if (!session?.loggedAt) return true;
+    const loggedAtMs = Date.parse(session.loggedAt);
+    if (Number.isNaN(loggedAtMs)) return true;
+    return (now - loggedAtMs) > SESSION_MAX_AGE_MS;
+  }
+
+  /* Valide qu'une session hôpital (restaurée depuis mc_hospital_session,
+     ou tout juste créée) correspond réellement à une identité Firebase
+     Auth confirmée ET toujours affiliée à l'établissement — sans ce
+     contrôle, un ancien tableau de bord pouvait se rouvrir sur la seule
+     foi du cache local (audit : "session fantôme"). Fonction PURE côté
+     nettoyage : ne modifie jamais l'état, c'est à l'appelant de décider
+     quoi faire du résultat (voir invalidateSession). */
+  async function isSessionConsistent(session) {
+    if (!session?.establishmentId || !session?.agentUid) return false;
+    if (isSessionExpired(session)) return false;
+
+    const user = window.Auth?.getUser?.();
+    const fbUser = (typeof firebaseAuth !== 'undefined' && firebaseAuth) ? firebaseAuth.currentUser : null;
+    if (!user || !fbUser) return false;
+    if (user.uid !== fbUser.uid) return false;
+    if (session.agentUid !== fbUser.uid) return false;
+
+    const est = window.HospitalsRegistry?.getHospitalById?.(session.establishmentId);
+    if (!est) return false;
+    if (!['active', 'approved'].includes(String(est.status || '').toLowerCase())) return false;
+
+    const staff = Array.isArray(est.staff) ? est.staff : [];
+    const activeOk = s => s.status === 'active' || s.status === 'approved';
+    const member = staff.find(s => s.uid === fbUser.uid && s.role === session.role && activeOk(s));
+    return !!member;
+  }
+
+  /* Nettoyage complet d'une session hôpital devenue invalide/obsolète —
+     utilisé par App.init() et HospitalDesktopUI quand
+     isSessionConsistent() renvoie false : ne laisse jamais l'ancien
+     tableau de bord visible. */
+  async function invalidateSession() {
+    try { sessionStorage.removeItem('mc_user'); } catch (_) {}
+    clearSession();
+    try { window.HospitalsRegistry?.clearCurrentHospital?.(); } catch (_) {}
+  }
+
   /* ── Recherche d'établissement par matricule ───────── */
   async function findByOfficialId(officialId) {
     const oid = String(officialId || '').trim().toUpperCase();
@@ -238,6 +298,18 @@ const HospitalAuth = (() => {
      etc. — le verrouillage de capacité devient effectif côté
      serveur, par personne. L'agent doit être affilié au staff de
      l'établissement. */
+  // Laboratoire et Réception sont réservés au desktop hôpital (aucun
+  // accès mobile — voir Auth._registerRolesForDevice()). Contrairement à
+  // médecin/infirmier/pharmacien, ces deux rôles n'ont donc AUCUN autre
+  // écran où créer un compte : l'écran mobile d'inscription n'est jamais
+  // atteint depuis le desktop (App.init() route directement vers
+  // HospitalAuth.renderScreen()). On réutilise ici, SANS les dupliquer,
+  // les mêmes fonctions d'inscription que l'écran mobile
+  // (Auth._registerRole/_regLab/_regReception : registre optionnel,
+  // statut 'pending', validation par l'administrateur identique à celle
+  // des autres rôles) — seul l'endroit où le formulaire s'affiche change.
+  const AGENT_SELF_REGISTER_ROLES = ['lab', 'reception'];
+
   function renderRolePicker(est) {
     const scr = document.getElementById('auth-screen');
     scr.innerHTML = `
@@ -247,7 +319,7 @@ const HospitalAuth = (() => {
           <p style="margin:.5rem 0 1rem;opacity:.75">Connectez-vous avec votre compte professionnel personnel :</p>
           <div class="form-group">
             <label>Rôle</label>
-            <select id="ha-agent-role">
+            <select id="ha-agent-role" onchange="HospitalAuth.onAgentRoleChange()">
               <option value="doctor">Médecin</option>
               <option value="nurse">Infirmier(e)</option>
               <option value="pharmacist">Pharmacie</option>
@@ -265,9 +337,55 @@ const HospitalAuth = (() => {
           </div>
           <button class="btn btn-primary btn-full" onclick="HospitalAuth.verifyAgent('${esc(est.establishmentId || est.id)}')">Se connecter</button>
           <div id="ha-agent-msg" style="margin-top:.8rem"></div>
+
+          <div id="ha-agent-register-toggle" style="margin-top:1rem;font-size:.85rem;display:none">
+            <span id="ha-agent-register-hint"></span>
+            <a href="#" onclick="HospitalAuth.toggleAgentRegister(event)">📝 Inscription</a>
+          </div>
+          <div id="ha-agent-register-wrap" style="display:none;margin-top:.75rem;border-top:1px solid var(--border);padding-top:.75rem">
+            <div id="register-form"></div>
+            <div id="reg-err" class="auth-error" style="display:none"></div>
+          </div>
+
           <button class="btn btn-ghost btn-full" style="margin-top:1rem" onclick="HospitalAuth.renderScreen()">← Retour</button>
         </div>
       </div>`;
+    onAgentRoleChange();
+  }
+
+  /* Affiche/masque le lien "Inscription" selon le rôle sélectionné —
+     visible uniquement pour Laboratoire et Réception (les seuls rôles
+     desktop sans autre écran d'inscription possible). */
+  function onAgentRoleChange() {
+    const role = document.getElementById('ha-agent-role')?.value;
+    const toggle = document.getElementById('ha-agent-register-toggle');
+    const wrap = document.getElementById('ha-agent-register-wrap');
+    if (!toggle || !wrap) return;
+    wrap.style.display = 'none';
+    const rf = document.getElementById('register-form');
+    if (rf) rf.innerHTML = '';
+    if (AGENT_SELF_REGISTER_ROLES.includes(role)) {
+      toggle.style.display = 'block';
+      const hint = document.getElementById('ha-agent-register-hint');
+      if (hint) hint.textContent = `Pas encore de compte ${role === 'lab' ? 'laboratoire' : 'réception'} ?`;
+    } else {
+      toggle.style.display = 'none';
+    }
+  }
+
+  /* Ouvre le formulaire d'inscription lab/reception — délègue
+     entièrement à Auth._registerRole(), qui construit le même
+     formulaire (numéro, email, mot de passe) que sur mobile, avec le
+     même bouton d'envoi (Auth._regLab/_regReception). */
+  function toggleAgentRegister(e) {
+    e?.preventDefault?.();
+    const role = document.getElementById('ha-agent-role')?.value;
+    if (!AGENT_SELF_REGISTER_ROLES.includes(role)) return;
+    const wrap = document.getElementById('ha-agent-register-wrap');
+    if (!wrap) return;
+    const opening = wrap.style.display === 'none';
+    wrap.style.display = opening ? 'block' : 'none';
+    if (opening) window.Auth?._registerRole?.(role);
   }
 
   /* Vérifie l'affiliation de l'agent au staff de l'établissement
@@ -276,15 +394,31 @@ const HospitalAuth = (() => {
   function findStaffRole(est, uid, number, role) {
     const num = String(number || '').trim().toUpperCase();
     const staff = Array.isArray(est.staff) ? est.staff : [];
+    const activeOk = s => s.status === 'active' || s.status === 'approved';
+    // Le rôle demandé (menu déroulant) DOIT concorder avec le rôle
+    // affilié réel — sans ce filtre, un uid affilié comme "doctor"
+    // pouvait entrer en ayant sélectionné n'importe quel autre rôle
+    // dans le menu (contrôle d'accès affaibli).
     // Priorité : correspondance par uid (identité authentifiée).
-    let member = staff.find(s => s.uid === uid && (s.status === 'active' || s.status === 'approved'));
+    let member = staff.find(s => s.uid === uid && s.role === role && activeOk(s));
     // Repli : par numéro professionnel (agent affilié avant d'avoir un uid lié).
     if (!member) {
       member = staff.find(s =>
         String(s.professionalNumber || '').toUpperCase() === num &&
-        (s.status === 'active' || s.status === 'approved'));
+        s.role === role && activeOk(s));
     }
     return member || null;
+  }
+
+  /* Nettoyage complet d'une tentative de connexion desktop invalide ou
+     incohérente : ne laisse subsister aucune session locale (mc_user,
+     mc_hospital_session) ni aucune session Firebase Auth résiduelle. */
+  async function _abortAgentSession() {
+    try { sessionStorage.removeItem('mc_user'); } catch (_) {}
+    clearSession();
+    if (typeof firebaseAuth !== 'undefined' && firebaseAuth?.signOut) {
+      try { await firebaseAuth.signOut(); } catch (_) {}
+    }
   }
 
   async function verifyAgent(establishmentId) {
@@ -309,7 +443,23 @@ const HospitalAuth = (() => {
       return;
     }
 
-    // 2) Vérifier l'affiliation au staff de l'établissement.
+    // 1bis) Vérification de cohérence AVANT toute affiliation/ouverture
+    // du tableau de bord — sans ce contrôle, une incohérence entre
+    // l'identité Firebase Auth réelle et le compte résolu localement
+    // pouvait ouvrir une session invalide (cf. audit "session fantôme").
+    const currentFbUser = (typeof firebaseAuth !== 'undefined' && firebaseAuth) ? firebaseAuth.currentUser : null;
+    const sessionUser = window.Auth?.getUser?.();
+    const consistent = !!sessionUser && !!currentFbUser &&
+      sessionUser.uid === currentFbUser.uid &&
+      account.uid === currentFbUser.uid;
+    if (!consistent) {
+      await _abortAgentSession();
+      msg.innerHTML = `<div class="auth-register-info" style="border-color:var(--danger)">❌ Session invalide — reconnectez-vous.</div>`;
+      return;
+    }
+
+    // 2) Vérifier l'affiliation au staff de l'établissement (le rôle
+    // demandé DOIT concorder avec le rôle affilié — voir findStaffRole).
     const member = findStaffRole(est, account.uid, num, role);
     if (!member) {
       // L'agent est authentifié mais pas affilié : on CRÉE une demande
@@ -339,12 +489,17 @@ const HospitalAuth = (() => {
           ? `<div class="auth-register-info" style="border-color:var(--secondary)">✅ Demande d'affiliation envoyée à l'administration. Vous pourrez vous connecter une fois validé.</div>`
           : `<div class="auth-register-info" style="border-color:var(--danger)">⚠️ Vous êtes authentifié, mais pas affilié, et la demande n'a pas pu être créée. Contactez l'administration.</div>`;
 
-      if (firebaseAuth?.signOut) { try { await firebaseAuth.signOut(); } catch (_) {} }
+      // Correctif (audit) : loginProfessionalSilently() sauvegarde
+      // désormais sessionStorage.mc_user dès l'authentification réussie
+      // — sans ce nettoyage, une tentative non affiliée laissait une
+      // session utilisateur locale active alors qu'aucun tableau de
+      // bord ne doit s'ouvrir.
+      await _abortAgentSession();
       return;
     }
 
     // Rôle de session = rôle vérifié dans le staff (source de vérité
-    // de l'affiliation), qui doit concorder avec le compte.
+    // de l'affiliation, déjà filtrée sur le rôle demandé).
     enter(establishmentId, member.role || account.role || role, {
       name: account.name || member.name,
       professionalNumber: num,
@@ -490,7 +645,14 @@ const HospitalAuth = (() => {
     // la session Firebase, puis purger les caches médicaux pour que
     // l'agent suivant ne retrouve rien du précédent.
     try { await window.DB?.flushOutbox?.(); } catch (_) {}
+    // Correctif (audit) : loginProfessionalSilently() sauvegarde
+    // désormais sessionStorage.mc_user (voir js/auth.js) — la
+    // déconnexion desktop doit donc aussi le supprimer, ainsi que
+    // l'établissement actif, sous peine de laisser des traces de la
+    // session de l'agent précédent visibles au suivant sur ce poste.
+    try { sessionStorage.removeItem('mc_user'); } catch (_) {}
     clearSession();
+    try { window.HospitalsRegistry?.clearCurrentHospital?.(); } catch (_) {}
     if (typeof firebaseAuth !== 'undefined' && firebaseAuth?.signOut) {
       try { await firebaseAuth.signOut(); } catch (_) {}
     }
@@ -507,7 +669,12 @@ const HospitalAuth = (() => {
     renderScreen();
   }
 
-  return { renderScreen, showTab, login, register, enter, verifyAgent, logout, getSession, hashPassword };
+  return {
+    renderScreen, showTab, login, register, enter, verifyAgent, logout, getSession, hashPassword,
+    onAgentRoleChange, toggleAgentRegister,
+    isSessionExpired, isSessionConsistent, invalidateSession,
+    SESSION_MAX_AGE_MS, INACTIVITY_TIMEOUT_MS,
+  };
 })();
 
 window.HospitalAuth = HospitalAuth;

@@ -7,17 +7,43 @@ const PharmacyPortal = (() => {
   const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   let cart  = [];
 
-  function render(section) {
-    const main = document.getElementById('main-content');
+  // Correctif (audit) : render(section) ciblait toujours #main-content,
+  // invisible en session desktop pure (rendu réel dans #hospital-content).
+  // renderInto(container, section) est l'API compatible desktop ;
+  // render() n'est plus qu'un raccourci mobile au-dessus. currentContainer
+  // mémorise le dernier container utilisé, pour que la navigation interne
+  // (_nav) reste dans le même container quel que soit le contexte.
+  let currentContainer = null;
+
+  function renderInto(container, section) {
+    currentContainer = container;
     switch (section) {
-      case 'dashboard':     renderDashboard(main);     break;
-      case 'pos':           renderPOS(main);           break;
-      case 'inventory':     renderInventory(main);     break;
-      case 'sales':         renderSales(main);         break;
-      case 'prescriptions': renderPrescriptions(main); break;
-      case 'map':           MapModule.render(main);    break;
-      default:              renderDashboard(main);
+      case 'dashboard':     renderDashboard(container);     break;
+      case 'pos':           renderPOS(container);           break;
+      case 'inventory':     renderInventory(container);     break;
+      case 'sales':         renderSales(container);         break;
+      case 'prescriptions': renderPrescriptions(container); break;
+      case 'map':           MapModule.render(container);    break;
+      default:              renderDashboard(container);
     }
+  }
+
+  function render(section) {
+    renderInto(document.getElementById('main-content'), section);
+  }
+
+  /* Navigation interne compatible desktop/mobile : les onglets propres à
+     la pharmacie (dashboard/pos/inventory/sales/prescriptions/map)
+     restent dans le container courant (desktop ou mobile) ; toute autre
+     section (ex. inbox) passe par le helper de navigation partagé. */
+  const PHARMACY_INTERNAL_SECTIONS = new Set(['dashboard','pos','inventory','sales','prescriptions','map']);
+  function _nav(section) {
+    if (PHARMACY_INTERNAL_SECTIONS.has(section) && currentContainer && document.body.contains(currentContainer)) {
+      renderInto(currentContainer, section);
+      return;
+    }
+    if (typeof window.navigateMedConnect === 'function') window.navigateMedConnect(section);
+    else App.navigateTo(section);
   }
 
   const today = () => new Date().toISOString().slice(0,10);
@@ -36,7 +62,7 @@ const PharmacyPortal = (() => {
     main.innerHTML = `
       <div class="page-header">
         <h2>📊 ${t('nav_dashboard')}</h2>
-        <button class="btn btn-primary btn-sm" onclick="App.navigateTo('pos')">🛒 ${t('nav_pos')}</button>
+        <button class="btn btn-primary btn-sm" onclick="PharmacyPortal._nav('pos')">🛒 ${t('nav_pos')}</button>
       </div>
       <div class="stats-grid">
         <div class="stat-card" style="border-top:3px solid #A855F7">
@@ -57,7 +83,7 @@ const PharmacyPortal = (() => {
         <div class="stat-card" style="border-top:3px solid var(--primary)">
           <div class="stat-icon">📨</div><div class="stat-value">${inbox.length}</div>
           <div class="stat-label">Ordonnances reçues</div>
-          <div class="stat-sub"><button class="btn btn-ghost btn-xs" onclick="App.navigateTo('inbox')">Voir →</button></div>
+          <div class="stat-sub"><button class="btn btn-ghost btn-xs" onclick="PharmacyPortal._nav('inbox')">Voir →</button></div>
         </div>
       </div>
       ${exp.length ? `<div class="alert-box">🔴 Médicaments EXPIRÉS : ${exp.map(m=>esc(m.name)).join(', ')}</div>` : ''}
@@ -65,7 +91,7 @@ const PharmacyPortal = (() => {
       ${low.length ? `<div class="alert-box">📦 Stock bas : ${low.map(m=>esc(m.name)).join(', ')}</div>` : ''}
       <div class="page-header" style="margin-top:1rem">
         <h3>Inventaire récent</h3>
-        <button class="btn btn-ghost btn-sm" onclick="App.navigateTo('inventory')">Tout voir →</button>
+        <button class="btn btn-ghost btn-sm" onclick="PharmacyPortal._nav('inventory')">Tout voir →</button>
       </div>
       ${inventoryTable(meds.slice(0,6))}`;
   }
@@ -168,7 +194,7 @@ const PharmacyPortal = (() => {
     App.toast(`✅ ${t('sell')} — ${total.toFixed(2)} ${t('currency')}`);
     printReceipt(sale);
     cart = [];
-    App.navigateTo('pos');
+    PharmacyPortal._nav('pos');
   }
 
   function printReceipt(sale) {
@@ -255,7 +281,7 @@ const PharmacyPortal = (() => {
       lot:      document.getElementById('m-lot').value,
       expiry:   document.getElementById('m-expiry').value,
     });
-    App.closeModal(); App.toast(t('msg_saved')); App.navigateTo('inventory');
+    App.closeModal(); App.toast(t('msg_saved')); PharmacyPortal._nav('inventory');
   }
 
   function openEditMed(mid) {
@@ -289,12 +315,12 @@ const PharmacyPortal = (() => {
       lot:      document.getElementById('em-lot').value,
       expiry:   document.getElementById('em-expiry').value,
     });
-    App.closeModal(); App.toast(t('msg_saved')); App.navigateTo('inventory');
+    App.closeModal(); App.toast(t('msg_saved')); PharmacyPortal._nav('inventory');
   }
 
   function deleteMed(mid) {
     if (!confirm(t('msg_confirm_delete'))) return;
-    DB.deleteMedicine(mid); App.toast(t('msg_deleted')); App.navigateTo('inventory');
+    DB.deleteMedicine(mid); App.toast(t('msg_deleted')); PharmacyPortal._nav('inventory');
   }
 
   /* ── SALES ──────────────────────────────────────── */
@@ -373,11 +399,11 @@ const PharmacyPortal = (() => {
     const reason = prompt('Motif (médicament manquant, etc.) :');
     if (reason === null) return;
     Network.setPrescriptionStatus(pid, 'cancelled', reason || 'Non précisé');
-    render('prescriptions');
+    _nav('prescriptions');
   }
 
   return {
-    render, filterMeds, addToCart, removeFromCart, updateQty, checkout, lookupPatient,
+    render, renderInto, _nav, filterMeds, addToCart, removeFromCart, updateQty, checkout, lookupPatient,
     openAddMed, saveMed, openEditMed, saveEditMed, deleteMed,
     renderPrescriptions, cancelPrescription,
   };

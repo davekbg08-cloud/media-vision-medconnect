@@ -1,9 +1,9 @@
 {
   "name": "medconnect-desktop",
-  "version": "1.0.0",
+  "version": "2.9.25",
   "description": "MedConnect — application de bureau (Windows + Linux)",
   "main": "main.js",
-  "homepage": "https://davekbg08-cloud.github.io/media-vision-medconnect/",
+  "homepage": "https://medconnect-e81ba.web.app/",
   "author": {
     "name": "Media Vision",
     "email": "contact@mediavision.app"
@@ -12,7 +12,9 @@
   "private": true,
   "scripts": {
     "start": "electron .",
+    "predist:win": "node ../scripts/sync-desktop-version.mjs",
     "dist:win": "electron-builder --win",
+    "predist:linux": "node ../scripts/sync-desktop-version.mjs",
     "dist:linux": "electron-builder --linux"
   },
   "devDependencies": {
@@ -26,16 +28,20 @@
       "output": "dist"
     },
     "files": [
-      "main.js"
+      "main.js",
+      "offline.html",
+      "resources/**/*"
     ],
     "win": {
       "target": ["nsis"],
-      "icon": "resources/icon.png"
+      "icon": "resources/icon.png",
+      "artifactName": "MedConnect-Setup-${version}.${ext}"
     },
     "linux": {
       "target": ["AppImage", "deb"],
       "icon": "resources/icon.png",
-      "category": "Office"
+      "category": "Office",
+      "artifactName": "MedConnect-${version}-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,

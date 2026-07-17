@@ -129,12 +129,12 @@ const HospitalPortal = (() => {
         <div class="stat-card" style="border-top:3px solid #F59E0B">
           <div class="stat-icon">📅</div><div class="stat-value">${s.pendingApts}</div>
           <div class="stat-label">RDV en attente</div>
-          <div class="stat-sub"><button class="btn btn-ghost btn-xs" onclick="App.navigateTo('appointments')">Voir →</button></div>
+          <div class="stat-sub"><button class="btn btn-ghost btn-xs" onclick="navigateMedConnect('appointments')">Voir →</button></div>
         </div>
         <div class="stat-card" style="border-top:3px solid #A855F7">
           <div class="stat-icon">📨</div><div class="stat-value">${s.unreadMessages}</div>
           <div class="stat-label">Messages non lus</div>
-          <div class="stat-sub"><button class="btn btn-ghost btn-xs" onclick="App.navigateTo('inbox')">Voir →</button></div>
+          <div class="stat-sub"><button class="btn btn-ghost btn-xs" onclick="navigateMedConnect('inbox')">Voir →</button></div>
         </div>
       </div>
       ${apts.length ? `
@@ -152,7 +152,7 @@ const HospitalPortal = (() => {
         </div>` : ''}
       <div class="page-header" style="margin-top:1rem">
         <h3>Patients récents</h3>
-        <button class="btn btn-ghost btn-sm" onclick="App.navigateTo('patients')">Tous →</button>
+        <button class="btn btn-ghost btn-sm" onclick="navigateMedConnect('patients')">Tous →</button>
       </div>
       <div class="records-list">
         ${patients.slice(-4).reverse().map(p=>patRow(p)).join('')
@@ -425,7 +425,7 @@ const HospitalPortal = (() => {
       ...currentEstablishmentFields(),
       ...completionFields,
     });
-    App.closeModal(); App.toast(`✅ ${t('msg_saved')} — ${p.id}`); App.navigateTo('patients');
+    App.closeModal(); App.toast(`✅ ${t('msg_saved')} — ${p.id}`); navigateMedConnect('patients');
     showFirstAccessCodeModal(p, confirmed);
   }
 
@@ -453,7 +453,7 @@ const HospitalPortal = (() => {
   function deletePatient(id) {
     if (!canUsePatient(id)) { App.toast('Accès patient non autorisé.', 'error'); return; }
     if (!confirm(t('msg_confirm_delete'))) return;
-    DB.deletePatient(id); App.toast(t('msg_deleted')); App.navigateTo('patients');
+    DB.deletePatient(id); App.toast(t('msg_deleted')); navigateMedConnect('patients');
   }
 
   /* ── CONSULTATION + ORDONNANCE INTELLIGENTE ───── */
@@ -667,7 +667,7 @@ const HospitalPortal = (() => {
 
     if (rxId) { openPrescriptionTarget(rxId); return; }
 
-    App.toast(t('msg_saved')); App.navigateTo('consultations');
+    App.toast(t('msg_saved')); navigateMedConnect('consultations');
     } finally { _savingConsult = false; }
   }
 
@@ -697,7 +697,7 @@ const HospitalPortal = (() => {
     const target = document.getElementById('rx-target')?.value || 'patient';
     Network.sendPrescriptionToPharmacy(pid, target);
     App.closeModal();
-    App.navigateTo('consultations');
+    navigateMedConnect('consultations');
   }
 
   function delConsult(cid, patientId) {
@@ -866,7 +866,7 @@ const HospitalPortal = (() => {
       App.toast(emergencyOverride
         ? '🚨 Transfert d\'urgence créé (abonnement ignoré — journalisé).'
         : '🚑 Transfert d\'urgence créé.');
-      App.navigateTo('dashboard');
+      navigateMedConnect('dashboard');
       return transfer;
     } catch (e) {
       showErr(e?.message || 'Impossible de créer le transfert.');
@@ -929,7 +929,7 @@ const HospitalPortal = (() => {
       else if (action === 'completed') await EmergencyTransferModule.completeTransfer(transferId);
       else                             await EmergencyTransferModule.acceptTransfer(transferId, user.uid || '');
       App.toast('✅ Transfert mis à jour.');
-      App.navigateTo('transfers');
+      navigateMedConnect('transfers');
     } catch (e) {
       console.error('[Transfers] acceptIncomingTransfer :', e);
       App.toast(e.message || 'Erreur sur le transfert.', 'error');
@@ -941,7 +941,7 @@ const HospitalPortal = (() => {
       const user = Auth.getUser() || {};
       await MedicalRecordSharing.approveShare(shareId, user.uid || '');
       App.toast('✅ Partage approuvé.');
-      App.navigateTo('transfers');
+      navigateMedConnect('transfers');
     } catch (e) {
       console.error('[Transfers] approveIncomingShare :', e);
       App.toast(e.message || 'Erreur sur le partage.', 'error');
