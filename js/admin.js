@@ -187,6 +187,65 @@ const AdminModule = (() => {
     return DB.pushAndReport ? DB.pushAndReport(writes) : false;
   }
 
+  /** Variante détaillée (avec délai maximal) de pushRegistrationCloud(),
+      utilisée par approve()/reject()/suspend() : un bouton de validation
+      administrative ne doit jamais rester bloqué indéfiniment, et ne
+      doit jamais annoncer un succès tant que Firestore n'a pas
+      réellement confirmé l'écriture.
+      Revue Codex (P1, PR #39) : users/{uid}, mc_accounts/{uid} et les
+      registration_requests associées sont écrits en un seul batch
+      ATOMIQUE (js/db.js pushBatchAndReportDetailed) — avec des écritures
+      indépendantes, users pouvait passer "approved" pendant que
+      mc_accounts échouait (connexion possible via users alors que le
+      tableau de bord admin affichait encore "pending"), et un échec
+      remettait la pièce manquante dans l'outbox pour un rejeu
+      automatique pouvant écraser une décision opposée prise ensuite. */
+  async function pushRegistrationCloudDetailed(uid, account, status, timeoutMs = 20000) {
+    if (!uid) return { ok: false, succeeded: [], failed: [], timedOut: false, error: null };
+    const reviewedAt = now();
+    const reviewedBy = currentAdminUid();
+    const writes = [
+      ['users', uid, { ...account, status, updatedAt: reviewedAt }],
+      ['mc_accounts', uid, { ...account, status, updatedAt: reviewedAt }],
+    ];
+    getRequestsSafe()
+      .filter(r => r.requesterUid === uid && r.requestId)
+      .forEach(r => writes.push(['registration_requests', r.requestId, {
+        ...r, status, updatedAt: reviewedAt, reviewedAt, reviewedBy,
+        approvedAt: status === 'approved' ? reviewedAt : r.approvedAt || null,
+        rejectedAt: status === 'rejected' ? reviewedAt : r.rejectedAt || null,
+      }]));
+    if (DB.pushBatchAndReportDetailed) {
+      return DB.pushBatchAndReportDetailed(writes, { timeoutMs, label: `Validation (${status})` });
+    }
+    const ok = DB.pushAndReport ? await DB.pushAndReport(writes) : false;
+    return { ok, succeeded: [], failed: [], timedOut: false, error: null };
+  }
+
+  /* ── ÉTAT VISUEL DES BOUTONS D'ACTION ADMIN ───────────
+     Verrou anti-double-clic + libellé d'attente, posés AVANT le premier
+     await, retirés dans un finally — pour que "Approuver"/"Refuser"/
+     "Suspendre" ne semblent plus jamais figés après un clic (cause
+     racine : aucune indication visuelle pendant l'écriture Firestore). */
+  function _lockActionButton(event, label) {
+    const btn = event?.target?.closest ? event.target.closest('button') : (event?.currentTarget || null);
+    if (!btn) return null;
+    if (btn.dataset && btn.dataset.processing === 'true') return 'locked';
+    if (btn.dataset) btn.dataset.processing = 'true';
+    btn.disabled = true;
+    btn._mcOriginalText = btn.textContent;
+    btn.textContent = label;
+    return btn;
+  }
+
+  function _unlockActionButton(btn) {
+    if (!btn || typeof document === 'undefined' || !document.body) return;
+    if (!document.body.contains(btn)) return; // fenêtre déjà fermée
+    btn.disabled = false;
+    btn.textContent = btn._mcOriginalText != null ? btn._mcOriginalText : btn.textContent;
+    if (btn.dataset) delete btn.dataset.processing;
+  }
+
   function statusText(status) {
     const s = String(status || '').toLowerCase();
     return s === 'pending' ? '⏳ En attente' :
@@ -308,7 +367,7 @@ const AdminModule = (() => {
                   <span class="role-badge role-${esc(a.role)}" style="margin-left:.4rem">${esc(roleLabel(a.role))}</span><br>
                   <small style="color:var(--text-muted);font-family:monospace;font-size:.72rem">${esc(a.username || roleProfessionalNumber(a) || '—')}</small>
                 </div>
-                <button class="btn btn-ghost btn-xs" style="color:var(--danger)" onclick="AdminModule.suspend('${esc(a.uid || '')}')">🚫</button>
+                <button class="btn btn-ghost btn-xs" style="color:var(--danger)" onclick="AdminModule.suspend('${esc(a.uid || '')}', event)">🚫</button>
               </div>`).join('')}
           </div>` : `<div class="card empty-state"><p>Aucun utilisateur actif</p></div>`}
 
@@ -348,85 +407,156 @@ const AdminModule = (() => {
   }
 
   /* ══ VALIDATION COMPTES ══════════════════════════════ */
-  async function approve(uid) {
-    const accounts = getAccountsSafe();
-    const idx = accounts.findIndex(a => a.uid === uid);
-    if (idx === -1) {
-      // Demande SANS compte mc_accounts (source 'request' pure) : le cas
-      // des fantômes. Impossible d'activer un compte inexistant — on clôt
-      // la demande pour qu'elle quitte la liste (option de purge offerte
-      // par le bouton 🗑️ Supprimer distinct).
-      const row = getRegistrationRows().find(x => x.requesterUid === uid || x.uid === uid);
-      if (!row) { App.toast('❌ Demande introuvable.', 'error'); return; }
-      if (!confirm('Cette demande n\'a aucun compte associé (probablement obsolète). La retirer de la liste ?')) return;
-      updateRegistrationRequests(row.requestId || uid, 'approved');
-      await pushRegistrationCloud(row.requestId || uid, { ...row, status: 'approved' }, 'approved');
-      App.toast('✅ Demande clôturée.');
+  async function approve(uid, event) {
+    const btn = _lockActionButton(event, '⏳ Validation en cours…');
+    if (btn === 'locked') return;
+    try {
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        App.toast('Connexion internet requise pour valider un compte.', 'error');
+        return;
+      }
+      const accounts = getAccountsSafe();
+      const idx = accounts.findIndex(a => a.uid === uid);
+      if (idx === -1) {
+        // Demande SANS compte mc_accounts (source 'request' pure) : le cas
+        // des fantômes. Un compte inexistant ne peut JAMAIS être approuvé
+        // (requestId n'est jamais utilisé comme uid) — seule la suppression
+        // de la demande obsolète est proposée (voir deleteRequest/openDetail).
+        App.toast('Cette demande ne possède aucun compte Firebase valide. Elle peut être supprimée, mais elle ne peut pas être approuvée.', 'error');
+        return;
+      }
+      const acc = accounts[idx];
+      // Une identité Firebase valide est un préalable absolu à toute
+      // approbation — sans elle, le compte ne pourra jamais se connecter
+      // (voir js/auth.js loginProfessionalSilently, qui exige authUid).
+      if (!acc.authUid || acc.uid !== acc.authUid) {
+        App.toast('Ce compte ne possède pas d\'identité Firebase valide. Supprimez la demande et demandez une nouvelle inscription.', 'error');
+        return;
+      }
+      if (!acc.email) {
+        App.toast('Ce compte ne possède pas d\'email valide. Supprimez la demande et demandez une nouvelle inscription.', 'error');
+        return;
+      }
+      if (!confirm('Approuver cette demande après vérification des informations ?')) return;
+
+      // Nouvelles données préparées SANS toucher au cache local avant
+      // confirmation Firestore — un échec ne doit jamais laisser croire
+      // que le compte a été approuvé.
+      const reviewedAt = now();
+      const nextAccount = {
+        ...acc, status: 'approved', approved_at: reviewedAt,
+        reviewedAt, reviewedBy: currentAdminUid(),
+      };
+
+      const result = await pushRegistrationCloudDetailed(uid, nextAccount, 'approved');
+      if (!result.ok) {
+        App.toast('❌ La validation n\'a pas été confirmée par Firestore. Vérifiez votre connexion puis réessayez.', 'error');
+        return;
+      }
+
+      // Cache local mis à jour SEULEMENT après confirmation complète.
+      accounts[idx] = nextAccount;
+      DB.saveAccounts(accounts);
+      updateRegistrationRequests(uid, 'approved');
+
+      Network?.notify?.({
+        to_role: nextAccount.role, to_id: nextAccount.uid, type:'info',
+        subject: '✅ Compte approuvé — MedConnect',
+        body: `Votre compte a été validé par l'administrateur.\nVous pouvez maintenant vous connecter.\n\n📞 +243 856 373 707`,
+      });
+      App.toast(`✅ Compte approuvé — ${nextAccount.name || nextAccount.fullName || nextAccount.email || nextAccount.uid}`);
       App.closeModal?.();
       App.navigateTo('dashboard');
-      return;
+    } catch (e) {
+      console.error('[Admin] approve :', e);
+      App.toast('❌ Erreur pendant la validation : ' + (e.message || e), 'error');
+    } finally {
+      _unlockActionButton(btn);
     }
-    if (!confirm('Approuver cette demande après vérification des informations ?')) return;
-
-    accounts[idx].status      = 'approved';
-    accounts[idx].approved_at = now();
-    accounts[idx].reviewedAt  = accounts[idx].approved_at;
-    accounts[idx].reviewedBy  = currentAdminUid();
-    DB.saveAccounts(accounts);
-    updateRegistrationRequests(uid, 'approved');
-    const ok = await pushRegistrationCloud(uid, accounts[idx], 'approved');
-    if (!ok) App.toast('⚠️ Enregistré localement, mais Firestore n\'a pas confirmé l\'écriture. Vérifiez la connexion et réessayez.', 'error');
-
-    Network?.notify?.({
-      to_role: accounts[idx].role, to_id: accounts[idx].uid, type:'info',
-      subject: '✅ Compte approuvé — MedConnect',
-      body: `Votre compte a été validé par l'administrateur.\nVous pouvez maintenant vous connecter.\n\n📞 +243 856 373 707`,
-    });
-    App.toast(`✅ Compte approuvé — ${accounts[idx].name || accounts[idx].fullName || accounts[idx].email || accounts[idx].uid}`);
-    App.closeModal?.();
-    App.navigateTo('dashboard');
   }
 
-  async function reject(uid) {
-    if (!confirm('Refuser cette demande après vérification ?')) return;
-    const accounts = getAccountsSafe();
-    const idx = accounts.findIndex(a => a.uid === uid);
-    if (idx === -1) { App.toast('❌ Compte introuvable pour cette demande.', 'error'); return; }
-    accounts[idx].status      = 'rejected';
-    accounts[idx].rejected_at = now();
-    accounts[idx].reviewedAt  = accounts[idx].rejected_at;
-    accounts[idx].reviewedBy  = currentAdminUid();
-    DB.saveAccounts(accounts);
-    updateRegistrationRequests(uid, 'rejected');
-    const ok = await pushRegistrationCloud(uid, accounts[idx], 'rejected');
-    if (!ok) App.toast('⚠️ Enregistré localement, mais Firestore n\'a pas confirmé l\'écriture. Vérifiez la connexion et réessayez.', 'error');
+  async function reject(uid, event) {
+    const btn = _lockActionButton(event, '⏳ Refus en cours…');
+    if (btn === 'locked') return;
+    try {
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        App.toast('Connexion internet requise pour refuser ce compte.', 'error');
+        return;
+      }
+      if (!confirm('Refuser cette demande après vérification ?')) return;
+      const accounts = getAccountsSafe();
+      const idx = accounts.findIndex(a => a.uid === uid);
+      if (idx === -1) { App.toast('❌ Compte introuvable pour cette demande.', 'error'); return; }
+      const acc = accounts[idx];
+      const reviewedAt = now();
+      const nextAccount = {
+        ...acc, status: 'rejected', rejected_at: reviewedAt,
+        reviewedAt, reviewedBy: currentAdminUid(),
+      };
 
-    Network?.notify?.({
-      to_role: accounts[idx].role, to_id: accounts[idx].uid, type:'info',
-      subject: '❌ Demande rejetée — MedConnect',
-      body: `Votre demande d'inscription a été rejetée.\nContactez l'administrateur : +243 856 373 707`,
-    });
-    App.toast('❌ Demande rejetée');
-    App.closeModal?.();
-    App.navigateTo('dashboard');
+      const result = await pushRegistrationCloudDetailed(uid, nextAccount, 'rejected');
+      if (!result.ok) {
+        App.toast('❌ Le refus n\'a pas été confirmé par Firestore. Vérifiez votre connexion puis réessayez.', 'error');
+        return;
+      }
+
+      accounts[idx] = nextAccount;
+      DB.saveAccounts(accounts);
+      updateRegistrationRequests(uid, 'rejected');
+
+      Network?.notify?.({
+        to_role: nextAccount.role, to_id: nextAccount.uid, type:'info',
+        subject: '❌ Demande rejetée — MedConnect',
+        body: `Votre demande d'inscription a été rejetée.\nContactez l'administrateur : +243 856 373 707`,
+      });
+      App.toast('❌ Demande rejetée');
+      App.closeModal?.();
+      App.navigateTo('dashboard');
+    } catch (e) {
+      console.error('[Admin] reject :', e);
+      App.toast('❌ Erreur pendant le refus : ' + (e.message || e), 'error');
+    } finally {
+      _unlockActionButton(btn);
+    }
   }
 
-  async function suspend(uid) {
-    if (!uid || !confirm('Suspendre cet utilisateur ?')) return;
-    const accounts = getAccountsSafe();
-    const idx = accounts.findIndex(a => a.uid === uid);
-    if (idx === -1) return;
-    accounts[idx].status = 'suspended';
-    accounts[idx].suspended_at = now();
-    DB.saveAccounts(accounts);
-    // Correctif (audit) : contrairement à approve()/reject(), le résultat
-    // de l'écriture critique n'était jusqu'ici ni attendu ni vérifié —
-    // un échec silencieux laissait l'admin croire le compte suspendu
-    // alors que users/{uid}.status (celui que lit accountStatusOk() côté
-    // règles) pouvait rester inchangé côté serveur.
-    const ok = await pushRegistrationCloud(uid, accounts[idx], 'suspended');
-    if (!ok) App.toast('⚠️ Enregistré localement, mais Firestore n\'a pas confirmé l\'écriture. Vérifiez la connexion et réessayez.', 'error');
-    App.toast('🚫 Utilisateur suspendu');
+  async function suspend(uid, event) {
+    const btn = _lockActionButton(event, '⏳ Suspension en cours…');
+    if (btn === 'locked') return;
+    try {
+      if (!uid) return;
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        App.toast('Connexion internet requise pour suspendre ce compte.', 'error');
+        return;
+      }
+      if (!confirm('Suspendre cet utilisateur ?')) return;
+      const accounts = getAccountsSafe();
+      const idx = accounts.findIndex(a => a.uid === uid);
+      if (idx === -1) return;
+      const acc = accounts[idx];
+      const nextAccount = { ...acc, status: 'suspended', suspended_at: now() };
+
+      // Correctif (audit) : contrairement à approve()/reject(), le résultat
+      // de l'écriture critique n'était jusqu'ici ni attendu ni vérifié —
+      // un échec silencieux laissait l'admin croire le compte suspendu
+      // alors que users/{uid}.status (celui que lit accountStatusOk() côté
+      // règles) pouvait rester inchangé côté serveur.
+      const result = await pushRegistrationCloudDetailed(uid, nextAccount, 'suspended');
+      if (!result.ok) {
+        App.toast('❌ La suspension n\'a pas été confirmée par Firestore. Vérifiez votre connexion puis réessayez.', 'error');
+        return;
+      }
+
+      accounts[idx] = nextAccount;
+      DB.saveAccounts(accounts);
+      App.toast('🚫 Utilisateur suspendu');
+    } catch (e) {
+      console.error('[Admin] suspend :', e);
+      App.toast('❌ Erreur pendant la suspension : ' + (e.message || e), 'error');
+      return;
+    } finally {
+      _unlockActionButton(btn);
+    }
     App.navigateTo('dashboard');
   }
 
@@ -461,12 +591,27 @@ const AdminModule = (() => {
         <p style="font-size:.82rem;color:var(--text-muted)">☐ Email utilisable pour la connexion</p>
         <p style="font-size:.82rem;color:var(--text-muted)">☐ Rôle demandé cohérent</p>
       </div>
+      ${(() => {
+        // source === 'request' : demande sans AUCUN compte mc_accounts
+        // associé (fantôme) — voir getRegistrationRows(). Ne pas se fier
+        // à a.uid seul : le merge pose uid = requesterUid en repli, donc
+        // presque toujours "vrai" même pour une demande fantôme.
+        const isGhost = a.status === 'pending' && a.source === 'request';
+        return `
+      ${isGhost ? `
+      <div class="auth-register-info" style="margin-top:1rem;border-color:var(--danger)">
+        Cette demande ne possède aucun compte Firebase valide. Elle peut être supprimée, mais elle ne peut pas être approuvée.
+      </div>` : ''}
       <div class="form-actions" style="margin-top:1rem">
-        ${a.status==='pending' ? `
-          <button class="btn btn-ghost btn-sm" style="color:var(--secondary);border-color:rgba(16,185,129,.3)" onclick="AdminModule.approve('${esc(a.uid || a.requesterUid)}')">✅ Approuver cette demande</button>
-          <button class="btn btn-ghost btn-sm" style="color:var(--danger);border-color:rgba(239,68,68,.3)" onclick="AdminModule.reject('${esc(a.uid || a.requesterUid)}')">❌ Refuser cette demande</button>` : ''}
-        <button class="btn btn-ghost" onclick="App.closeModal()">Fermer</button>
-      </div>`);
+        ${a.status === 'pending' ? (
+          isGhost
+            ? `<button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="AdminModule.deleteRequest('${esc(a.requestId || a.requesterUid)}')">🗑️ Supprimer la demande obsolète</button>`
+            : `<button class="btn btn-ghost btn-sm" style="color:var(--secondary);border-color:rgba(16,185,129,.3)" onclick="AdminModule.approve('${esc(a.uid || a.requesterUid)}', event)">✅ Approuver cette demande</button>
+               <button class="btn btn-ghost btn-sm" style="color:var(--danger);border-color:rgba(239,68,68,.3)" onclick="AdminModule.reject('${esc(a.uid || a.requesterUid)}', event)">❌ Refuser cette demande</button>`
+        ) : ''}
+        <button class="btn btn-ghost" onclick="App.closeModal()">${isGhost ? 'Annuler' : 'Fermer'}</button>
+      </div>`;
+      })()}`);
   }
 
   /* ══ DIFFUSION ═══════════════════════════════════════ */

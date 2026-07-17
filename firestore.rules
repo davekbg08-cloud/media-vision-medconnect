@@ -681,19 +681,26 @@ service cloud.firestore {
         hasNoSecretFields(request.resource.data);
       // Correctif (chantier "durcissement sans Cloud Functions") :
       // contrairement à users/doctors/nurses/pharmacies
-      // (safeSelfUserUpdate/status figé sauf isAdmin()), cette règle
-      // n'imposait PAS l'immuabilité du statut — un professionnel dont
-      // les écritures secondaires (users/{uid}, collection de rôle)
-      // échouent (hors-ligne, rôle lab/reception sans collection
+      // (safeSelfUserUpdate/status ET rôle figés sauf isAdmin()), cette
+      // règle n'imposait PAS l'immuabilité du statut — un professionnel
+      // dont les écritures secondaires (users/{uid}, collection de
+      // rôle) échouent (hors-ligne, rôle lab/reception sans collection
       // dédiée) pouvait, dans ce cas précis, forger lui-même
       // mc_accounts.status = 'approved'. Même contrainte que les
-      // autres collections de compte : status figé sauf isAdmin().
+      // autres collections de compte : status ET role figés sauf isAdmin().
+      // Correctif (chantier lab/reception, spec §11 point 50) : le rôle
+      // seul n'était pas encore protégé ici (contrairement à
+      // safeSelfUserUpdate, qui gèle déjà request.resource.data.role) —
+      // un compte lab/reception approuvé aurait pu changer son propre
+      // rôle (ex. vers 'doctor') sans jamais toucher au statut.
       allow update: if hasNoSecretFields(request.resource.data) && (
         isAdmin() ||
         ((signedIn() && request.auth.uid == docId) &&
-         request.resource.data.get('status', null) == resource.data.get('status', null)) ||
+         request.resource.data.get('status', null) == resource.data.get('status', null) &&
+         request.resource.data.get('role', null) == resource.data.get('role', null)) ||
         ((signedIn() && resource.data.get('authUid', null) == request.auth.uid) &&
-         request.resource.data.get('status', null) == resource.data.get('status', null))
+         request.resource.data.get('status', null) == resource.data.get('status', null) &&
+         request.resource.data.get('role', null) == resource.data.get('role', null))
       );
       // Correctif (chantier "suppression de compte") : le propriétaire
       // peut supprimer son propre document mc_accounts — cas pro
