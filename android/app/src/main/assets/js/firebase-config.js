@@ -47,9 +47,22 @@ function activateAppCheck() {
   }
 }
 
+/* ── Attente de la restauration Firebase Auth ──────────────
+   Au chargement, firebaseAuth.currentUser est synchroniquement null
+   jusqu'à ce que le SDK ait fini de restaurer une session persistée
+   (bref délai asynchrone). Sans l'attendre, tout code qui lit
+   firebaseAuth.currentUser juste après l'init (ex. restauration d'une
+   session desktop hôpital, voir hospital-desktop-ui.js) voit toujours
+   "personne connecté", même quand une session valide existe — d'où le
+   correctif : exposer une promesse résolue une seule fois, dès le
+   premier appel de onAuthStateChanged (utilisateur ou null). */
+let _resolveFirebaseAuthReady;
+window.firebaseAuthReadyPromise = new Promise(resolve => { _resolveFirebaseAuthReady = resolve; });
+
 function initFirebase() {
   try {
     if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
+      _resolveFirebaseAuthReady();
       return;
     }
 
@@ -63,8 +76,21 @@ function initFirebase() {
     firebaseDB.enablePersistence({ synchronizeTabs: true })
       .catch(() => {});
 
+    if (firebaseAuth && typeof firebaseAuth.onAuthStateChanged === 'function') {
+      let settled = false;
+      const unsubscribe = firebaseAuth.onAuthStateChanged(() => {
+        if (settled) return;
+        settled = true;
+        try { unsubscribe(); } catch (_) {}
+        _resolveFirebaseAuthReady();
+      });
+    } else {
+      _resolveFirebaseAuthReady();
+    }
+
   } catch (err) {
     firebaseReady = false;
+    _resolveFirebaseAuthReady();
   }
 }
 

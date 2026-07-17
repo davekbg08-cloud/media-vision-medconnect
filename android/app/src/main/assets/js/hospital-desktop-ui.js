@@ -11,11 +11,18 @@
    - un bouton « Retour à l'application » qui démonte l'overlay
      sans toucher à l'état du shell principal.
 
-   Routes desktop natives : dashboard, beds, lab, ai,
-   subscription. Les sections déjà couvertes par l'app
-   (patients, consultations, médecins, pharmacie, paramètres)
-   renvoient vers l'écran existant — on réutilise, on ne
-   duplique pas.
+   Routes desktop natives : dashboard, beds, lab, ai, subscription,
+   patients, records, reception, emergency, maternity, consultations,
+   prescriptions, settings, pharmacy, doctors — TOUTES les entrées du
+   menu (HospitalPermissions.visibleMenuFor) sont rendues nativement
+   dans #hospital-content. APP_SECTIONS (délégation à l'app mobile) ne
+   sert plus qu'au mode hybride réel : un utilisateur mobile connecté
+   qui ouvre EN PLUS l'espace hôpital depuis la sidebar principale
+   (voir open(), par opposition à openForSession() — la session
+   HospitalAuth pure). Correctif (audit) : fermer hospital-desktop-root
+   pour appeler App.navigateTo() ne faisait RIEN de visible en session
+   HospitalAuth pure, l'app-layout mobile restant caché
+   (display:none) — d'où les sections "qui ne s'affichent pas".
 
    Lanceur : auto-installé dans la sidebar principale,
    uniquement sur desktop (produit sous abonnement) et pour
@@ -26,27 +33,32 @@ const HospitalDesktopUI = (() => {
 
   const ROOT_ID = 'hospital-desktop-root';
   const STAFF_ROLES = ['admin', 'doctor', 'nurse', 'pharmacist'];
-  // Routes rendues nativement dans le shell desktop.
+  // Routes rendues nativement dans le shell desktop — TOUTES les
+  // entrées possibles du menu (voir HospitalPermissions.visibleMenuFor)
+  // ont un renderer ici, jamais un retour silencieux (voir navigate()).
   const NATIVE_ROUTES = {
-    dashboard:    (c) => renderDashboard(c),
-    beds:         (c) => HospitalBedsModule.render(c),
-    lab:          (c) => HospitalLabModule.render(c),
-    ai:           (c) => MedicalAIModule.render(c),
-    subscription: (c) => HospitalSubscriptionModule.render(c),
-    patients:     (c) => renderPatientsByYear(c),
-    records:      (c) => window.MedicalRecordDesktop?.render(c),
-    reception:    (c) => HospitalReceptionModule.render(c),
-    emergency:    (c) => HospitalEmergencyModule.render(c),
-    maternity:    (c) => HospitalMaternityModule.render(c),
+    dashboard:     (c) => renderDashboard(c),
+    beds:          (c) => HospitalBedsModule.render(c),
+    lab:           (c) => HospitalLabModule.render(c),
+    ai:            (c) => MedicalAIModule.render(c),
+    subscription:  (c) => HospitalSubscriptionModule.render(c),
+    patients:      (c) => renderPatientsByYear(c),
+    records:       (c) => window.MedicalRecordDesktop?.render(c),
+    reception:     (c) => HospitalReceptionModule.render(c),
+    emergency:     (c) => HospitalEmergencyModule.render(c),
+    maternity:     (c) => HospitalMaternityModule.render(c),
+    consultations: (c) => window.HospitalPortal?.renderConsultations?.(c),
+    prescriptions: (c) => window.HospitalPortal?.renderPrescriptions?.(c),
+    settings:      (c) => window.Settings?.render?.(c),
+    pharmacy:      (c) => window.PharmacyPortal?.renderInto?.(c, 'dashboard'),
+    doctors:       (c) => renderAffiliatedStaff(c),
   };
-  // Routes encore déléguées à l'app mobile SI elle coexiste (cas d'un
-  // usage hybride). En connexion desktop pure (session hôpital), ces
-  // sections seront progressivement rendues nativement.
-  const APP_SECTIONS = {
-    consultations: 'consultations',
-    doctors: 'hospitals',
-    settings: 'settings',
-  };
+  // Mode hybride réel uniquement (voir open(), pas openForSession()) :
+  // un utilisateur mobile qui ouvre EN PLUS l'espace hôpital retrouve
+  // ces sections dans l'app mobile plutôt que de les dupliquer ici.
+  // Vide par défaut désormais que toutes les routes ont un équivalent
+  // natif — conservé pour extension future si besoin.
+  const APP_SECTIONS = {};
 
   let _current = 'dashboard';
   let _sessionRole = null;
@@ -55,15 +67,40 @@ const HospitalDesktopUI = (() => {
 
   /* Ouverture depuis une session HOSPITALIÈRE (connexion desktop par
      matricule). Le rôle vient de la session hôpital, pas d'un compte
-     mobile — c'est l'entrée normale du produit desktop. */
-  function openForSession(session) {
+     mobile — c'est l'entrée normale du produit desktop.
+
+     Correctif (audit) : revérifie systématiquement la cohérence de la
+     session (Firebase Auth confirmé + affiliation toujours valide)
+     AVANT d'ouvrir quoi que ce soit — y compris juste après un login
+     réussi (coût négligeable, protection uniforme) — pour ne jamais
+     rouvrir un tableau de bord sur la seule foi du cache local. */
+  async function openForSession(session) {
     try {
       if (!session?.establishmentId) { HospitalAuth?.renderScreen?.(); return; }
-      // Synthétise l'identité minimale attendue par le reste du shell.
+
+      const consistent = window.HospitalAuth?.isSessionConsistent
+        ? await window.HospitalAuth.isSessionConsistent(session)
+        : false;
+      if (!consistent) {
+        await window.HospitalAuth?.invalidateSession?.();
+        window.HospitalAuth?.renderScreen?.();
+        return;
+      }
+
+      // Identité RÉELLE de l'agent connecté — jamais un id synthétique
+      // 'hospital_'+establishmentId (audit : "identité affichée"). La
+      // session hôpital ne fournit plus que le contexte établissement/rôle.
+      const fbUser = (typeof firebaseAuth !== 'undefined' && firebaseAuth) ? firebaseAuth.currentUser : null;
+      const authUser = window.Auth?.getUser?.();
       _sessionRole = session.role || 'reception';
       const hospital = window.HospitalsRegistry?.getHospitalById?.(session.establishmentId)
         || { establishmentId: session.establishmentId, name: session.establishmentName, officialId: session.officialId };
-      const agent = { uid: 'hospital_' + session.establishmentId, role: _sessionRole, name: roleName(_sessionRole) };
+      const agent = {
+        uid: authUser?.uid || fbUser?.uid || session.agentUid,
+        role: _sessionRole,
+        name: authUser?.name || session.agentName || roleName(_sessionRole),
+        professionalNumber: authUser?.professionalNumber || session.professionalNumber || '',
+      };
 
       if (isOpen()) { navigate(_current); return; }
       const root = document.createElement('div');
@@ -71,11 +108,46 @@ const HospitalDesktopUI = (() => {
       root.innerHTML = buildShell(agent, hospital);
       document.body.appendChild(root);
       document.body.classList.add('hospital-desktop-open');
+      startInactivityWatch();
       navigate('dashboard');
     } catch (e) {
       console.error('[HospitalDesktopUI] openForSession :', e);
       App.toast(e.message || "Impossible d'ouvrir l'espace hôpital.", 'error');
     }
+  }
+
+  /* ── Verrou d'inactivité (poste hospitalier partagé) ──
+     Réinitialisé à chaque interaction ; jamais déclenché s'il existe
+     une écriture encore en file (DB.outboxCount() > 0) — on ne coupe
+     jamais une session pendant une écriture médicale en cours. Durée
+     documentée dans HospitalAuth.INACTIVITY_TIMEOUT_MS. */
+  let _inactivityTimer = null;
+  let _lastActivityAt = Date.now();
+  const INACTIVITY_CHECK_INTERVAL_MS = 30 * 1000;
+
+  function _markActivity() { _lastActivityAt = Date.now(); }
+
+  function startInactivityWatch() {
+    if (_inactivityTimer) return;
+    ['click', 'keydown', 'pointerdown'].forEach(evt =>
+      document.addEventListener(evt, _markActivity, { passive: true }));
+    _lastActivityAt = Date.now();
+    _inactivityTimer = setInterval(() => {
+      if (!isOpen()) { stopInactivityWatch(); return; }
+      const timeout = window.HospitalAuth?.INACTIVITY_TIMEOUT_MS || (30 * 60 * 1000);
+      if ((Date.now() - _lastActivityAt) < timeout) return;
+      const pendingWrites = window.DB?.outboxCount?.() || 0;
+      if (pendingWrites > 0) return; // écriture médicale en cours : on réessaiera au prochain contrôle
+      stopInactivityWatch();
+      App.toast?.('🔒 Session verrouillée après inactivité — reconnectez-vous.', 'warning');
+      logoutSession();
+    }, INACTIVITY_CHECK_INTERVAL_MS);
+  }
+
+  function stopInactivityWatch() {
+    if (_inactivityTimer) { clearInterval(_inactivityTimer); _inactivityTimer = null; }
+    ['click', 'keydown', 'pointerdown'].forEach(evt =>
+      document.removeEventListener(evt, _markActivity));
   }
 
   function roleName(role) {
@@ -110,6 +182,7 @@ const HospitalDesktopUI = (() => {
   }
 
   function close() {
+    stopInactivityWatch();
     document.getElementById(ROOT_ID)?.remove();
     document.body.classList.remove('hospital-desktop-open');
   }
@@ -142,7 +215,7 @@ const HospitalDesktopUI = (() => {
         <header class="hospital-topbar">
           <div id="hospital-topbar-title">Tableau de bord</div>
           <div class="hospital-topbar-user">
-            ${esc(HospitalPermissions.roleLabel(user.role))} · <span style="opacity:.7">${esc(accessLevel)}</span>
+            <strong>${esc(user.name || 'Agent')}</strong> · ${esc(HospitalPermissions.roleLabel(user.role))} · <span style="opacity:.7">${esc(accessLevel)}</span>
           </div>
         </header>
         <div class="hospital-content" id="hospital-content"></div>
@@ -153,16 +226,13 @@ const HospitalDesktopUI = (() => {
   async function navigate(route) {
     if (!isOpen()) return;
 
-    // Sections déjà couvertes par l'app : on ferme l'espace hôpital
-    // et on route dans le shell principal (réutilisation, pas de doublon).
+    // Mode hybride réel uniquement (voir open()) : sections encore
+    // déléguées à l'app mobile. Vide en session HospitalAuth pure.
     if (APP_SECTIONS[route]) {
       close();
       App.navigateTo(APP_SECTIONS[route]);
       return;
     }
-
-    const renderer = NATIVE_ROUTES[route];
-    if (!renderer) return;
 
     _current = route;
     document.querySelectorAll('.hospital-nav-item').forEach(el =>
@@ -175,6 +245,18 @@ const HospitalDesktopUI = (() => {
 
     const content = document.getElementById('hospital-content');
     content.innerHTML = '<div class="loading">⏳</div>';
+
+    const renderer = NATIVE_ROUTES[route];
+    if (!renderer) {
+      // Correctif (audit) : un retour silencieux laissait l'écran
+      // précédent affiché sans aucun indice qu'un clic venait d'échouer
+      // ("aucun bouton du menu ne reste sans réaction"). Le shell
+      // desktop reste toujours visible, avec une erreur explicite.
+      console.error(`[HospitalDesktopUI] Aucun renderer pour la route "${route}"`);
+      content.innerHTML = `<div class="card empty-state"><p>⚠️ Section « ${esc(entry?.label || route)} » indisponible pour le moment.</p></div>`;
+      return;
+    }
+
     try {
       await renderer(content);
     } catch (e) {
@@ -322,7 +404,93 @@ const HospitalDesktopUI = (() => {
     `;
   }
 
-  return { open, openForSession, close, navigate, isOpen, logoutSession, requestTransfer };
+  /* ── Écran « Médecins affiliés » (route 'doctors') ──
+     Correctif (audit) : cette route renvoyait vers
+     HospitalsRegistry.renderManagePage() (registre "Mes établissements"
+     de l'app MOBILE, jamais atteignable en session desktop pure), qui
+     de plus affichait — pour un simple médecin — le registre global de
+     TOUS les établissements de la plateforme (renderAdminPage, réservé
+     en principe à l'administrateur plateforme). Ce nouvel écran lit
+     UNIQUEMENT le personnel de l'établissement ACTIF, et réserve les
+     actions administratives (approuver une affiliation, retirer un
+     membre) à admin/admin_hospital. */
+  async function renderAffiliatedStaff(container) {
+    const hospital = await CloudDB.getActiveHospital();
+    const hospitalId = hospital.establishmentId || hospital.id;
+    const role = HospitalPermissions.getCurrentRole();
+    const isAdminHere = ['admin', 'admin_hospital'].includes(role);
+
+    const staff = (Array.isArray(hospital.staff) ? hospital.staff : [])
+      .filter(s => s.status === 'active' || s.status === 'approved');
+    const pending = isAdminHere ? (window.HospitalsRegistry?.getPendingAffiliations?.(hospitalId) || []) : [];
+
+    container.innerHTML = `
+      <div class="hospital-page-header">
+        <div><h1>👨‍⚕️ Médecins affiliés</h1><p>${esc(hospital.name || 'Établissement')} · ${staff.length} membre(s) actif(s)</p></div>
+      </div>
+
+      ${isAdminHere && pending.length ? `
+      <div class="card">
+        <h3>⏳ Demandes d'affiliation en attente (${pending.length})</h3>
+        <div class="records-list">
+          ${pending.map(a => `
+            <div class="record-card">
+              <p><strong>${esc(a.requesterName || a.requesterUid || '—')}</strong> · ${esc(HospitalPermissions.roleLabel(a.requesterRole))}</p>
+              <p class="muted">N° ${esc(a.professionalNumber || '—')}</p>
+              <div style="display:flex;gap:.4rem;margin-top:.4rem">
+                <button class="btn btn-primary btn-sm" onclick="HospitalDesktopUI.respondAffiliationDesktop('${esc(a.requestId || a.afid || '')}', true)">✅ Approuver</button>
+                <button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="HospitalDesktopUI.respondAffiliationDesktop('${esc(a.requestId || a.afid || '')}', false)">❌ Refuser</button>
+              </div>
+            </div>`).join('')}
+        </div>
+      </div>` : ''}
+
+      <div class="card">
+        <h3>Personnel affilié</h3>
+        ${!staff.length ? `<p class="muted">Aucun membre affilié pour le moment.</p>` : `
+        <div class="records-list">
+          ${staff.map(s => `
+            <div class="record-card">
+              <p><strong>${esc(s.name || s.uid || '—')}</strong> · ${esc(HospitalPermissions.roleLabel(s.role))}</p>
+              <p class="muted">N° ${esc(s.professionalNumber || '—')} · Statut : ${esc(s.status || '—')}</p>
+              ${isAdminHere ? `<button class="btn btn-ghost btn-sm" style="color:var(--danger);margin-top:.4rem" onclick="HospitalDesktopUI.removeAffiliatedStaff('${esc(hospitalId)}', '${esc(s.uid)}')">🗑️ Retirer l'affiliation</button>` : ''}
+            </div>`).join('')}
+        </div>`}
+      </div>
+    `;
+  }
+
+  /* Wrappers desktop autour de HospitalsRegistry (dont le rafraîchissement
+     interne cible #main-content, invisible ici) : rejouent l'action puis
+     réaffichent explicitement 'doctors' dans le container desktop réel. */
+  function respondAffiliationDesktop(requestId, approved) {
+    window.HospitalsRegistry?.respondAffiliation?.(requestId, approved);
+    navigate('doctors');
+  }
+  function removeAffiliatedStaff(establishmentId, uid) {
+    window.HospitalsRegistry?.removeStaff?.(establishmentId, uid);
+    navigate('doctors');
+  }
+
+  return {
+    open, openForSession, close, navigate, isOpen, logoutSession, requestTransfer,
+    respondAffiliationDesktop, removeAffiliatedStaff,
+  };
 })();
+
+/* Helper de navigation partagé (desktop + mobile) — évite que les
+   modules communs (HospitalPortal, PharmacyPortal, HospitalsRegistry...)
+   appellent toujours App.navigateTo(), qui suppose que l'app-layout
+   mobile est visible et initialisé (jamais le cas en session
+   HospitalAuth pure desktop, voir audit "sections qui ne s'affichent
+   pas"). Route vers le shell desktop s'il est ouvert, sinon vers l'app
+   mobile comme avant — comportement inchangé hors contexte desktop. */
+function navigateMedConnect(section) {
+  if (window.HospitalDesktopUI?.isOpen?.()) {
+    return HospitalDesktopUI.navigate(section);
+  }
+  return window.App?.navigateTo?.(section);
+}
+window.navigateMedConnect = navigateMedConnect;
 
 window.HospitalDesktopUI = HospitalDesktopUI;

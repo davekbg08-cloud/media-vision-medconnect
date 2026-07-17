@@ -1000,46 +1000,97 @@ const Auth = (() => {
   function getRoleLabel(r) { return LABELS[r] || r; }
 
   /* Authentifie un professionnel SANS démarrer le shell mobile.
-     Utilisé par la connexion agent desktop : retourne le compte
-     (avec uid Firebase réel) ou null. Gère aussi lab/reception,
-     qui n'ont pas de registre dédié : on résout alors via users/
-     mc_accounts par matricule + rôle. */
+     Utilisé par la connexion agent desktop : retourne un compte de
+     session NORMALISÉ (avec uid = authUid = vrai uid Firebase Auth de
+     l'agent) ou null. Gère aussi lab/reception, qui n'ont pas de
+     registre dédié : on résout alors via users/mc_accounts par
+     matricule + rôle.
+
+     Correctif (audit) : cette fonction authentifiait bien le
+     professionnel mais ne sauvegardait JAMAIS sessionStorage.mc_user —
+     seul _upsertAccount() (registre local des comptes) était appelé,
+     jamais _save() (session courante). HospitalAuth.enter() ne
+     sauvegarde de son côté que mc_hospital_session : sans mc_user,
+     CloudDB.requireAuth() → Auth.getUser() ne trouvait personne et
+     affichait "Session expirée — reconnectez-vous" dès le premier
+     appel cloud (ex. IA médicale) après une connexion desktop
+     pourtant réussie. */
   async function loginProfessionalSilently(role, num, pass) {
     try {
-      // doctor/nurse/pharmacist : chemin existant (registres + auth).
+      let account = null;
       if (['doctor', 'nurse', 'pharmacist'].includes(role)) {
-        return await _restoreProfessional(role, num, pass);
-      }
-      // lab/reception : résolution directe par users/mc_accounts.
-      if (!_hasFirebaseDB()) return null;
-      const N = String(num || '').toUpperCase();
-      let data = null;
-      for (const col of ['users', 'mc_accounts']) {
-        for (const field of ['matricule', 'order_num', 'username']) {
-          const snap = await firebaseDB.collection(col)
-            .where('role', '==', role).where(field, '==', N).limit(1).get();
-          if (!snap.empty) { data = { id: snap.docs[0].id, ...snap.docs[0].data() }; break; }
+        // doctor/nurse/pharmacist : chemin existant (registres + auth).
+        account = await _restoreProfessional(role, num, pass);
+      } else {
+        // lab/reception : résolution directe par users/mc_accounts.
+        if (!_hasFirebaseDB()) return null;
+        const N = String(num || '').toUpperCase();
+        let data = null;
+        for (const col of ['users', 'mc_accounts']) {
+          for (const field of ['matricule', 'order_num', 'username']) {
+            const snap = await firebaseDB.collection(col)
+              .where('role', '==', role).where(field, '==', N).limit(1).get();
+            if (!snap.empty) { data = { id: snap.docs[0].id, ...snap.docs[0].data() }; break; }
+          }
+          if (data) break;
         }
-        if (data) break;
+        if (!data) return null;
+        // Correctif (audit) : contrairement à doctor/nurse/pharmacist
+        // (_restoreProfessional, qui appelle handleAccountStatusBeforeAuth
+        // AVANT tout signInWithEmailAndPassword), ce chemin lab/reception
+        // ne vérifiait jamais le statut du compte — un compte rejeté ou
+        // suspendu par l'admin (voir js/admin.js reject()/suspend(), qui
+        // ne peuvent que changer le statut Firestore, jamais désactiver le
+        // compte Firebase Auth lui-même : aucun Admin SDK sur ce projet,
+        // plan Spark) pouvait donc continuer à se connecter normalement.
+        if (!handleAccountStatusBeforeAuth(data, role, num)) return null;
+        if (data.email && _hasFirebaseAuth()) {
+          const cred = await firebaseAuth.signInWithEmailAndPassword(data.email, pass);
+          data.uid = cred?.user?.uid || data.uid;
+          data.authUid = data.uid;
+        } else if (data.password && data.password !== pass) {
+          return null;
+        }
+        account = _upsertAccount(data);
       }
-      if (!data) return null;
-      // Correctif (audit) : contrairement à doctor/nurse/pharmacist
-      // (_restoreProfessional, qui appelle handleAccountStatusBeforeAuth
-      // AVANT tout signInWithEmailAndPassword), ce chemin lab/reception
-      // ne vérifiait jamais le statut du compte — un compte rejeté ou
-      // suspendu par l'admin (voir js/admin.js reject()/suspend(), qui
-      // ne peuvent que changer le statut Firestore, jamais désactiver le
-      // compte Firebase Auth lui-même : aucun Admin SDK sur ce projet,
-      // plan Spark) pouvait donc continuer à se connecter normalement.
-      if (!handleAccountStatusBeforeAuth(data, role, num)) return null;
-      if (data.email && _hasFirebaseAuth()) {
-        const cred = await firebaseAuth.signInWithEmailAndPassword(data.email, pass);
-        data.uid = cred?.user?.uid || data.uid;
-        data.authUid = data.uid;
-      } else if (data.password && data.password !== pass) {
-        return null;
-      }
-      return _upsertAccount(data);
+      if (!account) return null;
+
+      // Correctif (audit) : ni ce chemin ni _restoreProfessional ne
+      // refusaient un compte SANS email ET SANS mot de passe local — un
+      // tel compte passait alors les deux branches de vérification sans
+      // qu'aucun mot de passe n'ait jamais été comparé à quoi que ce
+      // soit. On refuse explicitement : une session ne peut être ouverte
+      // que si une vérification a réellement eu lieu.
+      if (!account.email && account.password === undefined) return null;
+
+      // Une session desktop n'est valide QUE si Firebase Auth a confirmé
+      // une identité réelle — jamais un id local/synthétique. account.authUid
+      // est posé (ci-dessus, dans _restoreProfessional ou la branche
+      // lab/reception) uniquement par un signInWithEmailAndPassword
+      // effectivement réussi : un compte hérité sans email (mot de passe
+      // en clair, jamais migré vers Firebase Auth) n'a par définition
+      // aucune identité Firebase à confirmer — on refuse plutôt que
+      // d'ouvrir une session non vérifiable côté serveur.
+      const authUid = account.authUid || null;
+      if (!authUid) return null;
+
+      const sessionAccount = {
+        ...account,
+        uid: authUid,
+        authUid,
+        role: account.role || role,
+        name: account.name || '',
+        email: account.email || '',
+        status: account.status || 'approved',
+        username: account.username || num,
+        professionalNumber: num,
+      };
+      if (role === 'doctor') sessionAccount.order_num = account.order_num || num;
+      else sessionAccount.matricule = account.matricule || num;
+
+      _upsertAccount(sessionAccount);
+      _save(sessionAccount);
+      return sessionAccount;
     } catch (e) {
       console.warn('[MedConnect] loginProfessionalSilently :', e?.code || e?.message);
       return null;

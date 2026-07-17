@@ -12,7 +12,23 @@ const Settings = (() => {
     { code:'FR', flag:'🇫🇷', name:'France' },
   ];
 
+  // Correctif (audit) : plusieurs actions internes (thème, consentements,
+  // registres admin, localisation pharmacien) rappelaient en dur
+  // Settings.render(document.getElementById('main-content')) — jamais
+  // visible en session desktop pure (rendu dans #hospital-content, pas
+  // #main-content). currentContainer mémorise le container RÉEL reçu par
+  // le dernier render(), quel qu'il soit ; refresh() s'en sert pour se
+  // rafraîchir sans dépendre d'un id figé.
+  let currentContainer = null;
+
+  function refresh() {
+    if (currentContainer && document.body.contains(currentContainer)) {
+      render(currentContainer);
+    }
+  }
+
   function render(main) {
+    currentContainer = main;
     const user     = Auth.getUser();
     const settings = DB.getSettings();
     const curCode  = Currency.current();
@@ -48,11 +64,11 @@ const Settings = (() => {
         <p class="settings-desc">Apparence de l'application.</p>
         <div style="display:flex;gap:.75rem">
           <button class="theme-btn ${!document.body.classList.contains('light-theme')?'active':''}"
-                  onclick="App.toggleTheme();Settings.render(document.getElementById('main-content'))">
+                  onclick="App.toggleTheme();Settings.refresh()">
             🌙 Sombre
           </button>
           <button class="theme-btn ${document.body.classList.contains('light-theme')?'active':''}"
-                  onclick="App.toggleTheme();Settings.render(document.getElementById('main-content'))">
+                  onclick="App.toggleTheme();Settings.refresh()">
             ☀️ Clair
           </button>
         </div>
@@ -195,7 +211,7 @@ const Settings = (() => {
 
       updateSessionUser(patch);
       App.toast('✅ Localisation de la pharmacie enregistrée.');
-      Settings.render(document.getElementById('main-content'));
+      Settings.refresh();
     }, err => {
       const msg = err.code === err.PERMISSION_DENIED
         ? 'Permission GPS refusée.'
@@ -237,11 +253,11 @@ const Settings = (() => {
                 </div>
                 <div style="display:flex;gap:.4rem;margin-top:.5rem">
                   <button class="btn btn-ghost btn-xs" style="color:var(--secondary)"
-                    onclick="ACL.respondConsent('${c.cid}',true);Settings.render(document.getElementById('main-content'))">
+                    onclick="ACL.respondConsent('${c.cid}',true);Settings.refresh()">
                     ✅ Autoriser
                   </button>
                   <button class="btn btn-ghost btn-xs" style="color:var(--danger)"
-                    onclick="ACL.respondConsent('${c.cid}',false);Settings.render(document.getElementById('main-content'))">
+                    onclick="ACL.respondConsent('${c.cid}',false);Settings.refresh()">
                     ❌ Refuser
                   </button>
                 </div>
@@ -257,7 +273,7 @@ const Settings = (() => {
                 <small style="color:var(--text-muted)"> · expire le ${c.expires_at||'—'}</small>
               </div>
               <button class="btn btn-ghost btn-xs" style="color:var(--danger);margin-top:.4rem"
-                onclick="ACL.revokeConsent('${c.cid}');Settings.render(document.getElementById('main-content'))">
+                onclick="ACL.revokeConsent('${c.cid}');Settings.refresh()">
                 🚫 Révoquer l'accès
               </button>
             </div>`).join('')}` : ''}
@@ -291,7 +307,7 @@ const Settings = (() => {
                 <small style="color:var(--text-muted)">${esc(d.specialty)} · ${d.country}</small>
               </div>
               <button class="btn btn-ghost btn-xs" style="color:var(--danger)"
-                onclick="ACL.removeVerifiedDoctor('${d.order_num}');Settings.render(document.getElementById('main-content'))">🗑️</button>
+                onclick="ACL.removeVerifiedDoctor('${d.order_num}');Settings.refresh()">🗑️</button>
             </div>`).join('')}
         </div>
 
@@ -309,7 +325,7 @@ const Settings = (() => {
                 <small style="color:var(--text-muted)">${esc(p.pharmacy)} · ${p.country}</small>
               </div>
               <button class="btn btn-ghost btn-xs" style="color:var(--danger)"
-                onclick="ACL.removeVerifiedPharmacist('${p.matricule}');Settings.render(document.getElementById('main-content'))">🗑️</button>
+                onclick="ACL.removeVerifiedPharmacist('${p.matricule}');Settings.refresh()">🗑️</button>
             </div>`).join('')}
         </div>
 
@@ -353,7 +369,7 @@ const Settings = (() => {
     });
     App.closeModal();
     App.toast(ok ? '✅ Médecin ajouté au registre' : '❌ N° déjà enregistré', ok ? 'success' : 'error');
-    Settings.render(document.getElementById('main-content'));
+    Settings.refresh();
   }
 
   function openAddPharmacist() {
@@ -385,10 +401,10 @@ const Settings = (() => {
     });
     App.closeModal();
     App.toast(ok ? '✅ Pharmacien ajouté au registre' : '❌ Matricule déjà enregistré', ok ? 'success' : 'error');
-    Settings.render(document.getElementById('main-content'));
+    Settings.refresh();
   }
 
-  return { render, updatePharmacyLocation, openAddDoctor, saveDoctor, openAddPharmacist, savePharmacist, renderAboutSection };
+  return { render, refresh, updatePharmacyLocation, openAddDoctor, saveDoctor, openAddPharmacist, savePharmacist, renderAboutSection };
 })();
 
 window.Settings = Settings;
