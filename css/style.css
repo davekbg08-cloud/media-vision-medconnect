@@ -1503,3 +1503,17 @@ body.rtl .tl-connector { left: auto; right: -1.1rem; }
 .btn-pressed {
   animation: btn-press-pulse .3s ease-out;
 }
+
+/* ── IA médicale — cartes de résultats adaptées aux grands écrans
+   (desktop) : une colonne sur mobile, plusieurs colonnes en grille
+   dès que la largeur le permet, au lieu d'une longue liste verticale
+   sous-exploitant l'espace disponible. ── */
+.ai-results-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: .65rem;
+}
+@media (min-width: 900px) {
+  .ai-results-grid { grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); }
+}
+.ai-result-card { display: flex; flex-direction: column; }
