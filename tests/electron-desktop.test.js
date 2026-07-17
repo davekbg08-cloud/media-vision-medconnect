@@ -171,6 +171,13 @@ test('le workflow desktop nomme l\'installateur Windows non signé avec le suffi
   assert.match(workflowSrc, /steps\.sign\.outputs\.signed/, 'le nom doit dépendre de la détection réelle de signature (CSC_LINK/CSC_KEY_PASSWORD)');
 });
 
+test('le workflow desktop n\'exporte CSC_LINK/CSC_KEY_PASSWORD à electron-builder QUE s\'ils sont réellement non vides (régression : un secret absent vaut chaîne vide, pas "non défini", et electron-builder tente de résoudre CSC_LINK="" comme un fichier)', () => {
+  const idx = workflowSrc.indexOf('Build Windows installer');
+  const block = workflowSrc.slice(idx, idx + 900);
+  assert.doesNotMatch(block, /^\s*CSC_LINK:\s*\$\{\{\s*secrets\.CSC_LINK\s*\}\}/m, 'CSC_LINK ne doit jamais être assigné inconditionnellement dans un bloc env: (secret absent = chaîne vide, pas absent)');
+  assert.match(block, /if\s*\[\s*-n\s*"\$CSC_LINK_SECRET"\s*\]/, 'CSC_LINK ne doit être exporté que si le secret est non vide');
+});
+
 test('le workflow desktop vérifie le miroir Firebase Hosting AVANT le build (échec clair si indisponible)', () => {
   const idx = workflowSrc.indexOf('verify-hosting:');
   assert.ok(idx !== -1, 'job verify-hosting manquant');
