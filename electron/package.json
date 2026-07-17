@@ -1,6 +1,6 @@
 {
   "name": "medconnect-desktop",
-  "version": "2.9.25",
+  "version": "2.9.26",
   "description": "MedConnect — application de bureau (Windows + Linux)",
   "main": "main.js",
   "homepage": "https://medconnect-e81ba.web.app/",
@@ -33,12 +33,17 @@
       "resources/**/*"
     ],
     "win": {
-      "target": ["nsis"],
+      "target": [
+        "nsis"
+      ],
       "icon": "resources/icon.png",
       "artifactName": "MedConnect-Setup-${version}.${ext}"
     },
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "icon": "resources/icon.png",
       "category": "Office",
       "artifactName": "MedConnect-${version}-${arch}.${ext}"

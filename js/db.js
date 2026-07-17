@@ -140,6 +140,58 @@ const DB = (() => {
     return results.every(Boolean);
   }
 
+  /* ── DÉLAI MAXIMAL POUR LES ÉCRITURES CRITIQUES ────────
+     Réservé aux actions administratives (approbation de compte,
+     approbation d'affiliation…) : sans délai maximal, un bouton
+     "Approuver"/"Refuser" pouvait rester indéfiniment sur "⏳" si
+     Firestore ne répondait jamais (réseau très lent, requête bloquée),
+     sans jamais informer l'administrateur de l'échec. N'affecte PAS
+     les écritures médicales silencieuses habituelles (pushCloud/
+     _push), qui continuent d'alimenter l'outbox sans délai imposé. */
+  async function withTimeout(promise, timeoutMs, label) {
+    let timer;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`${label} : délai dépassé`)), timeoutMs);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** Variante détaillée de pushAndReport(), réservée aux validations
+      administratives critiques (AdminModule.approve/reject/suspend,
+      HospitalsRegistry.respondAffiliation) : contrairement à
+      pushAndReport() (booléen simple, utilisé par des dizaines
+      d'appelants existants — le changer romprait leurs `if (!ok)`),
+      celle-ci renvoie un compte-rendu complet ET applique un délai
+      maximal par écriture, pour qu'un bouton de validation ne reste
+      jamais bloqué indéfiniment sur un réseau qui ne répond jamais. */
+  async function pushAndReportDetailed(entries, options = {}) {
+    const timeoutMs = options.timeoutMs || 15000;
+    const label = options.label || 'Écriture';
+    const succeeded = [];
+    const failed = [];
+    let timedOut = false;
+    let error = null;
+
+    await Promise.all(entries.map(async ([col, id, data]) => {
+      try {
+        const ok = await withTimeout(_pushCritical(col, id, data), timeoutMs, label);
+        if (ok) succeeded.push([col, id]); else failed.push([col, id]);
+      } catch (e) {
+        if (/délai dépassé/.test(e?.message || '')) timedOut = true;
+        error = e;
+        failed.push([col, id]);
+      }
+    }));
+
+    return { ok: failed.length === 0, succeeded, failed, timedOut, error };
+  }
+
   async function _delete(collection, docId) {
     if (!firebaseReady || !firebaseDB) return false;
     try {
@@ -1039,7 +1091,7 @@ const DB = (() => {
   }
 
   return {
-    init, syncFromFirebase, syncFromFirebaseInBackground, setupUserScopedListeners, generatePatientId, makeId, pushAndReport, flushOutbox, outboxCount, getLastSyncAt,
+    init, syncFromFirebase, syncFromFirebaseInBackground, setupUserScopedListeners, generatePatientId, makeId, pushAndReport, pushAndReportDetailed, withTimeout, flushOutbox, outboxCount, getLastSyncAt,
     // pushCloud/deleteCloud : wrappers publics sur _push/_delete, à
     // utiliser par tout module (access_control.js, hospitals_registry.js,
     // affiliation-cleanup.js...) au lieu de réimplémenter un mini-push

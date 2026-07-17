@@ -1,8 +1,18 @@
 {
-  "version": "2.9.25",
-  "build": "2026.07.17.1",
+  "version": "2.9.26",
+  "build": "2026.07.17.2",
   "buildDate": "2026-07-17",
   "changelog": [
+    {
+      "version": "2.9.26",
+      "date": "2026-07-17",
+      "notes": [
+        "Laboratoire/Réception : l'inscription depuis le desktop hôpital exige désormais une identité Firebase réelle de bout en bout — aucun compte n'est plus créé (ni cloud, ni local) si Firebase Authentication échoue ou si Firestore ne confirme pas l'écriture, avec détection des doublons (matricule/email) avant toute création",
+        "Laboratoire/Réception : la demande d'affiliation à l'établissement est désormais créée dès l'inscription (au lieu d'exiger une seconde démarche après validation du compte), et la session est systématiquement nettoyée après l'inscription (jamais de tableau de bord ouvert pour un compte en attente)",
+        "Connexion desktop : messages d'erreur précis selon la cause réelle (compte en attente/refusé/suspendu, affiliation en attente, matricule déjà lié à un autre compte) — un matricule ne peut plus être repris silencieusement par un autre compte",
+        "Administration : les boutons \"Approuver\"/\"Refuser\"/\"Suspendre\" et l'approbation d'affiliation attendent désormais réellement la confirmation Firestore (avec délai maximal) avant d'afficher un succès, se verrouillent contre le double-clic, et ne peuvent plus transformer une demande fantôme (sans compte Firebase) en compte approuvé"
+      ]
+    },
     {
       "version": "2.9.25",
       "date": "2026-07-17",

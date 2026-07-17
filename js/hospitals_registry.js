@@ -286,6 +286,21 @@ const HospitalsRegistry = (() => {
     return a;
   }
 
+  /* Variante confirmée de requestAffiliation() : attend la confirmation
+     Firestore réelle de affiliation_requests avant de résoudre — utilisée
+     à l'inscription lab/reception (js/auth.js _regAgentStrict), où
+     annoncer une affiliation "envoyée" sans confirmation cloud tromperait
+     l'agent (même principe que addHospitalAndConfirm). saveAffiliations()
+     a déjà écrit en local + tenté le cloud en fire-and-forget (pushCloud) ;
+     on réécrit ici la même donnée via pushAndReport pour obtenir un
+     résultat réellement attendu. */
+  async function requestAffiliationAndConfirm(requesterUid, requesterName, establishmentId, options = {}) {
+    const a = requestAffiliation(requesterUid, requesterName, establishmentId, options);
+    if (!a) return { affiliation: null, confirmed: false };
+    const confirmed = await DB.pushAndReport([['affiliation_requests', a.requestId, a]]);
+    return { affiliation: a, confirmed };
+  }
+
   function notifyAffiliationRequest(affiliation) {
     const h = getHospitalById(affiliation.establishmentId);
     if (!window.Network?.notify) return;
@@ -400,53 +415,140 @@ const HospitalsRegistry = (() => {
     DB.saveAccounts(accounts);
   }
 
-  function respondAffiliation(requestId, approved) {
-    const affs = getAffiliations();
-    let idx = affs.findIndex(a => a.requestId === requestId || a.afid === requestId);
-    // Repli : l'ID déterministe encode uid+établissement.
-    if (idx === -1 && String(requestId).startsWith('AFF_')) {
-      const parts = String(requestId).slice(4).split('_');
-      const estId = parts.pop();
-      const uid = parts.join('_');
-      idx = affs.findIndex(a => a.requesterUid === uid && a.establishmentId === estId);
-    }
-    if (idx === -1) {
-      App?.toast?.('Demande introuvable (elle a peut-être déjà été traitée).', 'error');
-      return;
-    }
+  /* ── État visuel du bouton d'affiliation ────────────── */
+  function _lockAffButton(event, label) {
+    const btn = event?.target?.closest ? event.target.closest('button') : (event?.currentTarget || null);
+    if (!btn) return null;
+    if (btn.dataset && btn.dataset.processing === 'true') return 'locked';
+    if (btn.dataset) btn.dataset.processing = 'true';
+    btn.disabled = true;
+    btn._mcOriginalText = btn.textContent;
+    btn.textContent = label;
+    return btn;
+  }
+  function _unlockAffButton(btn) {
+    if (!btn || typeof document === 'undefined' || !document.body) return;
+    if (!document.body.contains(btn)) return;
+    btn.disabled = false;
+    btn.textContent = btn._mcOriginalText != null ? btn._mcOriginalText : btn.textContent;
+    if (btn.dataset) delete btn.dataset.processing;
+  }
 
-    const req = normalizeRequest(affs[idx]);
-    const h = getHospitalById(req.establishmentId);
-    if (!h) { App?.toast?.('Établissement introuvable pour cette demande.', 'error'); return; }
+  /* Transformée en fonction async CONFIRMÉE (correctif) : l'ancienne
+     version annonçait "Affiliation approuvée" et mutait staff/
+     hospitalMembers immédiatement en local, sans jamais attendre la
+     confirmation Firestore — un échec réseau silencieux laissait
+     croire à une approbation qui n'avait jamais atteint le serveur. */
+  async function respondAffiliation(requestId, approved, event) {
+    const btn = _lockAffButton(event, approved ? '⏳ Approbation en cours…' : '⏳ Refus en cours…');
+    if (btn === 'locked') return;
+    try {
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        App?.toast?.('Connexion internet requise pour traiter cette affiliation.', 'error');
+        return;
+      }
 
-    affs[idx] = normalizeRequest({
-      ...req,
-      status: approved ? 'approved' : 'rejected',
-      updatedAt: now(),
-      decided_at: now(),
-    });
-    saveAffiliations(affs);
+      const affs = getAffiliations();
+      let idx = affs.findIndex(a => a.requestId === requestId || a.afid === requestId);
+      // Repli : l'ID déterministe encode uid+établissement.
+      if (idx === -1 && String(requestId).startsWith('AFF_')) {
+        const parts = String(requestId).slice(4).split('_');
+        const estId = parts.pop();
+        const uid = parts.join('_');
+        idx = affs.findIndex(a => a.requesterUid === uid && a.establishmentId === estId);
+      }
+      if (idx === -1) {
+        App?.toast?.('Demande introuvable (elle a peut-être déjà été traitée).', 'error');
+        return;
+      }
 
-    if (approved) {
-      upsertStaffMember(h, affs[idx]);
-      updateUserAffiliation(affs[idx], h, true);
-    }
-    App?.toast?.(approved ? '✅ Affiliation approuvée.' : '❌ Affiliation refusée.');
+      const req = normalizeRequest(affs[idx]);
+      const h = getHospitalById(req.establishmentId);
+      if (!h) { App?.toast?.('Établissement introuvable pour cette demande.', 'error'); return; }
 
-    if (window.Network?.notify) {
-      Network.notify({
-        to_role: affs[idx].requesterRole,
-        to_id: affs[idx].requesterUid,
-        type: 'info',
-        subject: approved
-          ? `✅ Affiliation approuvée — ${h.name || 'Établissement'}`
-          : `❌ Affiliation refusée — ${h.name || 'Établissement'}`,
-        body: approved
-          ? `Votre demande d'affiliation à ${h.name} a été approuvée. Vous pouvez maintenant y accéder.`
-          : `Votre demande d'affiliation à ${h.name} a été refusée par l'administrateur.`,
+      if (approved) {
+        // Le compte professionnel doit être approuvé AVANT toute
+        // affiliation active, et son rôle doit concorder avec la demande
+        // — sinon un compte encore pending (ou dont le rôle a changé)
+        // pourrait obtenir un accès actif à un établissement.
+        const account = (DB.getAccounts() || []).find(a => a.uid === req.requesterUid);
+        const accStatus = String(account?.status || '').toLowerCase();
+        if (!account || !['approved', 'active'].includes(accStatus)) {
+          App?.toast?.('Le compte professionnel doit d\'abord être approuvé par l\'administration MedConnect.', 'error');
+          return;
+        }
+        if (account.role !== req.requesterRole) {
+          App?.toast?.('Le rôle du compte ne correspond pas à la demande d\'affiliation.', 'error');
+          return;
+        }
+      }
+
+      const nextReq = normalizeRequest({
+        ...req,
+        status: approved ? 'approved' : 'rejected',
+        updatedAt: now(),
+        decided_at: now(),
       });
+
+      const writes = [['affiliation_requests', nextReq.requestId, nextReq]];
+      let staffAfter = null;
+      if (approved) {
+        const staff = Array.isArray(h.staff) ? h.staff.slice() : [];
+        const sidx = staff.findIndex(s => s.uid === req.requesterUid);
+        const member = {
+          uid: req.requesterUid, name: req.requesterName, role: req.requesterRole,
+          professionalNumber: req.professionalNumber, establishmentId: h.establishmentId,
+          establishmentName: h.name, status: 'active',
+          linkedAt: sidx === -1 ? now() : (staff[sidx].linkedAt || now()), updatedAt: now(),
+        };
+        if (sidx === -1) staff.push(member); else staff[sidx] = { ...staff[sidx], ...member };
+        staffAfter = staff;
+        const nextEst = normalizeEstablishment({ ...h, staff, updatedAt: now() });
+        writes.push(['establishments', h.establishmentId, nextEst]);
+        writes.push(['hospitals', h.establishmentId, nextEst]);
+        writes.push(['mc_hospitals', h.establishmentId, nextEst]);
+        writes.push(['hospitalMembers', `${h.establishmentId}_${req.requesterUid}`, {
+          hospitalId: h.establishmentId, uid: req.requesterUid, role: req.requesterRole,
+          status: 'active', updatedAt: now(),
+        }]);
+      }
+
+      const result = DB.pushAndReportDetailed
+        ? await DB.pushAndReportDetailed(writes, { timeoutMs: 20000, label: 'Approbation affiliation' })
+        : { ok: DB.pushAndReport ? await DB.pushAndReport(writes) : false };
+
+      if (!result.ok) {
+        // La demande reste pending — jamais de membre actif ajouté
+        // localement tant que Firestore n'a pas confirmé.
+        App?.toast?.('❌ Une erreur est survenue — la demande reste en attente. Réessayez.', 'error');
+        return;
+      }
+
+      // Cache local mis à jour SEULEMENT après confirmation complète.
+      saveAffiliations(affs.map((a, i) => (i === idx ? nextReq : a)));
+      if (approved && staffAfter) {
+        updateHospital(h.establishmentId, { staff: staffAfter });
+        updateUserAffiliation(nextReq, h, true);
+      }
+
+      if (window.Network?.notify) {
+        Network.notify({
+          to_role: nextReq.requesterRole,
+          to_id: nextReq.requesterUid,
+          type: 'info',
+          subject: approved
+            ? `✅ Affiliation approuvée — ${h.name || 'Établissement'}`
+            : `❌ Affiliation refusée — ${h.name || 'Établissement'}`,
+          body: approved
+            ? `Votre demande d'affiliation à ${h.name} a été approuvée. Vous pouvez maintenant y accéder.`
+            : `Votre demande d'affiliation à ${h.name} a été refusée par l'administrateur.`,
+        });
+      }
+      App?.toast?.(approved ? '✅ Affiliation approuvée' : '❌ Affiliation refusée');
+      renderManagePage(document.getElementById('main-content'), 'requests');
+    } finally {
+      _unlockAffButton(btn);
     }
-    App.toast(approved ? '✅ Affiliation approuvée' : '❌ Affiliation refusée');
   }
 
   function removeStaff(establishmentId, uid) {
@@ -847,11 +949,11 @@ const HospitalsRegistry = (() => {
             </p>
             <div style="display:flex;gap:.5rem;margin-top:.65rem;flex-wrap:wrap">
               <button class="btn btn-ghost btn-sm" style="color:var(--secondary);border-color:rgba(16,185,129,.3)"
-                onclick="HospitalsRegistry.respondAffiliation('${a.requestId}',true);HospitalsRegistry.renderManagePage(document.getElementById('main-content'),'requests')">
+                onclick="HospitalsRegistry.respondAffiliation('${a.requestId}', true, event)">
                 ✅ Approuver
               </button>
               <button class="btn btn-ghost btn-sm" style="color:var(--danger);border-color:rgba(239,68,68,.3)"
-                onclick="HospitalsRegistry.respondAffiliation('${a.requestId}',false);HospitalsRegistry.renderManagePage(document.getElementById('main-content'),'requests')">
+                onclick="HospitalsRegistry.respondAffiliation('${a.requestId}', false, event)">
                 ❌ Refuser
               </button>
             </div>
@@ -1079,7 +1181,7 @@ const HospitalsRegistry = (() => {
 
   return {
     getHospitals, saveHospitals, addHospital, addHospitalAndConfirm, migratePasswordHashToAuth, updateHospital, getHospitalById,
-    getAffiliations, saveAffiliations, requestAffiliation, respondAffiliation, removeStaff, validateEstablishment,
+    getAffiliations, saveAffiliations, requestAffiliation, requestAffiliationAndConfirm, respondAffiliation, removeStaff, validateEstablishment,
     getDoctorHospitals, getPendingAffiliations, ensureHospitalMembership,
     getCurrentHospital, setCurrentHospital, clearCurrentHospital,
     getPatientsForContext, getAppointmentsForContext, getPatientsForEstablishment,
