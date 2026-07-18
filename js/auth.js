@@ -522,7 +522,7 @@ const Auth = (() => {
         <a class="btn-p" style="display:inline-block;text-decoration:none;margin-bottom:.75rem"
            href="https://wa.me/243856373707" target="_blank" rel="noopener">📞 Contacter sur WhatsApp</a>
         <br>
-        <button class="btn btn-ghost" onclick="Auth.showLogin()">← Retour à la connexion</button>
+        <button class="btn btn-ghost" onclick="window.HospitalAuth?.isAgentLoginActive?.() ? HospitalAuth.renderScreen() : Auth.showLogin()">← Retour à la connexion</button>
       </div>`;
   }
 

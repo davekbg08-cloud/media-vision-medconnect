@@ -65,6 +65,24 @@ const HospitalDesktopUI = (() => {
 
   function isOpen() { return !!document.getElementById(ROOT_ID); }
 
+  // Correctif (retour utilisateur) : openForSession()/open() ouvraient
+  // TOUJOURS sur navigate('dashboard'), quel que soit le rôle — un
+  // réceptionniste ou un laborantin atterrissait donc sur le même
+  // "Tableau de bord" générique (vue d'ensemble hôpital) qu'un médecin,
+  // avec des raccourcis ("Admissions", "Laboratoire") qu'il n'a pas
+  // forcément le droit d'utiliser. Les rôles à usage unique (réception,
+  // laboratoire, pharmacie) atterrissent désormais directement sur LEUR
+  // module ; les rôles à vue d'ensemble (médecin, infirmier(ère),
+  // admin_hospital, admin) continuent d'atterrir sur le Tableau de bord.
+  const DEFAULT_ROUTE_BY_ROLE = {
+    reception:  'reception',
+    lab:        'lab',
+    pharmacist: 'pharmacy',
+  };
+  function defaultRouteFor(role) {
+    return DEFAULT_ROUTE_BY_ROLE[role] || 'dashboard';
+  }
+
   /* Ouverture depuis une session HOSPITALIÈRE (connexion desktop par
      matricule). Le rôle vient de la session hôpital, pas d'un compte
      mobile — c'est l'entrée normale du produit desktop.
@@ -109,7 +127,7 @@ const HospitalDesktopUI = (() => {
       document.body.appendChild(root);
       document.body.classList.add('hospital-desktop-open');
       startInactivityWatch();
-      navigate('dashboard');
+      navigate(defaultRouteFor(agent.role));
     } catch (e) {
       console.error('[HospitalDesktopUI] openForSession :', e);
       App.toast(e.message || "Impossible d'ouvrir l'espace hôpital.", 'error');
@@ -174,7 +192,7 @@ const HospitalDesktopUI = (() => {
       root.innerHTML = buildShell(user, hospital);
       document.body.appendChild(root);
       document.body.classList.add('hospital-desktop-open');
-      navigate('dashboard');
+      navigate(defaultRouteFor(user.role));
     } catch (e) {
       console.error('[HospitalDesktopUI] open :', e);
       App.toast(e.message || 'Impossible d\'ouvrir l\'espace hôpital.', 'error');
