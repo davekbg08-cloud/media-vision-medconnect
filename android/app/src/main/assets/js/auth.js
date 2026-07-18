@@ -240,7 +240,8 @@ const Auth = (() => {
         <label class="inp-lbl">Téléphone (facultatif)</label>
         <input type="text" id="ag-phone" class="inp" placeholder="+243…">
       </div>
-      <button class="btn-p" onclick="${action}">✅ Envoyer la demande</button>
+      <button class="btn-p" id="ag-submit-btn" type="button" onclick="${action}">✅ Envoyer la demande</button>
+      <div id="ag-status" style="margin-top:.5rem;font-size:.82rem;color:var(--text-muted)"></div>
       <div class="auth-register-info" style="margin-top:.75rem">
         Votre demande devra être validée par l'administration MedConnect,
         puis votre affiliation à cet établissement devra être confirmée.
@@ -987,10 +988,35 @@ const Auth = (() => {
     return { conflict: null };
   }
 
+  // État visuel du bouton d'inscription — désactivé immédiatement, texte
+  // d'attente, restauré dans un finally, quelle que soit l'issue.
+  function _lockAgentButton(label) {
+    const btn = document.getElementById('ag-submit-btn');
+    if (!btn) return null;
+    btn._mcOriginalText = btn.textContent;
+    btn.disabled = true;
+    if (btn.dataset) btn.dataset.processing = 'true';
+    btn.textContent = label;
+    return btn;
+  }
+  function _unlockAgentButton(btn) {
+    if (!btn || typeof document === 'undefined' || !document.body?.contains?.(btn)) return;
+    btn.disabled = false;
+    btn.textContent = btn._mcOriginalText != null ? btn._mcOriginalText : btn.textContent;
+    if (btn.dataset) delete btn.dataset.processing;
+  }
+  function _setAgentStep(msg) {
+    const el = document.getElementById('ag-status');
+    if (el) el.textContent = msg || '';
+  }
+
   let _agentRegBusy = false;
   async function _regAgentStrict(role) {
     if (_agentRegBusy) return; // verrou anti-double-clic, avant tout await
+    const btn = document.getElementById('ag-submit-btn');
+    if (btn?.dataset?.processing === 'true') return;
     _agentRegBusy = true;
+    const lockedBtn = _lockAgentButton('⏳ Inscription en cours…');
     try {
       const fullName  = (document.getElementById('ag-fullname')?.value || '').trim();
       const matricule = _normalizeMatricule(document.getElementById('ag-matricule')?.value);
@@ -1014,6 +1040,7 @@ const Auth = (() => {
         return;
       }
 
+      _setAgentStep('Vérification du compte…');
       await _syncBeforeAuth('inscription laborantin/réception');
 
       const dup = await _checkAgentDuplicates(role, matricule, email);
@@ -1043,6 +1070,7 @@ const Auth = (() => {
       // Création Firebase Auth : sur TOUT échec (y compris
       // auth/email-already-in-use), on abandonne entièrement — aucun
       // document n'est créé, jamais de mode dégradé pour ces 2 rôles.
+      _setAgentStep('Création de l\'identité Firebase…');
       let credential;
       try {
         credential = await firebaseAuth.createUserWithEmailAndPassword(email, pass);
@@ -1084,6 +1112,7 @@ const Auth = (() => {
       // authUid ensuite supprimé, et _push() remettait la pièce en
       // échec dans l'outbox pour un rejeu automatique ultérieur,
       // recréant exactement le compte fantôme que ce chantier corrige.
+      _setAgentStep('Enregistrement du profil…');
       const criticalOk = DB.pushBatchAndReport ? await DB.pushBatchAndReport([
         ['mc_accounts', authUid, account],
         ['users', authUid, account],
@@ -1107,17 +1136,29 @@ const Auth = (() => {
 
       // Demande d'affiliation dès l'inscription si l'établissement est
       // connu (inscription ouverte depuis HospitalAuth) — sans bloquer
-      // ni annoncer un faux succès si elle échoue.
+      // ni annoncer un faux succès si elle échoue. On transmet
+      // l'établissement COMPLET déjà en mémoire (ctx.establishment,
+      // posé par HospitalAuth.toggleAgentRegister) : requestAffiliation()
+      // n'a alors jamais besoin de dépendre du cache local ni de
+      // retomber en erreur "établissement introuvable" à tort.
       let affiliationOutcome = 'no_establishment';
+      let affiliationReason = null;
       if (ctx?.establishmentId) {
+        _setAgentStep('Création de l\'affiliation…');
         try {
           const result = await window.HospitalsRegistry?.requestAffiliationAndConfirm?.(
-            authUid, fullName, ctx.establishmentId, { role, professionalNumber: matricule, silent: true }
+            authUid, fullName, ctx.establishmentId, {
+              role, professionalNumber: matricule, silent: true,
+              establishment: ctx.establishment || null,
+              officialId: ctx.officialId || '',
+            }
           );
           affiliationOutcome = result?.confirmed ? 'confirmed' : 'failed';
+          affiliationReason = result?.reason || null;
         } catch (e) {
           console.warn('[MedConnect] Création affiliation à l\'inscription :', e);
           affiliationOutcome = 'failed';
+          affiliationReason = 'permission_denied';
         }
       }
 
@@ -1127,21 +1168,30 @@ const Auth = (() => {
       // connecter ce nouveau compte Firebase — un compte encore
       // 'pending' ne doit JAMAIS rester connecté, ni ouvrir le tableau
       // de bord, sur un poste hospitalier partagé.
+      _setAgentStep('Déconnexion sécurisée…');
       try { await firebaseAuth.signOut(); } catch (e) { console.warn('[MedConnect] signOut après inscription agent :', e); }
       try { sessionStorage.removeItem('mc_user'); } catch (_) {}
       try { sessionStorage.removeItem('mc_hospital_session'); } catch (_) {}
       try { sessionStorage.removeItem('mc_current_hospital'); } catch (_) {}
 
-      _showAgentRegistrationDone(affiliationOutcome);
+      _showAgentRegistrationDone(affiliationOutcome, affiliationReason);
     } finally {
+      _unlockAgentButton(lockedBtn);
+      _setAgentStep('');
       _agentRegBusy = false;
     }
   }
 
-  function _showAgentRegistrationDone(affiliationOutcome) {
+  function _showAgentRegistrationDone(affiliationOutcome, affiliationReason) {
     let extra = '';
     if (affiliationOutcome === 'failed') {
-      extra = `<p style="color:var(--danger);margin-top:.75rem">Votre compte a été créé, mais la demande d'affiliation n'a pas été confirmée. Contactez l'administration de l'établissement.</p>`;
+      const REASON_MESSAGES = {
+        establishment_not_found: 'Le compte a été créé, mais l\'établissement n\'a pas pu être retrouvé pour créer l\'affiliation. Contactez l\'administration.',
+        permission_denied: 'Le compte a été créé, mais Firestore a refusé la demande d\'affiliation.',
+        timeout: 'Le compte a été créé, mais la confirmation de l\'affiliation a expiré. Vérifiez la connexion.',
+      };
+      const msg = REASON_MESSAGES[affiliationReason] || 'Votre compte a été créé, mais la demande d\'affiliation n\'a pas été confirmée. Contactez l\'administration de l\'établissement.';
+      extra = `<p style="color:var(--danger);margin-top:.75rem">${esc(msg)}</p>`;
     } else if (affiliationOutcome === 'no_establishment') {
       extra = `<p style="color:var(--text-muted);margin-top:.75rem">Votre affiliation sera demandée lors de votre première connexion à un établissement.</p>`;
     }
@@ -1157,6 +1207,9 @@ const Auth = (() => {
           Vous ne pourrez vous connecter qu'après approbation.
         </p>
         ${extra}
+        <p style="font-size:.85rem;color:var(--text-muted);margin-top:.75rem;line-height:1.6">
+          Inscription envoyée. Pour continuer sur ce poste, reconnectez l'établissement.
+        </p>
         <button class="btn-p" style="margin-top:1rem" onclick="window.HospitalAuth ? HospitalAuth.renderScreen() : Auth.showLogin()">← Retour à la connexion</button>
         <p style="font-size:.8rem;color:var(--text-muted);margin-top:.75rem">📞 +243 856 373 707 — Contacter l'administration</p>
       </div>`;
@@ -1320,23 +1373,85 @@ const Auth = (() => {
      ses requêtes sur `users` rejetées. mc_accounts en premier évite des
      appels voués à l'échec ; `users` reste tenté en repli (utile aux
      appelants déjà authentifiés, ex. un admin). */
+  // Correctif (bug résiduel) : limit(1) pouvait retourner un ancien/faux
+  // document mc_accounts SANS authUid avant le vrai compte lab/reception
+  // (ordre non garanti par Firestore sans orderBy), bloquant sa connexion.
+  // limit(10) + filtrage strict (rôle, matricule normalisé EXACT, authUid
+  // ET email présents) + tri par priorité de statut. Si plusieurs comptes
+  // valides distincts subsistent au même rang de priorité, la fonction
+  // NE CHOISIT JAMAIS arbitrairement : elle signale l'ambiguïté (à
+  // l'appelant de refuser la connexion — jamais de tentative signIn).
+  const _STATUS_PRIORITY = { approved: 0, active: 0, pending: 1, rejected: 2, suspended: 2 };
+  function _statusRank(c) { return _STATUS_PRIORITY[String(c?.status || '').toLowerCase()] ?? 3; }
+
   async function _resolveAgentAccountFromFirestore(role, num) {
     if (!_hasFirebaseDB()) return null;
     const N = _normalizeMatricule(num);
-    let data = null;
+    const found = new Map(); // dédoublonné par authUid (un même compte peut matcher plusieurs champs/collections)
     for (const col of ['mc_accounts', 'users']) {
       for (const field of ['matricule', 'professionalNumber', 'order_num', 'username']) {
         try {
           const snap = await firebaseDB.collection(col)
-            .where('role', '==', role).where(field, '==', N).limit(1).get();
-          if (!snap.empty) { data = { id: snap.docs[0].id, ...snap.docs[0].data() }; break; }
+            .where('role', '==', role).where(field, '==', N).limit(10).get();
+          snap.docs.forEach(doc => {
+            const data = doc.data() || {};
+            // Correspondance EXACTE après normalisation (le champ requêté
+            // peut différer légèrement en casse/espaces malgré le where()).
+            const candidateValue = _normalizeMatricule(data.matricule || data.professionalNumber || data.order_num || data.username);
+            if (candidateValue !== N) return;
+            // Jamais de connexion lab/reception sur un document sans
+            // identité Firebase réelle ni email (voir _regAgentStrict :
+            // un vrai compte en pose toujours) — ignoré, jamais retenu.
+            if (!data.authUid || !data.email) return;
+            if (!found.has(data.authUid)) found.set(data.authUid, { id: doc.id, ...data });
+          });
         } catch (e) {
           console.warn(`[MedConnect] _resolveAgentAccountFromFirestore (${col}.${field}) :`, e?.message || e);
         }
       }
-      if (data) break;
     }
-    return data;
+    if (!found.size) return null;
+
+    const candidates = [...found.values()].sort((a, b) => _statusRank(a) - _statusRank(b));
+    const topRank = _statusRank(candidates[0]);
+    const topCandidates = candidates.filter(c => _statusRank(c) === topRank);
+    if (topCandidates.length > 1) {
+      return { ambiguous: true, reason: 'account_ambiguous', candidates: topCandidates };
+    }
+    return candidates[0];
+  }
+
+  /* Vérification post-authentification (section 8) : après un signIn
+     Firebase réussi pour lab/reception, lit directement users/{uid} ET
+     mc_accounts/{uid} — jamais le tableau de bord à partir du seul
+     document public mc_accounts. Une contradiction entre les deux
+     (rôle ou authUid différents) signale un profil corrompu : mieux
+     vaut refuser et demander une correction administrateur que
+     d'ouvrir une session sur une base incohérente. Ne bloque jamais sur
+     une simple absence d'un des deux documents (compte encore en cours
+     de mirroring) ni sur une erreur réseau (vérification secondaire,
+     ne doit pas être plus stricte que la résolution qui a déjà eu lieu
+     avant le signIn). */
+  async function verifyAgentProfileConsistency(uid, role) {
+    if (!uid || !_hasFirebaseDB()) return { ok: true };
+    try {
+      const [usersDoc, accDoc] = await Promise.all([
+        firebaseDB.collection('users').doc(uid).get(),
+        firebaseDB.collection('mc_accounts').doc(uid).get(),
+      ]);
+      const u = usersDoc.exists ? usersDoc.data() : null;
+      const a = accDoc.exists ? accDoc.data() : null;
+      if (u && a) {
+        if (u.role && a.role && u.role !== a.role) return { ok: false, reason: 'profile_mismatch' };
+        if (u.authUid && a.authUid && u.authUid !== a.authUid) return { ok: false, reason: 'profile_mismatch' };
+      }
+      const effectiveRole = u?.role || a?.role;
+      if (effectiveRole && effectiveRole !== role) return { ok: false, reason: 'profile_mismatch' };
+      return { ok: true };
+    } catch (e) {
+      console.warn('[MedConnect] verifyAgentProfileConsistency :', e?.message || e);
+      return { ok: true };
+    }
   }
 
   async function loginProfessionalSilently(role, num, pass) {
@@ -1349,6 +1464,11 @@ const Auth = (() => {
         // lab/reception : résolution directe par users/mc_accounts.
         const data = await _resolveAgentAccountFromFirestore(role, num);
         if (!data) return null;
+        // Plusieurs comptes valides distincts pour le même matricule :
+        // jamais de choix arbitraire, jamais de tentative signIn — la
+        // correction revient à l'administrateur (voir verifyAgent, qui
+        // affiche le message précis via le précontrôle).
+        if (data.ambiguous) return null;
         // Correctif (audit) : contrairement à doctor/nurse/pharmacist
         // (_restoreProfessional, qui appelle handleAccountStatusBeforeAuth
         // AVANT tout signInWithEmailAndPassword), ce chemin lab/reception
@@ -1549,6 +1669,7 @@ const Auth = (() => {
   return {
     getUser, isLogged, logout, showLogin, loginProfessionalSilently,
     resolveAgentAccountForLogin: _resolveAgentAccountFromFirestore,
+    verifyAgentProfileConsistency,
     _setRegistrationContext,
     _tab, _loginRole, _registerRole,
     _doPatient, _createPatientPin, _doDoctor, _doPharmacist, _doNurse,

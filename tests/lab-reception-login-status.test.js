@@ -102,7 +102,7 @@ test("loginProfessionalSilently('lab', ...) fonctionne toujours normalement pour
   const firebaseAuthImpl = { signInWithEmailAndPassword: async () => { signInCalls++; return { user: { uid: 'lab-real-uid' } }; } };
   const { win } = setup({
     firebaseAuthImpl,
-    accountData: { uid: 'lab-uid-2', role: 'lab', matricule: 'LAB2', email: 'lab2@x.com', status: 'approved' },
+    accountData: { uid: 'lab-uid-2', role: 'lab', matricule: 'LAB2', email: 'lab2@x.com', status: 'approved', authUid: 'lab-real-uid' },
   });
   const result = await win.Auth.loginProfessionalSilently('lab', 'LAB2', 'whatever');
   assert.strictEqual(signInCalls, 1, 'signInWithEmailAndPassword doit être appelé pour un compte approuvé');
