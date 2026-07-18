@@ -1,8 +1,16 @@
 {
-  "version": "2.9.29",
-  "build": "2026.07.18.3",
+  "version": "2.9.30",
+  "build": "2026.07.18.4",
   "buildDate": "2026-07-18",
   "changelog": [
+    {
+      "version": "2.9.30",
+      "date": "2026-07-18",
+      "notes": [
+        "Nouveau : messagerie interne à l'établissement ajoutée au desktop hôpital (absente jusqu'ici, contrairement au mobile) — envoi/réception entre médecin, infirmier(ère), laborantin, réceptionniste, pharmacie et administration hôpital, avec pièce jointe optionnelle vers une fiche patient ou une ordonnance déjà existante (jamais un fichier importé)",
+        "Correctif : les ordonnances/consultations/résultats de laboratoire créés côté desktop hôpital ne sont désormais visibles au médecin/infirmier(ère) sur mobile que si l'abonnement de l'établissement est actif — le contenu créé côté mobile reste toujours visible, sans changement du principe existant"
+      ]
+    },
     {
       "version": "2.9.29",
       "date": "2026-07-18",

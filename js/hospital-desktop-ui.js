@@ -52,6 +52,7 @@ const HospitalDesktopUI = (() => {
     settings:      (c) => window.Settings?.render?.(c),
     pharmacy:      (c) => window.PharmacyPortal?.renderInto?.(c, 'dashboard'),
     doctors:       (c) => renderAffiliatedStaff(c),
+    messages:      (c) => window.HospitalMessagesModule?.render?.(c),
   };
   // Mode hybride réel uniquement (voir open(), pas openForSession()) :
   // un utilisateur mobile qui ouvre EN PLUS l'espace hôpital retrouve
