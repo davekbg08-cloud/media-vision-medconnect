@@ -1,8 +1,17 @@
 {
-  "version": "2.9.28",
-  "build": "2026.07.18.2",
+  "version": "2.9.29",
+  "build": "2026.07.18.3",
   "buildDate": "2026-07-18",
   "changelog": [
+    {
+      "version": "2.9.29",
+      "date": "2026-07-18",
+      "notes": [
+        "IA médicale : les articles restent affichés en français par défaut (titre et résumé traduits) quand une synthèse IA est configurée, avec le texte original toujours accessible (« Voir le texte original ») — sans clé configurée, message clair au lieu d'une traduction inventée",
+        "IA médicale : une recherche courte sur un seul médicament (ex. « quinine ») est désormais triée par pertinence clinique — les études cliniques/humaines apparaissent avant la chimie analytique ou l'expérimentation animale, sans qu'aucune étude ne soit supprimée",
+        "IA médicale : filtres (études humaines, essais cliniques, revues systématiques, effets indésirables, interactions, résistance, année) et nettoyage des balises HTML brutes que renvoyait parfois Europe PMC dans les résumés"
+      ]
+    },
     {
       "version": "2.9.28",
       "date": "2026-07-18",
