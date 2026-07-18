@@ -871,9 +871,21 @@ const HospitalAuth = (() => {
     renderScreen();
   }
 
+  // Correctif (retour utilisateur) : lorsqu'un médecin/infirmier(ère)
+  // tente sa connexion via le sélecteur d'agent desktop (établissement
+  // actif = _activeEstablishment) et que son compte est "rejected",
+  // js/auth.js::showRejectedAccountScreen() remplace #auth-screen
+  // (élément PARTAGÉ avec ce module) par un écran générique dont le
+  // bouton "Retour à la connexion" ramenait vers Auth.showLogin()
+  // (écran mobile), sans savoir que la tentative venait du desktop
+  // hôpital. Ce getter permet à ce bouton de revenir au bon endroit.
+  function isAgentLoginActive() {
+    return !!_activeEstablishment;
+  }
+
   return {
     renderScreen, showTab, login, register, enter, verifyAgent, logout, getSession, hashPassword,
-    onAgentRoleChange, toggleAgentRegister,
+    onAgentRoleChange, toggleAgentRegister, isAgentLoginActive,
     isSessionExpired, isSessionConsistent, invalidateSession,
     SESSION_MAX_AGE_MS, INACTIVITY_TIMEOUT_MS,
   };
