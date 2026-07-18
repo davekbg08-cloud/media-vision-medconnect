@@ -1,8 +1,25 @@
 {
-  "version": "2.9.30",
-  "build": "2026.07.18.4",
+  "version": "2.9.31",
+  "build": "2026.07.18.5",
   "buildDate": "2026-07-18",
   "changelog": [
+    {
+      "version": "2.9.31",
+      "date": "2026-07-18",
+      "notes": [
+        "Correctif sécurité majeur : un membre du personnel d'un établissement pouvait créer/modifier/supprimer des lits, admissions, dossiers d'urgence, de maternité et requêtes IA d'un AUTRE établissement — l'isolation entre hôpitaux est désormais appliquée à ces collections, comme c'était déjà le cas pour le laboratoire",
+        "Correctif : le mode hors-ligne de l'application (PWA installée, y compris Android) ne fonctionnait plus du tout depuis l'ajout de la messagerie desktop (fichier listé deux fois dans le cache, provoquant un échec silencieux de tout le pré-chargement) — corrigé",
+        "Correctif : les rendez-vous créés côté desktop hôpital n'appliquaient ni l'isolation par établissement ni le contrôle d'abonnement mobile/desktop déjà en place pour les consultations, ordonnances et résultats de laboratoire — aligné sur le même principe",
+        "Correctif : la création d'une fiche patient hors du contexte hôpital desktop (ex. ajout depuis le mobile) pouvait échouer silencieusement à cause d'une erreur technique interne — corrigé",
+        "Correctif : le menu du desktop hôpital affichait littéralement « hd_records » au lieu de « Dossiers médicaux » pour presque tous les rôles ; 4 autres libellés du menu restaient toujours en français quelle que soit la langue choisie — corrigés",
+        "Correctif : plusieurs écrans du desktop hôpital (pharmacie, consultations, ordonnances, patients, médecins affiliés) ne vérifiaient les droits qu'au niveau du menu — un contrôle réel a été ajouté à l'affichage de chacun, comme c'était déjà le cas pour les autres modules",
+        "Correctif : le badge de messages non lus ne redescendait plus après suppression d'un message urgent jamais ouvert",
+        "Correctif : un établissement dont l'abonnement était expiré pouvait quand même valider l'arrivée de nouveau personnel — désormais soumis au même contrôle que les autres actions de ce type",
+        "Correctif : le bouton « Retour » pendant la vérification d'une connexion desktop hôpital pouvait, dans de rares cas (réseau lent), rouvrir le tableau de bord après que l'utilisateur ait annulé — corrigé",
+        "Correctif : le bouton de transfert patient ne s'affichait pas pour un médecin arrivé par le lanceur mobile de l'espace hôpital — corrigé",
+        "Correctif : la gestion des lits (ajout, mise en maintenance) n'était pas limitée aux rôles prévus (infirmier·ère, administration hôpital) — corrigé"
+      ]
+    },
     {
       "version": "2.9.30",
       "date": "2026-07-18",

@@ -66,13 +66,13 @@ const HospitalPermissions = (() => {
     const L = k => (window.I18n?.t ? I18n.t(k) : null);
     const menu = [];
     if (canAccess(role, 'dashboard'))     menu.push({ key:'dashboard',     label:L('hd_dashboard')     || 'Tableau de bord',        icon:'📊' });
-    if (canAccess(role, 'reception'))     menu.push({ key:'reception',     label:'Réception / Accueil',  icon:'🛎️' });
+    if (canAccess(role, 'reception'))     menu.push({ key:'reception',     label:L('hd_reception')     || 'Réception / Accueil',    icon:'🛎️' });
     if (canAccess(role, 'patients'))      menu.push({ key:'patients',      label:L('hd_patients')      || 'Patients',                icon:'👥' });
     if (canAccess(role, 'records'))       menu.push({ key:'records',       label:L('hd_records')       || 'Dossiers médicaux',      icon:'📁' });
     if (canAccess(role, 'consultations')) menu.push({ key:'consultations', label:L('hd_consultations') || 'Consultations',           icon:'🩺' });
-    if (canAccess(role, 'prescriptions')) menu.push({ key:'prescriptions', label:'Ordonnances',                                       icon:'💊' });
-    if (canAccess(role, 'emergency'))     menu.push({ key:'emergency',     label:'Urgences',             icon:'🚑' });
-    if (canAccess(role, 'maternity'))     menu.push({ key:'maternity',     label:'Maternité',            icon:'🤰' });
+    if (canAccess(role, 'prescriptions')) menu.push({ key:'prescriptions', label:L('hd_prescriptions') || 'Ordonnances',              icon:'💊' });
+    if (canAccess(role, 'emergency'))     menu.push({ key:'emergency',     label:L('hd_emergency')     || 'Urgences',                icon:'🚑' });
+    if (canAccess(role, 'maternity'))     menu.push({ key:'maternity',     label:L('hd_maternity')     || 'Maternité',               icon:'🤰' });
     if (canAccess(role, 'beds'))          menu.push({ key:'beds',          label:L('hd_beds')          || 'Hospitalisation / Lits',  icon:'🛏️' });
     if (canAccess(role, 'lab'))           menu.push({ key:'lab',           label:L('hd_lab')           || 'Laboratoire',             icon:'🧪' });
     if (canAccess(role, 'pharmacy'))      menu.push({ key:'pharmacy',      label:L('hd_pharmacy')      || 'Pharmacie',                icon:'💊' });

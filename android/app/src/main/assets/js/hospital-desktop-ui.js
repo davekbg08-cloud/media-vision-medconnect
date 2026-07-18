@@ -186,6 +186,13 @@ const HospitalDesktopUI = (() => {
         App.toast('Sélectionnez d\'abord un établissement actif.', 'error');
         return;
       }
+      // Correctif (audit) : contrairement à openForSession(), _sessionRole
+      // n'était jamais initialisé sur ce chemin (lanceur mobile hybride)
+      // — HospitalCapabilities.can/require(_sessionRole, ...) évaluait
+      // alors toujours contre null, cassant silencieusement (ex. bouton
+      // "🚑 Transférer avec le dossier") pour un utilisateur pourtant
+      // habilité selon son rôle réel.
+      _sessionRole = user.role;
       if (isOpen()) { navigate(_current); return; }
 
       const root = document.createElement('div');
@@ -381,6 +388,11 @@ const HospitalDesktopUI = (() => {
   /* Patients classés par ANNÉE, chacun prêt à être transféré avec son
      dossier (bouton 🚑 relié au module de transfert d'urgence). */
   function renderPatientsByYear(container) {
+    // Correctif (audit) : cette route n'était protégée qu'au niveau du
+    // menu filtré (HospitalPermissions.visibleMenuFor) — aucune
+    // vérification réelle au moment du rendu, contrairement aux autres
+    // modules du bundle (hospital-lab.js, hospital-reception.js, etc.).
+    HospitalPermissions.requireRoute('patients');
     const hospital = window.HospitalsRegistry?.getCurrentHospital?.();
     const hid = hospital?.establishmentId;
     let patients = [];
@@ -434,6 +446,9 @@ const HospitalDesktopUI = (() => {
      actions administratives (approuver une affiliation, retirer un
      membre) à admin/admin_hospital. */
   async function renderAffiliatedStaff(container) {
+    // Correctif (audit) : même défaut que renderPatientsByYear ci-dessus
+    // — aucune vérification réelle de route au moment du rendu.
+    HospitalPermissions.requireRoute('doctors');
     const hospital = await CloudDB.getActiveHospital();
     const hospitalId = hospital.establishmentId || hospital.id;
     const role = HospitalPermissions.getCurrentRole();

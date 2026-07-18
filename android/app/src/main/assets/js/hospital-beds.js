@@ -128,6 +128,14 @@ const HospitalBedsModule = (() => {
 
   async function saveBed() {
     try {
+      // Correctif (audit) : ni saveBed() ni toggleMaintenance() ne
+      // vérifiaient la capacité 'manage_beds' (réservée à admin_hospital
+      // et nurse — PAS doctor, voir MATRIX), contrairement à
+      // saveAdmission()/discharge() ci-dessous qui suivent déjà ce
+      // principe. Un médecin pouvait ainsi ajouter un lit ou le
+      // basculer en maintenance alors que la matrice de capacités
+      // l'exclut.
+      if (!window.HospitalCapabilities?.guardHospitalAction?.('manage_beds')) return;
       // Pré-contrôle client : le serveur (hospitalCanWriteFromDevice)
       // bloquera de toute façon en desktop expiré — ceci donne un
       // message clair au lieu de l'erreur Firestore brute.
@@ -157,6 +165,8 @@ const HospitalBedsModule = (() => {
 
   async function toggleMaintenance(bedId) {
     try {
+      // Correctif (audit) : même garde que saveBed() ci-dessus.
+      if (!window.HospitalCapabilities?.guardHospitalAction?.('manage_beds')) return;
       const bed = _beds.find(b => b.id === bedId);
       if (!bed) return;
       const next = bed.status === 'maintenance' ? 'free' : 'maintenance';

@@ -23,9 +23,18 @@ const ASSETS = [
   './js/exchange-bridge.js', './js/medical-record-sharing.js', './js/emergency-transfer.js',
   './js/sync-badge.js',
   // Bundle desktop hôpital (adapté)
+  // Correctif (audit) : hospital-auth.js était listé deux fois ci-dessous
+  // (une fois ici, une fois après hospital-reception.js) — Cache.addAll()
+  // rejette silencieusement TOUTE la liste
+  // dès qu'une URL apparaît en double (comportement spec depuis Chrome
+  // 72), et le .catch() plus bas avale l'erreur sans qu'aucune alerte
+  // ne remonte : plus AUCUN fichier n'était réellement précaché, cassant
+  // tout le mode hors-ligne. hospital-emergency.js/hospital-maternity.js
+  // (chargés par index.html) manquaient aussi à cette liste.
   './js/cloud-db.js', './js/hospital-permissions.js', './js/hospital-capabilities.js', './js/hospital-auth.js', './js/hospital-i18n.js', './js/hospital-subscription.js',
   './js/medical-ai.js', './js/hospital-beds.js', './js/hospital-lab.js', './js/hospital-messages.js',
-  './js/hospital-desktop-ui.js', './js/hospital-reception.js', './js/hospital-auth.js',
+  './js/hospital-desktop-ui.js', './js/hospital-reception.js',
+  './js/hospital-emergency.js', './js/hospital-maternity.js',
   './js/medical-record-desktop.js',
   './js/button-feedback.js',
   './js/i18n.js', './js/db.js', './js/currency.js',

@@ -117,6 +117,10 @@ const HospitalAuth = (() => {
     try { sessionStorage.removeItem('mc_user'); } catch (_) {}
     clearSession();
     try { window.HospitalsRegistry?.clearCurrentHospital?.(); } catch (_) {}
+    // Correctif (audit) : purge aussi la copie localStorage (js/app.js
+    // mc_user_backup), sinon un poste ayant déjà servi le flux mobile
+    // générique pouvait la laisser survivre à cette invalidation.
+    try { window.Auth?.clearLocalBackup?.(); } catch (_) {}
   }
 
   /* ── Recherche d'établissement par matricule ───────── */
@@ -379,7 +383,7 @@ const HospitalAuth = (() => {
             <div id="reg-err" class="auth-error" style="display:none"></div>
           </div>
 
-          <button class="btn btn-ghost btn-full" style="margin-top:1rem" onclick="HospitalAuth.renderScreen()">← Retour</button>
+          <button class="btn btn-ghost btn-full" style="margin-top:1rem" onclick="HospitalAuth.cancelVerificationAndGoBack()">← Retour</button>
         </div>
       </div>`;
     onAgentRoleChange();
@@ -493,6 +497,8 @@ const HospitalAuth = (() => {
     if (typeof firebaseAuth !== 'undefined' && firebaseAuth?.signOut) {
       try { await firebaseAuth.signOut(); } catch (_) {}
     }
+    // Correctif (audit) : même purge que invalidateSession() ci-dessus.
+    try { window.Auth?.clearLocalBackup?.(); } catch (_) {}
   }
 
   function _lockVerifyButton() {
@@ -519,11 +525,20 @@ const HospitalAuth = (() => {
   // un signInWithEmailAndPassword awaités — un second clic pendant ce
   // temps relançait tout en parallèle (double tentative de connexion).
   let _verifyingAgent = false;
+  // Correctif (audit) : le bouton "← Retour" du sélecteur d'agent ne
+  // faisait que remplacer le rendu DOM (renderScreen()), sans jamais
+  // annuler un verifyAgent() encore en attente d'un await réseau lent
+  // (Firestore/signInWithEmailAndPassword). La promesse en vol pouvait
+  // donc aboutir jusqu'à enter(...) et rouvrir le tableau de bord après
+  // que l'utilisateur ait explicitement cliqué "Retour" pour annuler —
+  // voir cancelVerificationAndGoBack() plus bas.
+  let _verifyCancelled = false;
   async function verifyAgent(establishmentId) {
     if (_verifyingAgent) return;
     const btn = document.getElementById('ha-verify-btn');
     if (btn?.dataset?.processing === 'true') return;
     _verifyingAgent = true;
+    _verifyCancelled = false;
     const lockedBtn = _lockVerifyButton();
     try {
     const est = (window.HospitalsRegistry?.getHospitalById?.(establishmentId)) || { establishmentId };
@@ -694,6 +709,11 @@ const HospitalAuth = (() => {
       return;
     }
 
+    // Correctif (audit) : ne jamais ouvrir le tableau de bord si
+    // l'utilisateur a entre-temps cliqué "← Retour" pour annuler cette
+    // vérification (voir cancelVerificationAndGoBack()).
+    if (_verifyCancelled) return;
+
     // Rôle de session = rôle vérifié dans le staff (source de vérité
     // de l'affiliation, déjà filtrée sur le rôle demandé).
     _setVerifyStep('Ouverture du tableau de bord…');
@@ -707,6 +727,16 @@ const HospitalAuth = (() => {
       _setVerifyStep('');
       _verifyingAgent = false;
     }
+  }
+
+  // Correctif (audit) : remplace le "onclick=HospitalAuth.renderScreen()"
+  // direct du bouton "← Retour" du sélecteur d'agent. Marque la
+  // vérification en cours (s'il y en a une) comme annulée AVANT de
+  // changer d'écran, pour que le verifyAgent() en vol ne rouvre jamais
+  // le tableau de bord une fois résolu (voir _verifyCancelled ci-dessus).
+  function cancelVerificationAndGoBack() {
+    if (_verifyingAgent) _verifyCancelled = true;
+    renderScreen();
   }
 
   function enter(establishmentId, role, agentInfo = {}) {
@@ -858,6 +888,8 @@ const HospitalAuth = (() => {
     if (typeof firebaseAuth !== 'undefined' && firebaseAuth?.signOut) {
       try { await firebaseAuth.signOut(); } catch (_) {}
     }
+    // Correctif (audit) : même purge que invalidateSession() ci-dessus.
+    try { window.Auth?.clearLocalBackup?.(); } catch (_) {}
     try {
       const MEDICAL_KEYS = [
         'mc_patients', 'mc_consultations', 'mc_prescriptions',
@@ -885,7 +917,7 @@ const HospitalAuth = (() => {
 
   return {
     renderScreen, showTab, login, register, enter, verifyAgent, logout, getSession, hashPassword,
-    onAgentRoleChange, toggleAgentRegister, isAgentLoginActive,
+    onAgentRoleChange, toggleAgentRegister, isAgentLoginActive, cancelVerificationAndGoBack,
     isSessionExpired, isSessionConsistent, invalidateSession,
     SESSION_MAX_AGE_MS, INACTIVITY_TIMEOUT_MS,
   };

@@ -72,10 +72,30 @@ const Network = (() => {
     return recipientKeys(user).includes(message.to_id);
   }
 
+  // Correctif (audit) : dupliqué à l'identique de
+  // js/inbox_message_controls.js isDeletedForUser (même convention de
+  // duplication déjà en place pour recipientKeys/messageMatchesUser) —
+  // nécessaire ici pour que getUnread() ne compte pas un message que
+  // l'utilisateur a supprimé de sa boîte.
+  function isDeletedForUser(message, user) {
+    const keys = recipientKeys(user).map(String);
+    const deletedFor = Array.isArray(message.deletedFor) ? message.deletedFor.map(String) : [];
+    return keys.some(key => deletedFor.includes(key));
+  }
+
   function getUnread(role, id) {
     const user = window.Auth?.getUser?.();
+    // Correctif (audit) : un message supprimé (deletedFor) sans jamais
+    // avoir été ouvert restait compté ici indéfiniment — inbox_message_
+    // controls.js filtre bien deletedFor pour l'AFFICHAGE de la liste
+    // (renderInbox), mais ne patche jamais getUnread(), utilisé tel quel
+    // par le badge du menu (js/app.js buildNav). Le badge restait donc
+    // bloqué à un nombre non nul sans qu'aucune action utilisateur ne
+    // puisse plus jamais le faire redescendre.
     if (!id && user?.role === role) {
-      return DB.getMessages().filter(m => messageMatchesUser(m, user) && m.readStatus !== 'read' && !m.read).length;
+      return DB.getMessages().filter(m =>
+        messageMatchesUser(m, user) && !isDeletedForUser(m, user) && m.readStatus !== 'read' && !m.read
+      ).length;
     }
     return DB.getMessages().filter(m =>
       m.to_role === role && (!id || m.to_id === id) && m.readStatus !== 'read' && !m.read

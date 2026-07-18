@@ -518,9 +518,7 @@ service cloud.firestore {
       allow create: if isAdmin() ||
         ((currentRoleIs('doctor') || currentRoleIs('nurse')) &&
          (isEmergencyIntake(request.resource.data) ||
-          hospitalCanWrite(request.resource.data.establishmentId != null
-            ? request.resource.data.establishmentId
-            : request.resource.data.hospital_id)));
+          hospitalCanWrite(resolveHospitalId(request.resource.data))));
       allow update, delete: if isAdmin() || doctorCanRead(resource.data);
     }
 
@@ -647,13 +645,27 @@ service cloud.firestore {
     }
 
     match /notifications/{notificationId} {
+      // Correctif (audit) : deux fonctions écrivent réellement cette
+      // collection avec des noms de champs différents —
+      // js/db.js saveMessages() (miroir mc_messages) pose to_id/to_role,
+      // js/cloud-db.js createNotification() (ex. hospital-reception.js
+      // "patient orienté au médecin") pose toUid/recipientUserId. Cette
+      // seconde forme n'était couverte par AUCUNE des 3 clés vérifiées
+      // ici : les notifications qu'elle crée restaient structurellement
+      // illisibles par leur destinataire non-admin. Ajout ADDITIF des 2
+      // clés manquantes, sans retirer les 3 existantes. .get(clé, null)
+      // partout (au lieu de l'accès pointé direct) : un document qui ne
+      // porte qu'UN sous-ensemble de ces 5 clés optionnelles levait
+      // sinon une erreur d'évaluation sur les clés absentes.
       allow read, update: if isAdmin() ||
         (
           signedIn() &&
           (
-            resource.data.to_id == request.auth.uid ||
-            resource.data.recipientUid == request.auth.uid ||
-            resource.data.userUid == request.auth.uid
+            resource.data.get('to_id', null) == request.auth.uid ||
+            resource.data.get('recipientUid', null) == request.auth.uid ||
+            resource.data.get('userUid', null) == request.auth.uid ||
+            resource.data.get('toUid', null) == request.auth.uid ||
+            resource.data.get('recipientUserId', null) == request.auth.uid
           )
         );
       allow create: if signedIn();
@@ -851,10 +863,25 @@ service cloud.firestore {
     // (js/timeline.js) n'était jamais alimenté. Écrit par
     // hospital-beds.js/hospital-reception.js (doctor/nurse/reception/
     // admin_hospital, mêmes rôles que canRegisterPatient()).
+    // Correctif (audit sécurité) : "allow write" n'exigeait que le rôle,
+    // aucune isolation par établissement — un médecin/infirmier/
+    // réceptionniste/admin_hospital réellement affilié à l'hôpital A
+    // pouvait créer, modifier ou SUPPRIMER une admission de l'hôpital B
+    // (vérifié en conditions réelles sur l'émulateur). Ajout ADDITIF de
+    // belongsToSameEstablishment, même principe que mc_lab_results ci-
+    // dessus. "write" scindé en create/update (request.resource.data,
+    // hôpital CIBLE) et update/delete (resource.data, hôpital existant)
+    // car resource.data n'existe pas encore à la création.
     match /mc_admissions/{docId} {
       allow read: if canReadMedicalData(resource.data);
-      allow write: if isAdmin() || currentRoleIs('doctor') || currentRoleIs('nurse') ||
-        hasRole('reception') || hasRole('admin_hospital');
+      allow create: if isAdmin() ||
+        ((currentRoleIs('doctor') || currentRoleIs('nurse') ||
+          hasRole('reception') || hasRole('admin_hospital')) &&
+         belongsToSameEstablishment(request.resource.data));
+      allow update, delete: if isAdmin() ||
+        ((currentRoleIs('doctor') || currentRoleIs('nurse') ||
+          hasRole('reception') || hasRole('admin_hospital')) &&
+         belongsToSameEstablishment(resource.data));
     }
 
     // Correctif (audit) : miroirs patient des collections desktop
@@ -863,16 +890,31 @@ service cloud.firestore {
     // Écrits par hospital-emergency.js/hospital-maternity.js, gatés
     // côté client par guardHospitalAction('view_patient'/'create_patient'),
     // mêmes rôles que canRegisterPatient().
+    // Correctif (audit sécurité) : même faille d'isolation que
+    // mc_admissions ci-dessus (aucun belongsToSameEstablishment) —
+    // corrigée de façon identique.
     match /mc_emergency_cases/{docId} {
       allow read: if canReadMedicalData(resource.data);
-      allow write: if isAdmin() || currentRoleIs('doctor') || currentRoleIs('nurse') ||
-        hasRole('reception') || hasRole('admin_hospital');
+      allow create: if isAdmin() ||
+        ((currentRoleIs('doctor') || currentRoleIs('nurse') ||
+          hasRole('reception') || hasRole('admin_hospital')) &&
+         belongsToSameEstablishment(request.resource.data));
+      allow update, delete: if isAdmin() ||
+        ((currentRoleIs('doctor') || currentRoleIs('nurse') ||
+          hasRole('reception') || hasRole('admin_hospital')) &&
+         belongsToSameEstablishment(resource.data));
     }
 
     match /mc_maternity_cases/{docId} {
       allow read: if canReadMedicalData(resource.data);
-      allow write: if isAdmin() || currentRoleIs('doctor') || currentRoleIs('nurse') ||
-        hasRole('reception') || hasRole('admin_hospital');
+      allow create: if isAdmin() ||
+        ((currentRoleIs('doctor') || currentRoleIs('nurse') ||
+          hasRole('reception') || hasRole('admin_hospital')) &&
+         belongsToSameEstablishment(request.resource.data));
+      allow update, delete: if isAdmin() ||
+        ((currentRoleIs('doctor') || currentRoleIs('nurse') ||
+          hasRole('reception') || hasRole('admin_hospital')) &&
+         belongsToSameEstablishment(resource.data));
     }
 
     match /mc_medicines/{docId} {
@@ -938,9 +980,7 @@ service cloud.firestore {
       allow create: if isAdmin() ||
         ((currentRoleIs('doctor') || currentRoleIs('nurse')) &&
          (isEmergencyIntake(request.resource.data) ||
-          hospitalCanWrite(request.resource.data.establishmentId != null
-            ? request.resource.data.establishmentId
-            : request.resource.data.hospital_id)));
+          hospitalCanWrite(resolveHospitalId(request.resource.data))));
       allow update, delete: if isAdmin();
     }
 
@@ -988,7 +1028,18 @@ service cloud.firestore {
     }
 
     match /mc_appointments/{docId} {
-      allow read: if canReadMedicalData(resource.data);
+      // Correctif (audit sécurité) : contrairement à mc_consultations/
+      // mc_lab_results/mc_prescriptions, cette collection n'avait ni
+      // l'isolation par établissement (belongsToSameEstablishment) ni
+      // la passerelle d'abonnement (subscriptionReadGateOk) — même
+      // principe additif que ces collections sœurs : un membre de
+      // l'établissement voit les rendez-vous de ses collègues, et un
+      // rendez-vous créé côté desktop n'est visible au médecin/
+      // infirmier(ère) que si l'abonnement est actif (jamais pour le
+      // patient, ownsPatientData reste inconditionnel via canReadMedicalData).
+      allow read: if (canReadMedicalData(resource.data) ||
+        belongsToSameEstablishment(resource.data)) &&
+        subscriptionReadGateOk(resource.data);
       // Correctif (audit) : aucune clause create — seul isAdmin()
       // pouvait écrire, alors que DB.addAppointment() (js/db.js) est
       // appelé par un médecin/infirmier/patient normal
@@ -1140,7 +1191,18 @@ service cloud.firestore {
         get(/databases/$(database)/documents/affiliation_requests/$('AFF_' + request.auth.uid + '_' + hospitalId)).data.status == 'approved';
     }
     match /hospitalMembers/{docId} {
-      allow read: if isAdmin() || signedIn();
+      // Correctif (audit sécurité) : "signedIn()" seul laissait N'IMPORTE
+      // QUEL compte connecté (patient, pharmacien, personnel d'un tout
+      // autre établissement) lire l'affiliation hôpital↔personnel↔rôle
+      // de n'importe qui, en devinant simplement le docId
+      // ({hospitalId}_{uid}). Resserré au même principe que le reste du
+      // fichier (PARTIE E) : admin, ou le titulaire du document lui-même
+      // — les 2 seuls lecteurs réels identifiés côté client
+      // (auth.js verifyAgent → requête where('uid','==',soi-même),
+      // hospitals_registry.js getHospitalMemberDirect → lecture de SA
+      // PROPRE affiliation lors de la connexion).
+      allow read: if isAdmin() ||
+        (signedIn() && resource.data.get('uid', null) == request.auth.uid);
       allow create, update: if isAdmin() ||
         (signedIn() &&
          docId == (resolveHospitalId(request.resource.data) + '_' + request.auth.uid) &&
@@ -1153,11 +1215,20 @@ service cloud.firestore {
       allow delete: if isAdmin() || (signedIn() && resource.data.get('uid', null) == request.auth.uid);
     }
 
-    /* ── Bundle desktop hôpital (adapté) — beds/admissions/aiQueries ── */
+    /* ── Bundle desktop hôpital (adapté) — beds/admissions/aiQueries ──
+       Correctif (audit sécurité) : "desktopWorkflowCanWrite" ne vérifie
+       QUE l'abonnement de l'hôpital CIBLE, jamais que l'auteur est
+       affilié à cet hôpital — vérifié en conditions réelles sur
+       l'émulateur : un membre actif de l'hôpital B pouvait créer/
+       modifier/supprimer des lits, admissions, dossiers d'urgence et de
+       maternité de l'hôpital A. Ajout ADDITIF de
+       belongsToSameEstablishment(request.resource.data) partout ici,
+       même principe déjà appliqué à mc_lab_results/mc_admissions. */
     match /beds/{docId} {
       allow read: if isAdmin() || signedIn();
       allow create, update: if isAdmin() ||
-        (signedIn() && desktopWorkflowCanWrite(resolveHospitalId(request.resource.data)));
+        (signedIn() && belongsToSameEstablishment(request.resource.data) &&
+         desktopWorkflowCanWrite(resolveHospitalId(request.resource.data)));
       allow delete: if isAdmin();
     }
 
@@ -1168,7 +1239,8 @@ service cloud.firestore {
       allow read: if canReadMedicalData(resource.data) ||
         belongsToSameEstablishment(resource.data);
       allow create, update: if isAdmin() ||
-        (canManageCare() && desktopWorkflowCanWrite(resolveHospitalId(request.resource.data)));
+        (canManageCare() && belongsToSameEstablishment(request.resource.data) &&
+         desktopWorkflowCanWrite(resolveHospitalId(request.resource.data)));
       allow delete: if isAdmin();
     }
 
@@ -1177,7 +1249,8 @@ service cloud.firestore {
       allow read: if canReadMedicalData(resource.data) ||
         belongsToSameEstablishment(resource.data);
       allow create, update: if isAdmin() ||
-        (canRegisterPatient() && desktopWorkflowCanWrite(resolveHospitalId(request.resource.data)));
+        (canRegisterPatient() && belongsToSameEstablishment(request.resource.data) &&
+         desktopWorkflowCanWrite(resolveHospitalId(request.resource.data)));
       allow delete: if isAdmin();
     }
 
@@ -1186,7 +1259,8 @@ service cloud.firestore {
       allow read: if canReadMedicalData(resource.data) ||
         belongsToSameEstablishment(resource.data);
       allow create, update: if isAdmin() ||
-        (canRegisterPatient() && desktopWorkflowCanWrite(resolveHospitalId(request.resource.data)));
+        (canRegisterPatient() && belongsToSameEstablishment(request.resource.data) &&
+         desktopWorkflowCanWrite(resolveHospitalId(request.resource.data)));
       allow delete: if isAdmin();
     }
 
@@ -1195,7 +1269,8 @@ service cloud.firestore {
       allow read: if canReadMedicalData(resource.data) ||
         belongsToSameEstablishment(resource.data);
       allow create, update: if isAdmin() ||
-        (canRegisterPatient() && desktopWorkflowCanWrite(resolveHospitalId(request.resource.data)));
+        (canRegisterPatient() && belongsToSameEstablishment(request.resource.data) &&
+         desktopWorkflowCanWrite(resolveHospitalId(request.resource.data)));
       allow delete: if isAdmin();
     }
 
@@ -1204,7 +1279,8 @@ service cloud.firestore {
       // l'auteur et à l'admin (peut contenir du contexte clinique).
       allow read: if isAdmin() || (signedIn() && resource.data.userId == request.auth.uid);
       allow create: if isAdmin() ||
-        (signedIn() && desktopWorkflowCanWrite(resolveHospitalId(request.resource.data)));
+        (signedIn() && belongsToSameEstablishment(request.resource.data) &&
+         desktopWorkflowCanWrite(resolveHospitalId(request.resource.data)));
       allow update, delete: if isAdmin();
     }
 
