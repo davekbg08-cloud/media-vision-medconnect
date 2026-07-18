@@ -138,6 +138,12 @@ const HospitalAuth = (() => {
 
   /* ── ÉCRAN DE CONNEXION ────────────────────────────── */
   function renderScreen() {
+    // Retour à l'écran initial : plus aucun établissement "actif" en
+    // mémoire — un sélecteur d'agent ne doit jamais réapparaître comme
+    // si l'établissement était encore authentifié après un signOut
+    // (ex. juste après une inscription lab/reception).
+    _activeEstablishment = null;
+    window.Auth?._setRegistrationContext?.(null);
     const scr = document.getElementById('auth-screen');
     if (!scr) return;
     scr.style.display = 'block';
@@ -245,6 +251,17 @@ const HospitalAuth = (() => {
       const est = await findByOfficialId(mat);
       if (!est) { App.toast('Établissement introuvable pour ce matricule.', 'error'); return; }
 
+      // Correctif (bug confirmé) : findByOfficialId() peut avoir trouvé
+      // l'établissement directement dans Firestore sans jamais l'ajouter
+      // au cache local (HospitalsRegistry) — requestAffiliation() (via
+      // getHospitalById) échouait alors silencieusement pour un agent
+      // lab/reception s'inscrivant sur ce poste. Mis en cache DÈS ICI
+      // (avant toute étape suivante, y compris la migration héritée
+      // ci-dessous, qui écrit directement sur ce même cache local et
+      // doit donc rester l'écriture la PLUS RÉCENTE) — sans écriture
+      // Firestore, sans changer son statut ni son propriétaire.
+      window.HospitalsRegistry?.cacheHospital?.(est);
+
       // L'établissement doit être VALIDÉ par l'administration MedConnect
       // avant toute connexion. Une inscription ne s'active pas d'elle-même.
       const estStatus = String(est.status || '').toLowerCase();
@@ -267,7 +284,12 @@ const HospitalAuth = (() => {
       }
 
       // Établissement déverrouillé → connexion personnelle de l'agent.
-      renderRolePicker(est);
+      // Relit la version la plus fraîche du cache local : la migration
+      // héritée ci-dessus (si elle a eu lieu) l'a modifiée directement
+      // en local (retrait de passwordHash) — reprendre le `est` original
+      // en mémoire ici l'écraserait avec l'ancien passwordHash.
+      const finalEst = window.HospitalsRegistry?.getHospitalById?.(est.establishmentId || est.id) || est;
+      renderRolePicker(finalEst);
     } catch (e) {
       console.error('[HospitalAuth] login :', e);
       App.toast(e.message || 'Connexion impossible.', 'error');
@@ -310,7 +332,16 @@ const HospitalAuth = (() => {
   // des autres rôles) — seul l'endroit où le formulaire s'affiche change.
   const AGENT_SELF_REGISTER_ROLES = ['lab', 'reception'];
 
+  // Établissement complet conservé en mémoire dès le sélecteur de rôle
+  // affiché — évite de dépendre uniquement de
+  // HospitalsRegistry.getHospitalById(establishmentId) (repose sur le
+  // cache local, qui peut être en retard) pour toggleAgentRegister() et
+  // pour transmettre le contexte d'inscription complet à Auth. Réinitialisé
+  // par renderScreen() (retour à l'écran initial) et après inscription.
+  let _activeEstablishment = null;
+
   function renderRolePicker(est) {
+    _activeEstablishment = est;
     const scr = document.getElementById('auth-screen');
     scr.innerHTML = `
       <div class="hospital-auth-wrap">
@@ -335,12 +366,13 @@ const HospitalAuth = (() => {
             <label>Mot de passe personnel</label>
             <input id="ha-agent-pw" type="password" placeholder="••••••••">
           </div>
-          <button class="btn btn-primary btn-full" onclick="HospitalAuth.verifyAgent('${esc(est.establishmentId || est.id)}')">Se connecter</button>
+          <button class="btn btn-primary btn-full" id="ha-verify-btn" type="button" onclick="HospitalAuth.verifyAgent('${esc(est.establishmentId || est.id)}')">Se connecter</button>
+          <div id="ha-agent-step" style="margin-top:.5rem;font-size:.8rem;color:var(--text-muted)"></div>
           <div id="ha-agent-msg" style="margin-top:.8rem"></div>
 
           <div id="ha-agent-register-toggle" style="margin-top:1rem;font-size:.85rem;display:none">
             <span id="ha-agent-register-hint"></span>
-            <a href="#" onclick="HospitalAuth.toggleAgentRegister(event)">📝 Inscription</a>
+            <a href="#" onclick="HospitalAuth.toggleAgentRegister(event, '${esc(est.establishmentId || est.id)}')">📝 Inscription</a>
           </div>
           <div id="ha-agent-register-wrap" style="display:none;margin-top:.75rem;border-top:1px solid var(--border);padding-top:.75rem">
             <div id="register-form"></div>
@@ -374,10 +406,14 @@ const HospitalAuth = (() => {
   }
 
   /* Ouvre le formulaire d'inscription lab/reception — délègue
-     entièrement à Auth._registerRole(), qui construit le même
-     formulaire (numéro, email, mot de passe) que sur mobile, avec le
-     même bouton d'envoi (Auth._regLab/_regReception). */
-  function toggleAgentRegister(e) {
+     entièrement à Auth._registerRole(), qui construit désormais le
+     formulaire renforcé dédié à ces 2 rôles (nom complet, matricule,
+     email, mot de passe 8+ caractères, service/téléphone facultatifs),
+     avec le même bouton d'envoi (Auth._regLab/_regReception).
+     establishmentId est transmis via Auth._setRegistrationContext pour
+     que la demande d'affiliation soit créée dès l'inscription (voir
+     js/auth.js _regAgentStrict, section 4 du cahier des charges). */
+  function toggleAgentRegister(e, establishmentId) {
     e?.preventDefault?.();
     const role = document.getElementById('ha-agent-role')?.value;
     if (!AGENT_SELF_REGISTER_ROLES.includes(role)) return;
@@ -385,14 +421,32 @@ const HospitalAuth = (() => {
     if (!wrap) return;
     const opening = wrap.style.display === 'none';
     wrap.style.display = opening ? 'block' : 'none';
-    if (opening) window.Auth?._registerRole?.(role);
+    if (opening) {
+      // Correctif : utilise l'établissement COMPLET déjà en mémoire
+      // (posé par renderRolePicker) au lieu de dépendre uniquement de
+      // HospitalsRegistry.getHospitalById(establishmentId), qui peut
+      // ne pas encore connaître cet établissement localement.
+      const est = _activeEstablishment ||
+        (establishmentId ? window.HospitalsRegistry?.getHospitalById?.(establishmentId) : null);
+      window.Auth?._setRegistrationContext?.(establishmentId ? {
+        establishmentId,
+        establishmentName: est?.name || '',
+        officialId: est?.officialId || '',
+        establishment: est || null,
+      } : null);
+      window.Auth?._registerRole?.(role);
+    } else {
+      window.Auth?._setRegistrationContext?.(null);
+    }
   }
+
+  function _normNum(s) { return String(s || '').trim().toUpperCase().replace(/\s+/g, ' '); }
 
   /* Vérifie l'affiliation de l'agent au staff de l'établissement
      (le rôle au sein de l'hôpital). L'AUTHENTIFICATION, elle, se
      fait par le vrai compte Firebase de l'agent dans verifyAgent. */
   function findStaffRole(est, uid, number, role) {
-    const num = String(number || '').trim().toUpperCase();
+    const num = _normNum(number);
     const staff = Array.isArray(est.staff) ? est.staff : [];
     const activeOk = s => s.status === 'active' || s.status === 'approved';
     // Le rôle demandé (menu déroulant) DOIT concorder avec le rôle
@@ -401,13 +455,33 @@ const HospitalAuth = (() => {
     // dans le menu (contrôle d'accès affaibli).
     // Priorité : correspondance par uid (identité authentifiée).
     let member = staff.find(s => s.uid === uid && s.role === role && activeOk(s));
-    // Repli : par numéro professionnel (agent affilié avant d'avoir un uid lié).
+    // Repli : par numéro professionnel, UNIQUEMENT si ce membre n'a
+    // encore AUCUN uid lié (agent affilié avant d'avoir un compte
+    // Firebase personnel) — jamais si un uid DIFFÉRENT y est déjà
+    // posé (voir findStaffConflict, qui doit être vérifié en premier
+    // par l'appelant : un matricule déjà lié à un autre compte ne doit
+    // jamais être silencieusement repris).
     if (!member) {
       member = staff.find(s =>
-        String(s.professionalNumber || '').toUpperCase() === num &&
+        !s.uid &&
+        _normNum(s.professionalNumber) === num &&
         s.role === role && activeOk(s));
     }
     return member || null;
+  }
+
+  /* Détecte un matricule déjà lié à un AUTRE uid que celui qui vient de
+     s'authentifier — cas d'un agent réel dont le compte a été recréé
+     (nouvel authUid Firebase) alors que le staff garde encore l'ancien.
+     Ne JAMAIS remplacer automatiquement : l'administration de
+     l'établissement doit corriger l'affiliation elle-même. */
+  function findStaffConflict(est, uid, number, role) {
+    const num = _normNum(number);
+    const staff = Array.isArray(est.staff) ? est.staff : [];
+    return staff.find(s =>
+      s.uid && s.uid !== uid &&
+      _normNum(s.professionalNumber) === num &&
+      s.role === role) || null;
   }
 
   /* Nettoyage complet d'une tentative de connexion desktop invalide ou
@@ -421,7 +495,37 @@ const HospitalAuth = (() => {
     }
   }
 
+  function _lockVerifyButton() {
+    const btn = document.getElementById('ha-verify-btn');
+    if (!btn) return null;
+    btn._mcOriginalText = btn.textContent;
+    btn.disabled = true;
+    if (btn.dataset) btn.dataset.processing = 'true';
+    btn.textContent = '⏳ Connexion en cours…';
+    return btn;
+  }
+  function _unlockVerifyButton(btn) {
+    if (!btn || typeof document === 'undefined' || !document.body?.contains?.(btn)) return;
+    btn.disabled = false;
+    btn.textContent = btn._mcOriginalText != null ? btn._mcOriginalText : btn.textContent;
+    if (btn.dataset) delete btn.dataset.processing;
+  }
+  function _setVerifyStep(text) {
+    const el = document.getElementById('ha-agent-step');
+    if (el) el.textContent = text || '';
+  }
+
+  // Anti double-appui : la vérification enchaîne des lectures cloud puis
+  // un signInWithEmailAndPassword awaités — un second clic pendant ce
+  // temps relançait tout en parallèle (double tentative de connexion).
+  let _verifyingAgent = false;
   async function verifyAgent(establishmentId) {
+    if (_verifyingAgent) return;
+    const btn = document.getElementById('ha-verify-btn');
+    if (btn?.dataset?.processing === 'true') return;
+    _verifyingAgent = true;
+    const lockedBtn = _lockVerifyButton();
+    try {
     const est = (window.HospitalsRegistry?.getHospitalById?.(establishmentId)) || { establishmentId };
     const role = document.getElementById('ha-agent-role').value;
     const num  = document.getElementById('ha-agent-num').value.trim();
@@ -429,17 +533,62 @@ const HospitalAuth = (() => {
     const msg  = document.getElementById('ha-agent-msg');
     if (!num || !pw) { App.toast('Numéro et mot de passe requis.', 'error'); return; }
 
+    // 0) Pré-vérification du statut du compte — messages précis, et
+    // surtout AUCUNE tentative de signIn Firebase pour un compte
+    // pending/rejected/suspended (jamais de message technique Firebase
+    // quand la vraie cause est le statut du compte). Réservé à
+    // lab/reception : doctor/nurse/pharmacist passent par leur propre
+    // registre (resolveProfessionalAccountFromFirestore), où authUid
+    // n'est posé qu'APRÈS un premier signIn réussi — l'exiger ici les
+    // bloquerait à tort dès leur toute première connexion.
+    let precheck = null;
+    let precheckAttempted = false;
+    if (AGENT_SELF_REGISTER_ROLES.includes(role)) {
+      _setVerifyStep('Recherche du compte…');
+      precheckAttempted = true;
+      try { precheck = await window.Auth?.resolveAgentAccountForLogin?.(role, num); } catch (_) { precheck = null; }
+    }
+    if (precheck?.ambiguous) {
+      msg.innerHTML = `<div class="auth-register-info" style="border-color:var(--danger)">Ce matricule correspond à plusieurs comptes distincts. Demandez une correction à l'administrateur.</div>`;
+      return;
+    }
+    if (!precheck && precheckAttempted) {
+      const roleLabel = role === 'lab' ? 'Laboratoire' : 'Réception';
+      msg.innerHTML = `<div class="auth-register-info" style="border-color:var(--danger)">Aucun compte ${esc(roleLabel)} ne correspond à ce matricule.</div>`;
+      return;
+    }
+    if (precheck) {
+      const status = String(precheck.status || '').toLowerCase();
+      if (status === 'pending') {
+        msg.innerHTML = `<div class="auth-register-info" style="border-color:var(--accent)">⏳ Votre compte attend encore la validation de l'administration MedConnect.</div>`;
+        return;
+      }
+      if (status === 'rejected') {
+        msg.innerHTML = `<div class="auth-register-info" style="border-color:var(--danger)">❌ Votre demande a été refusée. Contactez l'administration.</div>`;
+        return;
+      }
+      if (status === 'suspended') {
+        msg.innerHTML = `<div class="auth-register-info" style="border-color:var(--danger)">🚫 Compte suspendu. Contactez l'administrateur.</div>`;
+        return;
+      }
+      if (!precheck.authUid || !precheck.email) {
+        msg.innerHTML = `<div class="auth-register-info" style="border-color:var(--danger)">❌ Ce compte ne possède pas d'identité Firebase valide. Contactez l'administration.</div>`;
+        return;
+      }
+    }
+
     // 1) Authentification PERSONNELLE de l'agent (vraie session Firebase
     //    à son nom → le serveur lira SON rôle). On réutilise le login
     //    professionnel existant (Auth.loginProfessional) qui résout le
     //    compte par numéro + rôle et fait signInWithEmailAndPassword.
+    _setVerifyStep('Vérification du mot de passe…');
     let account = null;
     try {
       account = await window.Auth?.loginProfessionalSilently?.(role, num, pw);
     } catch (_) { account = null; }
 
     if (!account) {
-      msg.innerHTML = `<div class="auth-register-info" style="border-color:var(--danger)">❌ Identifiants incorrects. Utilisez votre numéro professionnel et votre mot de passe personnel (le même que sur mobile).</div>`;
+      msg.innerHTML = `<div class="auth-register-info" style="border-color:var(--danger)">❌ Matricule ou mot de passe incorrect.</div>`;
       return;
     }
 
@@ -458,14 +607,61 @@ const HospitalAuth = (() => {
       return;
     }
 
-    // 2) Vérifier l'affiliation au staff de l'établissement (le rôle
-    // demandé DOIT concorder avec le rôle affilié — voir findStaffRole).
-    const member = findStaffRole(est, account.uid, num, role);
+    // 1ter) Vérification de cohérence du profil Firestore (users vs
+    // mc_accounts) — jamais d'ouverture du tableau de bord sur la seule
+    // foi du document public mc_accounts si users le contredit (rôle ou
+    // authUid différents). Réservé à lab/reception, comme le précontrôle.
+    if (AGENT_SELF_REGISTER_ROLES.includes(role)) {
+      const profileCheck = await window.Auth?.verifyAgentProfileConsistency?.(account.uid, role);
+      if (profileCheck?.ok === false) {
+        await _abortAgentSession();
+        msg.innerHTML = `<div class="auth-register-info" style="border-color:var(--danger)">Votre profil professionnel doit être corrigé par l'administration.</div>`;
+        return;
+      }
+    }
+
+    // 2) Un matricule déjà lié à un AUTRE uid ne doit jamais être repris
+    // silencieusement (voir findStaffConflict) — refus explicite, jamais
+    // de remplacement automatique de l'affiliation existante.
+    const conflict = findStaffConflict(est, account.uid, num, role);
+    if (conflict) {
+      await _abortAgentSession();
+      msg.innerHTML = `<div class="auth-register-info" style="border-color:var(--danger)">❌ Ce matricule est déjà lié à un autre compte.<br>Contactez l'administration de l'établissement pour corriger l'affiliation.</div>`;
+      return;
+    }
+
+    _setVerifyStep('Vérification de l\'affiliation…');
+    // 3) Vérifier l'affiliation. Priorité : cache local staff (rapide,
+    // suffisant si déjà à jour) — sinon hospitalMembers/
+    // affiliation_requests directement en Firestore (sources de vérité
+    // réelles, jamais le seul cache local qui peut être en retard —
+    // voir resolveAgentAffiliation).
+    let member = findStaffRole(est, account.uid, num, role);
     if (!member) {
-      // L'agent est authentifié mais pas affilié : on CRÉE une demande
-      // d'affiliation pour que l'administration puisse la valider.
-      // (Auparavant on affichait juste un message sans rien créer —
-      // l'admin ne recevait donc aucune demande.)
+      let affiliationResolution = null;
+      try {
+        affiliationResolution = await window.HospitalsRegistry?.resolveAgentAffiliation?.(
+          est.establishmentId || establishmentId, account.uid, role);
+      } catch (e) { console.warn('[HospitalAuth] resolveAgentAffiliation :', e); }
+
+      if (affiliationResolution?.status === 'active') {
+        member = { role, name: account.name, professionalNumber: num, status: 'active' };
+      } else if (affiliationResolution?.status === 'pending') {
+        msg.innerHTML = `<div class="auth-register-info" style="border-color:var(--accent)">Votre compte est validé, mais votre affiliation à cet établissement attend encore une approbation.</div>`;
+        await _abortAgentSession();
+        return;
+      } else if (affiliationResolution?.status === 'rejected') {
+        msg.innerHTML = `<div class="auth-register-info" style="border-color:var(--danger)">Votre affiliation à cet établissement a été refusée.</div>`;
+        await _abortAgentSession();
+        return;
+      }
+    }
+    if (!member) {
+      // L'agent est authentifié mais pas affilié (aucune trace, ni
+      // locale ni Firestore) : on CRÉE une demande d'affiliation pour
+      // que l'administration puisse la valider. (Auparavant on
+      // affichait juste un message sans rien créer — l'admin ne
+      // recevait donc aucune demande.)
       let created = false;
       try {
         const existing = (window.HospitalsRegistry?.getAffiliations?.() || []).find(a =>
@@ -474,17 +670,17 @@ const HospitalAuth = (() => {
         if (existing) {
           created = 'exists';
         } else {
-          const req = window.HospitalsRegistry?.requestAffiliation?.(
+          const req = await window.HospitalsRegistry?.requestAffiliation?.(
             account.uid, account.name || `${role} ${num}`, est.establishmentId || establishmentId,
-            { role, professionalNumber: num });
-          created = !!req;
+            { role, professionalNumber: num, establishment: est });
+          created = !!req?.requestId;
         }
       } catch (e) {
         console.warn('[HospitalAuth] Création demande affiliation :', e);
       }
 
       msg.innerHTML = created === 'exists'
-        ? `<div class="auth-register-info" style="border-color:var(--accent)">⏳ Votre demande d'affiliation est déjà en attente de validation par l'administration.</div>`
+        ? `<div class="auth-register-info" style="border-color:var(--accent)">Votre compte est validé, mais votre affiliation à cet établissement attend encore une approbation.</div>`
         : created
           ? `<div class="auth-register-info" style="border-color:var(--secondary)">✅ Demande d'affiliation envoyée à l'administration. Vous pourrez vous connecter une fois validé.</div>`
           : `<div class="auth-register-info" style="border-color:var(--danger)">⚠️ Vous êtes authentifié, mais pas affilié, et la demande n'a pas pu être créée. Contactez l'administration.</div>`;
@@ -500,11 +696,17 @@ const HospitalAuth = (() => {
 
     // Rôle de session = rôle vérifié dans le staff (source de vérité
     // de l'affiliation, déjà filtrée sur le rôle demandé).
+    _setVerifyStep('Ouverture du tableau de bord…');
     enter(establishmentId, member.role || account.role || role, {
       name: account.name || member.name,
       professionalNumber: num,
       uid: account.uid,
     });
+    } finally {
+      _unlockVerifyButton(lockedBtn);
+      _setVerifyStep('');
+      _verifyingAgent = false;
+    }
   }
 
   function enter(establishmentId, role, agentInfo = {}) {

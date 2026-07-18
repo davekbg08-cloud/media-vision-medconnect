@@ -1,15 +1,51 @@
 {
-  "version": "2.9.26",
-  "build": "2026.07.17.2",
-  "buildDate": "2026-07-17",
+  "version": "2.9.29",
+  "build": "2026.07.18.3",
+  "buildDate": "2026-07-18",
   "changelog": [
     {
-      "version": "2.9.26",
-      "date": "2026-07-17",
+      "version": "2.9.29",
+      "date": "2026-07-18",
       "notes": [
         "IA médicale : les articles restent affichés en français par défaut (titre et résumé traduits) quand une synthèse IA est configurée, avec le texte original toujours accessible (« Voir le texte original ») — sans clé configurée, message clair au lieu d'une traduction inventée",
         "IA médicale : une recherche courte sur un seul médicament (ex. « quinine ») est désormais triée par pertinence clinique — les études cliniques/humaines apparaissent avant la chimie analytique ou l'expérimentation animale, sans qu'aucune étude ne soit supprimée",
         "IA médicale : filtres (études humaines, essais cliniques, revues systématiques, effets indésirables, interactions, résistance, année) et nettoyage des balises HTML brutes que renvoyait parfois Europe PMC dans les résumés"
+      ]
+    },
+    {
+      "version": "2.9.28",
+      "date": "2026-07-18",
+      "notes": [
+        "Correctif Laboratoire (desktop hôpital) : le bouton « + Nouvelle demande » ouvrait une fenêtre affichée SOUS le tableau de bord (invisible à l'écran, clic apparemment sans effet) — la fenêtre passe désormais au-dessus, se ferme par la croix, la touche Échap ou un clic en dehors",
+        "Correctif sécurité : le bouton « + Nouvelle demande » et la création de demandes d'analyses étaient accessibles à tous les rôles, y compris au laborantin lui-même — réservés désormais au médecin, à l'infirmier(ère) et à l'administration hospitalière, vérifié à l'affichage ET au moment de l'action, y compris côté serveur (règles Firestore)",
+        "Correctif : la prise en charge et la saisie de résultat n'étaient plus limitées par établissement — un laborantin pouvait modifier une demande ou un résultat d'un AUTRE hôpital ; l'accès est désormais strictement limité à l'établissement d'affiliation, avec des transitions de statut contrôlées (impossible de revenir en arrière ou de sauter une étape)",
+        "Correctif : la saisie d'un résultat de laboratoire effectuait 3 écritures Firestore séparées — un échec après la première pouvait clôturer une demande sans résultat associé (invisible pour le médecin et le patient) ; les 3 écritures sont désormais atomiques (tout ou rien)",
+        "Correctif : un résultat demandé par un(e) infirmier(ère) ne parvenait qu'au médecin (jamais à l'infirmier(ère) demandeur) et pouvait confondre son identifiant avec celui du médecin responsable — les deux rôles reçoivent désormais correctement le résultat, sans confusion d'identité",
+        "Correctif : le rôle Laboratoire n'était notifié d'AUCUNE nouvelle demande d'analyse en temps réel — corrigé",
+        "Interface : recherche du patient par numéro MC (cache local puis vérification cloud ciblée), retour visuel et verrou anti double-clic sur tous les boutons du module laboratoire (nouvelle demande, prise en charge, saisie de résultat)"
+      ]
+    },
+    {
+      "version": "2.9.27",
+      "date": "2026-07-18",
+      "notes": [
+        "Correctif Laboratoire/Réception : un établissement retrouvé dans Firestore lors de la connexion mais absent du cache local (fusions manquées) empêchait la création de la demande d'affiliation à l'inscription — l'établissement est désormais mis en cache localement dès sa lecture, sans jamais écraser le personnel déjà connu ni écrire sur Firestore",
+        "Correctif : la demande d'affiliation ne renvoyait plus d'échec exploitable (false silencieux) quand l'établissement n'était pas immédiatement disponible — elle tente désormais une lecture ciblée Firestore, sinon retourne un motif précis (« établissement introuvable ») affiché tel quel au lieu d'un message générique",
+        "Correctif sécurité : la recherche du compte Laboratoire/Réception au moment de la connexion se limitait au premier document trouvé (limit(1)) — un faux document sans identité Firebase pouvait masquer le vrai compte ; la recherche est désormais élargie et filtrée (identité Firebase + rôle + email requis), avec refus explicite (\"identités ambiguës\") si plusieurs comptes valides coexistent au lieu d'un choix arbitraire",
+        "Correctif : après connexion, le profil Firestore (rôle, statut, identité) est désormais revérifié directement et comparé au compte public local — toute incohérence bloque l'ouverture du tableau de bord au lieu de l'autoriser sur la seule foi du cache",
+        "Correctif : l'affiliation à l'établissement n'était vérifiée que via le cache local du personnel (establishments.staff), pouvant devenir périmé — la connexion consulte désormais directement hospitalMembers et affiliation_requests, avec réparation contrôlée du cache uniquement si Firestore confirme une affiliation approuvée (jamais l'inverse)",
+        "Amélioration : messages d'erreur distincts à la connexion Laboratoire/Réception selon la cause réelle (compte introuvable, en attente de validation, affiliation en attente/refusée, mot de passe incorrect, identité incohérente) au lieu d'un message générique unique",
+        "Interface : retour à l'écran de connexion établissement (au lieu d'un état intermédiaire ambigu) après l'inscription Laboratoire/Réception, avec indication claire de reconnexion ; retour visuel immédiat (bouton verrouillé, étapes affichées) sur les boutons d'inscription et de connexion de ces rôles"
+      ]
+    },
+    {
+      "version": "2.9.26",
+      "date": "2026-07-17",
+      "notes": [
+        "Laboratoire/Réception : l'inscription depuis le desktop hôpital exige désormais une identité Firebase réelle de bout en bout — aucun compte n'est plus créé (ni cloud, ni local) si Firebase Authentication échoue ou si Firestore ne confirme pas l'écriture, avec détection des doublons (matricule/email) avant toute création",
+        "Laboratoire/Réception : la demande d'affiliation à l'établissement est désormais créée dès l'inscription (au lieu d'exiger une seconde démarche après validation du compte), et la session est systématiquement nettoyée après l'inscription (jamais de tableau de bord ouvert pour un compte en attente)",
+        "Connexion desktop : messages d'erreur précis selon la cause réelle (compte en attente/refusé/suspendu, affiliation en attente, matricule déjà lié à un autre compte) — un matricule ne peut plus être repris silencieusement par un autre compte",
+        "Administration : les boutons \"Approuver\"/\"Refuser\"/\"Suspendre\" et l'approbation d'affiliation attendent désormais réellement la confirmation Firestore (avec délai maximal) avant d'afficher un succès, se verrouillent contre le double-clic, et ne peuvent plus transformer une demande fantôme (sans compte Firebase) en compte approuvé"
       ]
     },
     {

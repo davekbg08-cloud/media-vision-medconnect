@@ -19,6 +19,27 @@ body.hospital-desktop-open {
   overflow: hidden;
 }
 
+/* Correctif (chantier "modales laboratoire") : #global-modal (css/style.css,
+   z-index: 1000) et .toast-container (z-index: 9999, déjà au-dessus en
+   pratique) sont définis pour le shell PRINCIPAL, sous #hospital-desktop-root
+   (z-index: 5000). Le shell desktop hôpital, ouvert par-dessus, masquait
+   donc toute modale ouverte depuis un module desktop (ex. HospitalLabModule
+   .openNew()) : App.openModal() ajoutait bien .active, mais l'overlay
+   restait visuellement sous le shell. Ne jamais baisser le z-index du
+   shell : on relève celui de la modale/des toasts uniquement quand le
+   shell desktop est ouvert. */
+body.hospital-desktop-open #global-modal {
+  z-index: 7000;
+}
+
+body.hospital-desktop-open #global-modal.active {
+  display: flex;
+}
+
+body.hospital-desktop-open .toast-container {
+  z-index: 8000;
+}
+
 /* ── Sidebar propre au shell hôpital ── */
 .hospital-sidebar {
   width: 250px;

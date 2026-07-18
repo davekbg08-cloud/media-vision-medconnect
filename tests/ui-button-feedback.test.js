@@ -74,8 +74,6 @@ for (const [label, file, flag] of [
   // Audit (2.9.22) : tous les créateurs de données async restants.
   ['consultation saveConsult', 'js/hospital.js', '_savingConsult'],
   ['admission saveAdmission', 'js/hospital-beds.js', '_savingAdmission'],
-  ['labo saveOrder', 'js/hospital-lab.js', '_savingOrder'],
-  ['labo saveResult', 'js/hospital-lab.js', '_savingResult'],
   ['rendez-vous save', 'js/appointments.js', '_savingApt'],
   ['connexion établissement login', 'js/hospital-auth.js', '_loggingIn'],
   ['inscription établissement register', 'js/hospital-auth.js', '_registering'],
@@ -85,6 +83,24 @@ for (const [label, file, flag] of [
     assert.match(src, new RegExp(`let ${flag} = false;`), `déclaration du verrou ${flag}`);
     assert.match(src, new RegExp(`if \\(${flag}\\) return;`), 'garde en tête');
     assert.match(src, new RegExp(`finally \\{ ${flag} = false; \\}`), 'relâché dans finally (jamais bloqué)');
+  });
+}
+
+// labo saveOrder/saveResult (chantier "modales laboratoire") : verrou de
+// réentrance à la fois sur le flag ET le bouton lui-même (data-processing),
+// restauration du LIBELLÉ du bouton en plus du flag — motif différent des
+// entrées génériques ci-dessus (retour false explicite + finally multi-
+// lignes qui restaure aussi le texte du bouton), vérifié séparément.
+for (const [label, flag, unlockLabel] of [
+  ['labo saveOrder', '_savingOrder', 'Envoyer la demande'],
+  ['labo saveResult', '_savingResult', 'Enregistrer le résultat'],
+]) {
+  test(`${label} : verrou de réentrance (${flag}) posé et relâché dans finally, bouton restauré`, () => {
+    const src = read('js/hospital-lab.js');
+    assert.match(src, new RegExp(`let ${flag} = false;`), `déclaration du verrou ${flag}`);
+    assert.match(src, new RegExp(`if \\(${flag}\\) return false;`), 'garde en tête (retour false explicite)');
+    assert.match(src, new RegExp(`${flag} = false;\\s*\\n\\s*_unlockButton\\(btn, '${unlockLabel.replace(/'/g, "\\\\'")}'\\);`),
+      'relâché dans finally ET bouton restauré avec son libellé initial');
   });
 }
 
