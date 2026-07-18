@@ -35,6 +35,10 @@ const HospitalPermissions = (() => {
     reception:     ['admin', 'admin_hospital', 'reception', 'nurse'],
     ai:            ['admin', 'admin_hospital', 'doctor'],
     subscription:  ['admin', 'admin_hospital'],
+    // Messagerie interne à l'établissement (retour utilisateur : absente
+    // du desktop hôpital, contrairement au mobile) — ouverte à tout le
+    // personnel affilié, comme settings.
+    messages:      ['admin', 'admin_hospital', 'doctor', 'nurse', 'pharmacist', 'lab', 'reception'],
     settings:      ['admin', 'admin_hospital', 'doctor', 'nurse', 'pharmacist', 'lab', 'reception'],
   };
 
@@ -74,6 +78,7 @@ const HospitalPermissions = (() => {
     if (canAccess(role, 'pharmacy'))      menu.push({ key:'pharmacy',      label:L('hd_pharmacy')      || 'Pharmacie',                icon:'💊' });
     if (canAccess(role, 'doctors'))       menu.push({ key:'doctors',       label:L('hd_doctors')       || 'Médecins affiliés',       icon:'👨‍⚕️' });
     if (canAccess(role, 'ai'))            menu.push({ key:'ai',            label:L('hd_ai')            || 'IA médicale',             icon:'🤖' });
+    if (canAccess(role, 'messages'))      menu.push({ key:'messages',      label:L('hd_messages')      || 'Messagerie',              icon:'📨' });
     if (canAccess(role, 'subscription'))  menu.push({ key:'subscription',  label:L('hd_subscription')  || 'Abonnement',              icon:'💳' });
     if (canAccess(role, 'settings'))      menu.push({ key:'settings',      label:L('hd_settings')      || 'Paramètres',              icon:'⚙️' });
     return menu;

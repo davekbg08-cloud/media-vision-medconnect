@@ -17,7 +17,17 @@ const Network = (() => {
      toUid/fromUid/fromRole/readStatus/priority/createdAt
      sont les champs propres pour les nouveaux usages.
   ──────────────────────────────────────────────────── */
-  function notify({ to_role, to_id, type, subject, body, priority, recipientUid, hospitalId }) {
+  function notify({
+    to_role, to_id, type, subject, body, priority, recipientUid, hospitalId,
+    // Pièce jointe (chantier "messagerie desktop hôpital") : référence
+    // vers une fiche patient ou une ordonnance DÉJÀ existante dans
+    // Firestore — jamais un fichier/photo uploadé (pas de Firebase
+    // Storage sur ce projet). Le destinataire ne peut ouvrir la
+    // référence que s'il a lui-même le droit de lire ce document
+    // (règles Firestore de mc_patients/mc_prescriptions, inchangées) :
+    // joindre une référence n'élargit aucun accès.
+    attachedRecordType = null, attachedRecordId = null, attachedRecordLabel = null,
+  }) {
     const from = window.Auth?.getUser?.();
     const msgs = DB.getMessages();
     msgs.push({
@@ -46,6 +56,7 @@ const Network = (() => {
       // messagerie pro→pro (js/transfer_ui_patch.js) le renseigne.
       hospitalId: hospitalId || null,
       sourceDevice: window.ExchangeBridge?.currentSourceDevice?.() || 'mobile',
+      attachedRecordType, attachedRecordId, attachedRecordLabel,
     });
     DB.saveMessages(msgs);
   }

@@ -16,6 +16,7 @@
     hd_lab:           { fr:'Laboratoire', en:'Laboratory', es:'Laboratorio', ar:'المختبر', pt:'Laboratório', sw:'Maabara', zh:'实验室', de:'Labor', ru:'Лаборатория', hi:'प्रयोगशाला' },
     hd_pharmacy:      { fr:'Pharmacie', en:'Pharmacy', es:'Farmacia', ar:'الصيدلية', pt:'Farmácia', sw:'Duka la dawa', zh:'药房', de:'Apotheke', ru:'Аптека', hi:'फार्मेसी' },
     hd_ai:            { fr:'IA médicale', en:'Medical AI', es:'IA médica', ar:'الذكاء الاصطناعي الطبي', pt:'IA médica', sw:'AI ya matibabu', zh:'医疗AI', de:'Medizinische KI', ru:'Медицинский ИИ', hi:'चिकित्सा AI' },
+    hd_messages:      { fr:'Messagerie', en:'Messages', es:'Mensajería', ar:'الرسائل', pt:'Mensagens', sw:'Ujumbe', zh:'消息', de:'Nachrichten', ru:'Сообщения', hi:'संदेश' },
     hd_subscription:  { fr:'Abonnement', en:'Subscription', es:'Suscripción', ar:'الاشتراك', pt:'Assinatura', sw:'Usajili', zh:'订阅', de:'Abonnement', ru:'Подписка', hi:'सदस्यता' },
     hd_settings:      { fr:'Paramètres', en:'Settings', es:'Ajustes', ar:'الإعدادات', pt:'Configurações', sw:'Mipangilio', zh:'设置', de:'Einstellungen', ru:'Настройки', hi:'सेटिंग्स' },
     hd_back_to_app:   { fr:"Retour à l'application", en:'Back to app', es:'Volver a la app', ar:'العودة إلى التطبيق', pt:'Voltar ao app', sw:'Rudi kwenye programu', zh:'返回应用', de:'Zurück zur App', ru:'Назад в приложение', hi:'ऐप पर वापस' },
