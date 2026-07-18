@@ -209,6 +209,35 @@ service cloud.firestore {
     function hospitalCanWriteFromDevice(hospitalId, deviceValue) {
       return hospitalSubscriptionOk(hospitalId) || deviceValue != 'desktop';
     }
+
+    /* ── LECTURE mobile du dossier médical par le personnel clinique ──
+       Demande client : un contenu (consultation/ordonnance/résultat de
+       labo) créé côté DESKTOP hôpital ne doit être visible au médecin/
+       infirmier(ère) que si l'abonnement de l'établissement est actif —
+       jamais pour le patient (toujours visible, principe inchangé), et
+       jamais pour le contenu créé côté MOBILE (toujours visible aux
+       professionnels, jamais coupé — principe hospitalCanWriteFromDevice
+       existant, inchangé ici).
+       ⚠️ LIMITE CONNUE (même famille que hospitalCanWriteFromDevice) :
+       les règles ne peuvent pas distinguer une lecture depuis l'app
+       mobile d'une lecture depuis le desktop pour un même compte
+       Firebase — seul sourceDevice, DÉCLARÉ sur le document au moment
+       de sa création, est disponible sans backend. Un médecin/
+       infirmier(ère) qui relit depuis le desktop DE CE MÊME hôpital un
+       contenu que ce dernier a lui-même créé sera donc logiquement
+       soumis à la même règle tant que l'abonnement est inactif — accepté
+       comme limite technique, cohérent avec le reste du projet (aucune
+       Cloud Function). NE PAS présenter comme une détection fiable du
+       device courant.
+    */
+    function clinicalStaffCanReadDesktopContent(data) {
+      return data.get('sourceDevice', null) != 'desktop' ||
+        hospitalSubscriptionOk(resolveHospitalId(data));
+    }
+    function subscriptionReadGateOk(data) {
+      return !(currentRoleIs('doctor') || currentRoleIs('nurse')) ||
+        clinicalStaffCanReadDesktopContent(data);
+    }
     // Collections des WORKFLOWS DESKTOP (beds / admissions /
     // receptionVisits / labRequests / labResults / emergencyCases /
     // maternityCases / aiQueries) : elles ne sont JAMAIS écrites par la
@@ -761,8 +790,13 @@ service cloud.firestore {
       // infirmier lire TOUTE la collection, y compris d'autres hôpitaux
       // — remplacé par belongsToSameEstablishment (aucun consentement
       // requis pour l'établissement créateur, clarification client).
-      allow read: if canReadMedicalData(resource.data) ||
-        belongsToSameEstablishment(resource.data);
+      // subscriptionReadGateOk : une consultation créée côté desktop
+      // n'est visible au médecin/infirmier(ère) que si l'abonnement de
+      // l'établissement est actif (voir définition plus haut) — jamais
+      // appliqué au patient (ownsPatientData reste inconditionnel).
+      allow read: if (canReadMedicalData(resource.data) ||
+        belongsToSameEstablishment(resource.data)) &&
+        subscriptionReadGateOk(resource.data);
       // Créer/valider une consultation = acte médical : médecin
       // uniquement (l'infirmier peut lire, pas créer). Verrouillage
       // serveur du contrôle de capacité côté client.
@@ -787,7 +821,12 @@ service cloud.firestore {
     }
 
     match /mc_lab_results/{docId} {
-      allow read: if canReadMedicalData(resource.data) || belongsToSameEstablishment(resource.data);
+      // subscriptionReadGateOk : un résultat de labo créé côté desktop
+      // n'est visible au médecin/infirmier(ère) que si l'abonnement de
+      // l'établissement est actif (jamais appliqué au patient, ni au
+      // laborantin/admin_hospital qui traitent la demande).
+      allow read: if (canReadMedicalData(resource.data) || belongsToSameEstablishment(resource.data)) &&
+        subscriptionReadGateOk(resource.data);
       // Correctif (chantier "modales laboratoire") : "allow write" sans
       // aucune autre condition permettait à un laborantin (ou médecin/
       // infirmier) de N'IMPORTE QUEL hôpital de créer/modifier/
@@ -911,9 +950,14 @@ service cloud.firestore {
       // établissements confondus) par belongsToSameEstablishment —
       // sans consentement pour l'établissement créateur (clarification
       // client), plus l'auteur direct et le pharmacien ciblé.
-      allow read: if canReadMedicalData(resource.data) ||
+      // subscriptionReadGateOk : une ordonnance créée côté desktop n'est
+      // visible au médecin/infirmier(ère) que si l'abonnement de
+      // l'établissement est actif (jamais appliqué au patient, ni au
+      // pharmacien qui la traite).
+      allow read: if (canReadMedicalData(resource.data) ||
         belongsToSameEstablishment(resource.data) ||
-        pharmacyCanReadPrescription(resource.data);
+        pharmacyCanReadPrescription(resource.data)) &&
+        subscriptionReadGateOk(resource.data);
       // Correctif (audit) : même défaut que mc_consultations — le
       // principe hospitalCanWriteFromDevice n'était appliqué que sur
       // la collection jumelle /prescriptions (mirror jamais lu en
