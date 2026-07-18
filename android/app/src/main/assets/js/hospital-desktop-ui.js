@@ -456,6 +456,17 @@ const HospitalDesktopUI = (() => {
 
     const staff = (Array.isArray(hospital.staff) ? hospital.staff : [])
       .filter(s => s.status === 'active' || s.status === 'approved');
+    // Correctif (chantier sécurité, section 9) : le listener global
+    // affiliation_requests (js/db.js setupRealtimeListeners) ne peut
+    // jamais alimenter le cache local d'un admin_hospital — une requête
+    // Firestore non filtrée dont la seule branche de règle viable dépend
+    // de resource.data (belongsToSameEstablishment) est refusée en bloc
+    // pour ce rôle. On rafraîchit donc ici, à la demande, via une
+    // requête CIBLÉE (CloudDB.listByHospital, déjà filtrée par
+    // établissement) avant de lire le cache local.
+    if (isAdminHere) {
+      await window.HospitalsRegistry?.refreshAffiliationsForHospital?.(hospitalId);
+    }
     const pending = isAdminHere ? (window.HospitalsRegistry?.getPendingAffiliations?.(hospitalId) || []) : [];
 
     container.innerHTML = `
@@ -472,8 +483,8 @@ const HospitalDesktopUI = (() => {
               <p><strong>${esc(a.requesterName || a.requesterUid || '—')}</strong> · ${esc(HospitalPermissions.roleLabel(a.requesterRole))}</p>
               <p class="muted">N° ${esc(a.professionalNumber || '—')}</p>
               <div style="display:flex;gap:.4rem;margin-top:.4rem">
-                <button class="btn btn-primary btn-sm" onclick="HospitalDesktopUI.respondAffiliationDesktop('${esc(a.requestId || a.afid || '')}', true)">✅ Approuver</button>
-                <button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="HospitalDesktopUI.respondAffiliationDesktop('${esc(a.requestId || a.afid || '')}', false)">❌ Refuser</button>
+                <button class="btn btn-primary btn-sm" onclick="HospitalDesktopUI.respondAffiliationDesktop('${esc(a.requestId || a.afid || '')}', true, event)">✅ Approuver</button>
+                <button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="HospitalDesktopUI.respondAffiliationDesktop('${esc(a.requestId || a.afid || '')}', false, event)">❌ Refuser</button>
               </div>
             </div>`).join('')}
         </div>
@@ -497,9 +508,17 @@ const HospitalDesktopUI = (() => {
   /* Wrappers desktop autour de HospitalsRegistry (dont le rafraîchissement
      interne cible #main-content, invisible ici) : rejouent l'action puis
      réaffichent explicitement 'doctors' dans le container desktop réel. */
-  function respondAffiliationDesktop(requestId, approved) {
-    window.HospitalsRegistry?.respondAffiliation?.(requestId, approved);
-    navigate('doctors');
+  async function respondAffiliationDesktop(requestId, approved, event) {
+    // Correctif (chantier sécurité) : respondAffiliation() renvoie
+    // désormais {ok, ...} sur TOUS les chemins — on l'attend et on ne
+    // navigue (faux succès) que si ok === true ; en cas d'échec (ex.
+    // permission Firestore refusée), le message d'erreur reste visible
+    // et l'écran des demandes en attente n'est pas quitté.
+    const result = await window.HospitalsRegistry?.respondAffiliation?.(requestId, approved, event);
+    if (result?.ok === true) {
+      await navigate('doctors');
+    }
+    return result;
   }
   function removeAffiliatedStaff(establishmentId, uid) {
     window.HospitalsRegistry?.removeStaff?.(establishmentId, uid);

@@ -29,11 +29,17 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Vérifier le secret requis
+      - name: Vérifier les secrets requis
         env:
           FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          FIRESTORE_BACKUP_ENCRYPTION_KEY: ${{ secrets.FIRESTORE_BACKUP_ENCRYPTION_KEY }}
         run: |
           test -n "$FIREBASE_SERVICE_ACCOUNT_JSON" || (echo "Secret manquant : FIREBASE_SERVICE_ACCOUNT_JSON (voir docs/BACKUP_RESTORE_RUNBOOK.md)" && exit 1)
+          # Correctif (chantier sécurité, section 12/13) : bug confirmé —
+          # ce workflow publiait jusqu'ici l'export NDJSON en clair
+          # comme artefact ; désormais chiffré (voir étape ci-dessous),
+          # donc ce secret est requis pour que la sauvegarde aboutisse.
+          test -n "$FIRESTORE_BACKUP_ENCRYPTION_KEY" || (echo "Secret manquant : FIRESTORE_BACKUP_ENCRYPTION_KEY (voir docs/BACKUP_RESTORE_RUNBOOK.md)" && exit 1)
 
       - name: Installer firebase-admin (non permanent, cf. scripts/backup-firestore.mjs)
         run: npm install firebase-admin --no-save
@@ -55,10 +61,23 @@ jobs:
         if: always()
         run: rm -f /tmp/firebase-service-account.json
 
-      - name: Publier l'export comme artefact
+      - name: Chiffrer l'export (gpg symétrique AES256) — jamais de NDJSON en clair publié
+        env:
+          FIRESTORE_BACKUP_ENCRYPTION_KEY: ${{ secrets.FIRESTORE_BACKUP_ENCRYPTION_KEY }}
+        run: |
+          VERSION=$(node -e "console.log(require('./config/app-version.json').version)")
+          node scripts/encrypt-backup.mjs --in backup-output --out backup-output.tar.gz.gpg --version "$VERSION"
+
+      - name: Supprimer l'export en clair (jamais publié)
+        if: always()
+        run: rm -rf backup-output
+
+      - name: Publier l'archive chiffrée + le manifeste public comme artefact
         uses: actions/upload-artifact@v4
         with:
           name: firestore-backup-${{ github.run_id }}
-          path: backup-output
-          retention-days: 90
+          path: |
+            backup-output.tar.gz.gpg
+            backup-output.tar.gz.gpg.manifest.json
+          retention-days: 30
           if-no-files-found: error

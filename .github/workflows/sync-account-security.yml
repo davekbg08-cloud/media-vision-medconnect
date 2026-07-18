@@ -46,6 +46,13 @@ jobs:
       - name: Synchroniser révocations + custom claims
         env:
           GOOGLE_APPLICATION_CREDENTIALS: /tmp/firebase-service-account.json
+          # Optionnel — liste d'UID Firebase séparés par des virgules,
+          # seuls autorisés à conserver le custom claim admin:true (voir
+          # scripts/sync-account-security.mjs). Tant que ce secret n'est
+          # pas configuré, le script NE MODIFIE AUCUN claim admin
+          # existant (sécurité par défaut) — à définir avant de
+          # considérer la réconciliation du claim admin comme active.
+          ADMIN_UID_ALLOWLIST: ${{ secrets.ADMIN_UID_ALLOWLIST }}
         run: node scripts/sync-account-security.mjs --apply
 
       - name: Supprimer la clé décodée

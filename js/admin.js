@@ -283,6 +283,28 @@ const AdminModule = (() => {
       </div>`;
   }
 
+  /* Chantier "reception/affiliation sans régression" (section 13) :
+     avertissement NON BLOQUANT quand Firebase App Check n'est pas
+     configuré (APP_CHECK_SITE_KEY vide, voir js/firebase-config.js et
+     docs/FIREBASE_APP_CHECK_SETUP.md). `typeof` évite toute
+     ReferenceError si ce fichier est chargé isolément (sandbox de
+     test) sans firebase-config.js. Purement informatif : App Check
+     n'est JAMAIS présenté ici comme un remplacement des règles
+     Firestore, seulement comme une couche complémentaire optionnelle.
+     Aucun blocage d'aucune action admin — un admin qui n'a pas encore
+     configuré la clé continue de travailler normalement. */
+  function appCheckWarningBanner() {
+    const configured = typeof APP_CHECK_SITE_KEY !== 'undefined' && !!APP_CHECK_SITE_KEY;
+    if (configured) return '';
+    return `
+      <div class="card" style="border-left:3px solid var(--accent);margin-bottom:1rem">
+        <p style="margin:0">⚠️ <strong>Firebase App Check non configuré</strong> — les règles Firestore
+        (rôle/établissement/statut) restent la protection réelle et ne sont pas affectées ;
+        App Check n'est qu'une couche complémentaire optionnelle qui vérifie l'origine de
+        l'application. Voir <code>docs/FIREBASE_APP_CHECK_SETUP.md</code> pour l'activer.</p>
+      </div>`;
+  }
+
   /* ══ DASHBOARD ══════════════════════════════════════ */
   function renderDashboard(main) {
     try {
@@ -321,6 +343,8 @@ const AdminModule = (() => {
             📢 Informer les utilisateurs
           </button>
         </div>
+
+        ${appCheckWarningBanner()}
 
         <div class="stats-grid">
           <div class="stat-card" style="border-top:3px solid var(--secondary)">

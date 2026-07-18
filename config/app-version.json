@@ -1,8 +1,24 @@
 {
-  "version": "2.9.31",
-  "build": "2026.07.18.5",
+  "version": "2.9.32",
+  "build": "2026.07.18.6",
   "buildDate": "2026-07-18",
   "changelog": [
+    {
+      "version": "2.9.32",
+      "date": "2026-07-18",
+      "notes": [
+        "Correctif sécurité majeur : la création d'un compte mc_accounts avec le rôle administrateur (plateforme ou établissement) n'était pas bloquée côté serveur, et la synchronisation des accès (custom claims) pouvait en tenir compte — un compte administrateur ne peut désormais plus être créé de cette façon, et l'attribution du claim administrateur dépend uniquement d'une liste externe validée, jamais du document mc_accounts",
+        "Correctif : un administrateur d'établissement (admin_hospital) voyait le bouton d'approbation/refus d'une demande d'affiliation, mais Firestore le refusait systématiquement — il peut désormais réellement décider pour son propre établissement (jamais pour un autre), avec un message d'erreur clair en cas d'échec au lieu d'un faux succès",
+        "Correctif sécurité : la réception ne pouvait pas créer de fiche patient malgré l'affichage de l'écran — corrigé (champs strictement administratifs, jamais de contenu clinique), avec vérification réelle de la confirmation Firestore avant de poursuivre",
+        "Amélioration Réception : recherche d'un patient déjà enregistré ailleurs dans l'établissement (et pas seulement dans le cache de ce poste)",
+        "Correctif sécurité : la réception pouvait hospitaliser directement un patient (rôle sans cette capacité) — la sélection d'un lit crée désormais une pré-admission, confirmée ensuite par un médecin, infirmier(ère) ou l'administration de l'établissement",
+        "Correctif sécurité : un membre du personnel (réception, laborantin) pouvait lire des consultations, ordonnances ou résultats de laboratoire sans que son rôle ne le permette — l'accès est désormais strictement limité au personnel clinique concerné",
+        "Correctif sécurité : un pharmacien pouvait consulter et modifier le stock et les ventes de n'importe quel AUTRE pharmacien — chaque pharmacien est désormais isolé aux données qu'il a lui-même créées",
+        "Correctif sécurité : la messagerie interne n'empêchait pas qu'un message soit envoyé sous une identité usurpée, ni qu'un destinataire modifie après coup le contenu d'un message reçu — les deux failles sont corrigées",
+        "Sécurité (infrastructure) : les sauvegardes automatiques quotidiennes de la base de données sont désormais chiffrées avant publication (au lieu d'un export en clair), avec une durée de conservation réduite",
+        "Interface : avertissement discret pour l'administrateur si la protection Firebase App Check n'est pas configurée (sans bloquer aucune action — les règles de sécurité serveur restent la vraie protection)"
+      ]
+    },
     {
       "version": "2.9.31",
       "date": "2026-07-18",

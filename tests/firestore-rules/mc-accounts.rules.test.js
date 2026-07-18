@@ -239,3 +239,118 @@ test("mc_accounts : la création d'un compte professionnel (sans patient_id) n'e
     uid: 'DOC_MC-TEST-CODE-5', role: 'doctor', status: 'pending',
   }));
 });
+
+/* ── Chantier "reception/affiliation sans régression" — section 1 ──
+   Un rôle 'admin'/'admin_hospital' auto-attribué dans mc_accounts
+   pouvait aboutir à un vrai custom claim Firebase Auth via
+   scripts/sync-account-security.mjs (élévation de privilège réelle). */
+
+test("mc_accounts : un utilisateur signé ne peut pas créer un compte role=admin (identité Firebase réelle)", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  const attacker = env.authenticatedContext('attacker-admin-1').firestore();
+  await assertFails(setDoc(doc(attacker, 'mc_accounts', 'attacker-admin-1'), {
+    uid: 'attacker-admin-1', authUid: 'attacker-admin-1', role: 'admin', status: 'pending',
+  }));
+});
+
+test("mc_accounts : un utilisateur non authentifié ne peut pas créer un compte role=admin (mode dégradé)", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  const unauthed = env.unauthenticatedContext().firestore();
+  await assertFails(setDoc(doc(unauthed, 'mc_accounts', 'ADM_MC-TEST-ADMIN-1'), {
+    uid: 'ADM_MC-TEST-ADMIN-1', role: 'admin', status: 'pending',
+  }));
+});
+
+test("mc_accounts : un utilisateur signé ne peut pas créer un compte role=admin_hospital", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  const attacker = env.authenticatedContext('attacker-admin-hosp-1').firestore();
+  await assertFails(setDoc(doc(attacker, 'mc_accounts', 'attacker-admin-hosp-1'), {
+    uid: 'attacker-admin-hosp-1', authUid: 'attacker-admin-hosp-1', role: 'admin_hospital', status: 'pending',
+  }));
+});
+
+test("mc_accounts : un utilisateur non authentifié ne peut pas créer un compte role=admin_hospital (mode dégradé)", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  const unauthed = env.unauthenticatedContext().firestore();
+  await assertFails(setDoc(doc(unauthed, 'mc_accounts', 'ADM_MC-TEST-ADMIN-2'), {
+    uid: 'ADM_MC-TEST-ADMIN-2', role: 'admin_hospital', status: 'pending',
+  }));
+});
+
+test("mc_accounts : un compte professionnel avec identité Firebase doit avoir status=pending (pas active/approved)", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  const doctor = env.authenticatedContext('doctor-strict-status-1').firestore();
+  await assertFails(setDoc(doc(doctor, 'mc_accounts', 'doctor-strict-status-1'), {
+    uid: 'doctor-strict-status-1', authUid: 'doctor-strict-status-1', role: 'doctor', status: 'approved',
+  }));
+});
+
+test("mc_accounts : le mode dégradé (sans authUid) exige aussi status=pending", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  const unauthed = env.unauthenticatedContext().firestore();
+  await assertFails(setDoc(doc(unauthed, 'mc_accounts', 'DOC_MC-TEST-STATUS-1'), {
+    uid: 'DOC_MC-TEST-STATUS-1', role: 'doctor', status: 'approved',
+  }));
+});
+
+test("mc_accounts : identité Firebase réelle — docId doit correspondre à request.auth.uid", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  const doctor = env.authenticatedContext('doctor-strict-docid-1').firestore();
+  await assertFails(setDoc(doc(doctor, 'mc_accounts', 'un-autre-docid'), {
+    uid: 'doctor-strict-docid-1', authUid: 'doctor-strict-docid-1', role: 'doctor', status: 'pending',
+  }));
+});
+
+test("mc_accounts : identité Firebase réelle — uid et authUid doivent correspondre à request.auth.uid", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  const doctor = env.authenticatedContext('doctor-strict-uid-1').firestore();
+  await assertFails(setDoc(doc(doctor, 'mc_accounts', 'doctor-strict-uid-1'), {
+    uid: 'un-autre-uid', authUid: 'doctor-strict-uid-1', role: 'doctor', status: 'pending',
+  }));
+  await assertFails(setDoc(doc(doctor, 'mc_accounts', 'doctor-strict-uid-1'), {
+    uid: 'doctor-strict-uid-1', authUid: 'un-autre-uid', role: 'doctor', status: 'pending',
+  }));
+});
+
+test('mc_accounts : lab et reception peuvent toujours créer leur compte avec une identité Firebase réelle', async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  const lab = env.authenticatedContext('lab-strict-1').firestore();
+  await assertSucceeds(setDoc(doc(lab, 'mc_accounts', 'lab-strict-1'), {
+    uid: 'lab-strict-1', authUid: 'lab-strict-1', role: 'lab', status: 'pending',
+    matricule: 'LAB-001', professionalNumber: 'LAB-001', username: 'LAB-001',
+    fullName: 'Labo Test', name: 'Labo Test', email: 'lab@test.mc',
+  }));
+  const reception = env.authenticatedContext('reception-strict-1').firestore();
+  await assertSucceeds(setDoc(doc(reception, 'mc_accounts', 'reception-strict-1'), {
+    uid: 'reception-strict-1', authUid: 'reception-strict-1', role: 'reception', status: 'pending',
+    matricule: 'REC-001', professionalNumber: 'REC-001', username: 'REC-001',
+    fullName: 'Reception Test', name: 'Reception Test', email: 'reception@test.mc',
+  }));
+});
+
+test('mc_accounts : le propriétaire ne peut pas modifier authUid, uid, patient_id, professionalNumber ou matricule', async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, 'mc_accounts', 'lab-immut-1'), {
+      uid: 'lab-immut-1', authUid: 'lab-immut-1', role: 'lab', status: 'pending',
+      professionalNumber: 'LAB-100', matricule: 'LAB-100',
+    });
+  });
+  const owner = env.authenticatedContext('lab-immut-1').firestore();
+  await assertFails(updateDoc(doc(owner, 'mc_accounts', 'lab-immut-1'), { authUid: 'autre-uid' }));
+  await assertFails(updateDoc(doc(owner, 'mc_accounts', 'lab-immut-1'), { uid: 'autre-uid' }));
+  await assertFails(updateDoc(doc(owner, 'mc_accounts', 'lab-immut-1'), { professionalNumber: 'LAB-999' }));
+  await assertFails(updateDoc(doc(owner, 'mc_accounts', 'lab-immut-1'), { matricule: 'LAB-999' }));
+  await assertSucceeds(updateDoc(doc(owner, 'mc_accounts', 'lab-immut-1'), { phone: '+243800000099' }));
+});

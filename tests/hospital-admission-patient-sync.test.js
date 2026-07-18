@@ -28,9 +28,32 @@ test('hospital-beds.js saveAdmission() écrit le miroir mc_admissions APRÈS la 
     'patient_id doit être mappé depuis le numéro MC saisi');
 });
 
-test('hospital-reception.js écrit aussi le miroir mc_admissions pour une admission créée depuis ce flux', () => {
-  const mirrorIdx = receptionSrc.indexOf('DB.addAdmissionRecord(');
+// Chantier sécurité (section 6, pré-admission) : bug confirmé —
+// réception (rôle sans admit_patient/manage_beds) créait auparavant
+// directement l'admission ET le miroir mc_admissions ici même. La
+// sélection d'un lit par la réception ne crée plus qu'une PRÉ-ADMISSION
+// (receptionVisit, status 'pre_admission') — jamais d'admissions/miroir
+// mc_admissions depuis ce fichier. C'est désormais
+// HospitalBedsModule.confirmAdmission() (js/hospital-beds.js, écran
+// "Lits", réservé à doctor/nurse/admin_hospital/admin) qui crée
+// l'admission ET écrit le miroir, une fois la pré-admission confirmée.
+test('hospital-reception.js NE crée PLUS directement d\'admission (pré-admission uniquement, voir section 6)', () => {
+  assert.ok(!receptionSrc.includes("CloudDB.createDoc('admissions'"),
+    "hospital-reception.js ne doit plus créer directement de document admissions");
+  assert.match(receptionSrc, /status = 'pre_admission'/,
+    "la sélection d'un lit par la réception doit créer une pré-admission, pas une admission directe");
+});
+
+test('hospital-beds.js confirmAdmission() écrit le miroir mc_admissions APRÈS la création de admissions (pré-admission confirmée)', () => {
+  const start = bedsSrc.indexOf('async function confirmAdmission(');
+  assert.ok(start !== -1, 'confirmAdmission doit exister');
+  const end = bedsSrc.indexOf('\n  // Lit demandé indisponible', start);
+  const body = bedsSrc.slice(start, end !== -1 ? end : undefined);
+  const admissionsIdx = body.indexOf("['admissions', admissionId");
+  assert.ok(admissionsIdx !== -1, 'admissions doit être créé dans le batch atomique');
+  const mirrorIdx = body.indexOf('DB.addAdmissionRecord(');
   assert.ok(mirrorIdx !== -1, 'le miroir mc_admissions doit être écrit');
-  const admissionsIdx = receptionSrc.indexOf("CloudDB.createDoc('admissions'");
-  assert.ok(admissionsIdx !== -1 && admissionsIdx < mirrorIdx, 'le miroir doit être écrit après admissions');
+  assert.ok(admissionsIdx < mirrorIdx, 'le miroir doit être écrit après la confirmation de admissions');
+  assert.match(body.slice(mirrorIdx, body.indexOf('});', mirrorIdx)), /patient_id:\s*visit\.patientMc/,
+    'patient_id doit être mappé depuis le numéro MC de la visite');
 });
