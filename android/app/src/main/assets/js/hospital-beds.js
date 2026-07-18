@@ -26,6 +26,7 @@ const HospitalBedsModule = (() => {
 
   let _beds = [];
   let _admissions = [];
+  let _preAdmissions = [];
 
   async function render(container) {
     HospitalPermissions.requireRoute('beds');
@@ -34,10 +35,18 @@ const HospitalBedsModule = (() => {
     container.innerHTML = `<div class="card empty-state"><p>Chargement des lits…</p></div>`;
 
     try {
-      [_beds, _admissions] = await Promise.all([
+      let receptionVisits = [];
+      [_beds, _admissions, receptionVisits] = await Promise.all([
         CloudDB.listByHospital('beds', hospitalId),
         CloudDB.listByHospital('admissions', hospitalId),
+        // Chantier sécurité (section 6) : la réception ne crée plus
+        // qu'une PRÉ-ADMISSION (receptionVisit) — cet écran (déjà
+        // réservé à doctor/nurse/admin_hospital/admin, voir
+        // js/hospital-permissions.js ROUTES.beds) est le seul endroit
+        // où confirmer réellement une admission.
+        CloudDB.listByHospital('receptionVisits', hospitalId),
       ]);
+      _preAdmissions = receptionVisits.filter(v => v.status === 'pre_admission');
     } catch (e) {
       console.error('[Beds] Chargement :', e);
       container.innerHTML = `<div class="card empty-state"><p>Erreur de chargement : ${esc(e.message)}</p></div>`;
@@ -65,6 +74,15 @@ const HospitalBedsModule = (() => {
         <div class="hospital-stat-card"><h3>${active.length}</h3><p>Patients hospitalisés</p></div>
       </div>
 
+      ${_preAdmissions.length ? `
+      <div class="card">
+        <h3>🕓 Pré-admissions en attente (${_preAdmissions.length})</h3>
+        <div class="records-list">
+          ${_preAdmissions.sort((a,b) => String(a.admissionRequestedAt||'').localeCompare(String(b.admissionRequestedAt||'')))
+            .map(v => preAdmissionCard(v)).join('')}
+        </div>
+      </div>` : ''}
+
       <div class="card">
         <h3>Lits</h3>
         ${!total ? `<p class="muted">Aucun lit enregistré. Ajoutez les lits de l'établissement pour commencer.</p>` : `
@@ -83,6 +101,15 @@ const HospitalBedsModule = (() => {
         </div>`}
       </div>
     `;
+  }
+
+  function preAdmissionCard(v) {
+    return `
+      <div class="card record-card">
+        <p><strong>${esc(v.patientName || '—')}</strong> · ${esc(v.patientMc || '')}</p>
+        <p class="muted">Lit demandé : ${esc(v.requestedBedLabel || '—')} · Motif : ${esc(v.reason || '—')}</p>
+        <button class="btn btn-primary btn-sm" onclick="HospitalBedsModule.confirmAdmission('${esc(v.id)}')">✅ Confirmer l'admission</button>
+      </div>`;
   }
 
   function bedCard(b) {
@@ -274,6 +301,131 @@ const HospitalBedsModule = (() => {
     } finally { _savingAdmission = false; }
   }
 
+  /* ── Confirmer une pré-admission (chantier sécurité, section 6) ──
+     Seul endroit qui crée réellement une admission/occupe un lit à
+     partir d'une prise en charge réception — jamais réception
+     elle-même (rôle sans admit_patient/manage_beds). Écriture en UN
+     SEUL batch atomique (admissions + beds + receptionVisits) : soit
+     les 3 documents changent ensemble, soit aucun. Le mirroir
+     mc_admissions reste best-effort (comme respondAffiliation) — un
+     échec n'annule jamais l'admission déjà confirmée.
+     Limite connue (documentée, pas de transaction Firestore
+     introduite pour ce chantier — aucun précédent dans ce fichier) :
+     la vérification "lit encore libre" est une lecture PUIS un batch,
+     pas une transaction ; une fenêtre de course résiduelle existe si
+     deux soignants confirment la même pré-admission en même temps sur
+     le même lit dans la même seconde — accepté comme limite connue,
+     cf. rapport final. */
+  let _confirmingAdmission = false;
+  async function confirmAdmission(visitId, overrideBedId) {
+    if (_confirmingAdmission) return;
+    _confirmingAdmission = true;
+    try {
+      if (!window.HospitalCapabilities?.guardHospitalAction?.('admit_patient')) return;
+      const visit = _preAdmissions.find(v => v.id === visitId);
+      if (!visit) { App.toast('Pré-admission introuvable — rechargez la page.', 'error'); return; }
+
+      const bedId = overrideBedId || visit.requestedBedId;
+      if (!bedId) { App.toast('Aucun lit associé à cette pré-admission.', 'error'); return; }
+
+      // Admission = acte desktop sous abonnement (même gating que
+      // hospital-beds.js saveAdmission()).
+      await CloudDB.requireWritableSubscription('create_consultation');
+
+      const hospitalId = await CloudDB.getActiveHospitalId();
+      let bed;
+      try {
+        bed = await CloudDB.getDoc('beds', bedId);
+      } catch (bedErr) {
+        console.error('[Beds] confirmAdmission — lecture du lit :', bedErr);
+        App.toast('Impossible de vérifier la disponibilité du lit. Réessayez.', 'error');
+        return;
+      }
+      if (!bed || bed.status !== 'free') {
+        App.toast("Ce lit n'est plus disponible — choisissez-en un autre.", 'error');
+        openPickAnotherBed(visitId);
+        return;
+      }
+
+      const admissionId = DB.makeId('ADM');
+      const admittedAt = new Date().toISOString();
+      const batchResult = await DB.pushBatchAndReportDetailed([
+        ['admissions', admissionId, {
+          establishmentId: hospitalId, hospitalId,
+          patientMc: visit.patientMc,
+          patientName: visit.patientName || '',
+          bedId, ward: bed.ward || visit.requestedBedLabel || '',
+          reason: visit.reason || '',
+          doctorUid: visit.doctorUid || '', doctorName: visit.doctorName || '',
+          status: 'admitted', admittedAt, dischargedAt: '',
+          sourceReceptionVisitId: visitId,
+        }],
+        ['beds', bedId, { ...bed, status: 'occupied' }],
+        ['receptionVisits', visitId, {
+          ...visit,
+          status: 'hospitalized', admissionStatus: 'approved',
+          bedId, bedLabel: bed.ward ? `Lit ${bed.number || ''} — ${bed.ward}` : (visit.requestedBedLabel || ''),
+          admissionConfirmedAt: admittedAt,
+          admissionConfirmedByUid: window.Auth?.getUser?.()?.uid || '',
+        }],
+      ], { label: 'Confirmation admission' });
+
+      if (!batchResult.ok) {
+        App.toast("L'admission n'a pas pu être confirmée par Firestore. Vérifiez la connexion puis réessayez.", 'error');
+        return;
+      }
+
+      // Miroir vers mc_admissions (best-effort, comme saveAdmission()) —
+      // sans lui, le patient ne voit jamais cette hospitalisation.
+      if (window.DB?.addAdmissionRecord) {
+        try {
+          DB.addAdmissionRecord({
+            sourceAdmissionId: admissionId,
+            patient_id: visit.patientMc,
+            patient_uid: '',
+            bedId, ward: bed.ward || '', reason: visit.reason || '',
+            status: 'admitted', admittedAt,
+            hospital_id: hospitalId, establishmentId: hospitalId,
+          });
+        } catch (mirrorErr) {
+          console.warn('[Beds] confirmAdmission — miroir mc_admissions :', mirrorErr);
+        }
+      }
+
+      await CloudDB.createAuditLog('reception_admission_confirmed', 'admissions', admissionId, { patientMc: visit.patientMc, bedId, visitId });
+      App.toast('✅ Admission confirmée.');
+      HospitalDesktopUI.navigate('beds');
+    } catch (e) {
+      console.error('[Beds] confirmAdmission :', e);
+      App.toast(e.message || "Erreur lors de la confirmation de l'admission.", 'error');
+    } finally { _confirmingAdmission = false; }
+  }
+
+  // Lit demandé indisponible entre-temps : la pré-admission reste en
+  // l'état (jamais perdue) — on propose simplement d'en choisir un
+  // autre parmi les lits actuellement libres.
+  function openPickAnotherBed(visitId) {
+    const freeBeds = _beds.filter(b => b.status === 'free');
+    if (!freeBeds.length) {
+      App.toast('Aucun autre lit libre disponible pour le moment.', 'error');
+      return;
+    }
+    App.openModal('🛏️ Choisir un autre lit', `
+      <div class="form-group"><label>Lit *</label>
+        <select id="pab-bed">
+          ${freeBeds.map(b => `<option value="${esc(b.id)}">Lit ${esc(b.number)} — ${esc(b.ward || '')}</option>`).join('')}
+        </select></div>
+      <button class="btn btn-primary btn-full" onclick="HospitalBedsModule.confirmAdmissionWithBed('${esc(visitId)}')">Confirmer l'admission</button>
+    `);
+  }
+
+  function confirmAdmissionWithBed(visitId) {
+    const bedId = document.getElementById('pab-bed')?.value;
+    if (!bedId) return;
+    App.closeModal();
+    confirmAdmission(visitId, bedId);
+  }
+
   async function discharge(admissionId) {
     try {
       if (!window.HospitalCapabilities?.guardHospitalAction?.('discharge_patient')) return;
@@ -303,7 +455,7 @@ const HospitalBedsModule = (() => {
     }
   }
 
-  return { render, openAddBed, saveBed, toggleMaintenance, openAdmit, saveAdmission, discharge };
+  return { render, openAddBed, saveBed, toggleMaintenance, openAdmit, saveAdmission, discharge, confirmAdmission, confirmAdmissionWithBed };
 })();
 
 window.HospitalBedsModule = HospitalBedsModule;

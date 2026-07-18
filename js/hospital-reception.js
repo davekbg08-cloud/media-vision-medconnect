@@ -51,6 +51,7 @@ const HospitalReceptionModule = (() => {
         <div class="hospital-stat-card"><h3>${todayVisits.length}</h3><p>Arrivées aujourd'hui</p></div>
         <div class="hospital-stat-card"><h3>${waiting.length}</h3><p>⏳ En attente</p></div>
         <div class="hospital-stat-card"><h3>${todayVisits.filter(v=>v.status==='oriented').length}</h3><p>➡️ Orientés</p></div>
+        <div class="hospital-stat-card"><h3>${todayVisits.filter(v=>v.status==='pre_admission').length}</h3><p>🕓 Pré-admissions</p></div>
         <div class="hospital-stat-card"><h3>${todayVisits.filter(v=>v.status==='hospitalized').length}</h3><p>🛏️ Hospitalisés</p></div>
       </div>
 
@@ -65,7 +66,15 @@ const HospitalReceptionModule = (() => {
   }
 
   function statusLabel(s) {
-    return ({ waiting:'⏳ En attente', oriented:'➡️ Orienté', hospitalized:'🛏️ Hospitalisé', done:'✅ Clôturé' })[s] || s;
+    return ({
+      waiting:'⏳ En attente', oriented:'➡️ Orienté',
+      // 'pre_admission' (chantier sécurité, section 6) : la réception a
+      // demandé un lit, mais aucune admission n'existe encore — reste
+      // "hospitalized" pour les entrées déjà créées AVANT ce correctif
+      // (jamais migrées, voir HospitalBedsModule.confirmAdmission).
+      pre_admission:'🕓 Pré-admission en attente',
+      hospitalized:'🛏️ Hospitalisé', done:'✅ Clôturé',
+    })[s] || s;
   }
 
   function visitCard(v) {
@@ -75,6 +84,7 @@ const HospitalReceptionModule = (() => {
         <p class="muted">${statusLabel(v.status)} · ${esc(v.reason || '')} · arrivé à ${esc(String(v.arrivedAt||'').slice(11,16))}</p>
         ${v.doctorName ? `<p>👨‍⚕️ Orienté vers ${esc(v.doctorName)}</p>` : ''}
         ${v.bedLabel ? `<p>🛏️ ${esc(v.bedLabel)}</p>` : ''}
+        ${v.status === 'pre_admission' && v.requestedBedLabel ? `<p>🕓 Lit demandé : ${esc(v.requestedBedLabel)} (en attente de confirmation par un soignant)</p>` : ''}
         ${v.status === 'waiting' ? `
           <button class="btn btn-ghost btn-sm" onclick="HospitalReceptionModule.closeVisit('${esc(v.id)}')">Clôturer</button>` : ''}
       </div>`;
@@ -139,17 +149,67 @@ const HospitalReceptionModule = (() => {
     `);
   }
 
-  function lookupPatient() {
+  /* ── Recherche patient cloud-first (chantier sécurité, section 5) ──
+     Correctif (bug confirmé) : lookupPatient() ne cherchait QUE dans
+     window.DB.getPatients() (cache local) — un patient déjà enregistré
+     ailleurs (autre poste, jamais synchronisé sur CE poste) était donc
+     déclaré "introuvable" à tort par la réception, menant à la création
+     d'un doublon. Miroir exact du pattern déjà en production dans
+     js/hospital-lab.js (_lookupPatient/_searchPatient) : cache local
+     d'abord, puis lecture Firestore CIBLÉE d'un seul document
+     (mc_patients/{mc}) — jamais toute la collection. L'isolation par
+     établissement (firestore.rules belongsToSameEstablishment) reste
+     la seule vraie barrière ; ici on distingue explicitement ce refus
+     ("Non autorisé") d'une absence réelle ("introuvable"), utile à la
+     réception pour éviter de recréer par erreur la fiche de quelqu'un
+     affilié à un autre établissement. */
+  let _rcSearchToken = 0;
+  async function _lookupPatientCloud(mc) {
+    const local = (window.DB?.getPatients?.() || []).find(x => String(x.id||'').toUpperCase() === mc);
+    if (local) return { patient: local, denied: false };
+    if (!window.firebaseReady || !window.firebaseDB) return { patient: null, denied: false };
+    try {
+      const snap = await window.firebaseDB.collection('mc_patients').doc(mc).get();
+      if (!snap.exists) return { patient: null, denied: false };
+      const patient = { id: snap.id, ...snap.data() };
+      // Fusionne dans le cache local SANS écraser une entrée locale
+      // plus fraîche déjà présente (vérifié juste au-dessus — ce
+      // chemin n'est atteint que si `local` était absent).
+      try {
+        const list = window.DB?.getPatients?.() || [];
+        if (!list.some(x => x.id === patient.id)) {
+          window.DB?.savePatients?.([...list, patient]);
+        }
+      } catch (mergeErr) { console.warn('[Reception] Fusion cache patient :', mergeErr); }
+      return { patient, denied: false };
+    } catch (e) {
+      if (e?.code === 'permission-denied') return { patient: null, denied: true };
+      throw e;
+    }
+  }
+
+  async function lookupPatient() {
     const mc = document.getElementById('rc-mc').value.trim().toUpperCase();
     const box = document.getElementById('rc-found');
     if (!mc) { box.innerHTML = ''; return; }
-    const p = (window.DB?.getPatients?.() || []).find(x => String(x.id||'').toUpperCase() === mc);
-    if (p) {
-      box.innerHTML = `<small style="color:var(--secondary)">✅ ${esc(p.firstname||'')} ${esc(p.lastname||'')} trouvé.</small>`;
-      const fn = document.getElementById('rc-fn'); if (fn) fn.value = p.firstname || '';
-      const ln = document.getElementById('rc-ln'); if (ln) ln.value = p.lastname || '';
-    } else {
-      box.innerHTML = `<small style="color:var(--accent)">⚠️ Aucun patient avec ce numéro. Renseignez la section « Nouveau patient ».</small>`;
+    const token = ++_rcSearchToken;
+    box.innerHTML = `<small class="muted">⏳ Recherche en cours…</small>`;
+    try {
+      const { patient: p, denied } = await _lookupPatientCloud(mc);
+      if (token !== _rcSearchToken) return; // saisie modifiée entre-temps : réponse obsolète
+      if (p) {
+        box.innerHTML = `<small style="color:var(--secondary)">✅ Patient trouvé — ${esc(p.firstname||'')} ${esc(p.lastname||'')}</small>`;
+        const fn = document.getElementById('rc-fn'); if (fn) fn.value = p.firstname || '';
+        const ln = document.getElementById('rc-ln'); if (ln) ln.value = p.lastname || '';
+      } else if (denied) {
+        box.innerHTML = `<small style="color:var(--danger)">🚫 Non autorisé — ce numéro appartient à un autre établissement.</small>`;
+      } else {
+        box.innerHTML = `<small style="color:var(--accent)">⚠️ Patient introuvable. Renseignez la section « Nouveau patient ».</small>`;
+      }
+    } catch (e) {
+      if (token !== _rcSearchToken) return;
+      console.error('[Reception] lookupPatient :', e);
+      box.innerHTML = `<small style="color:var(--danger)">❌ Recherche impossible — vérifiez la connexion.</small>`;
     }
   }
 
@@ -166,7 +226,12 @@ const HospitalReceptionModule = (() => {
       const hospitalId = await CloudDB.getActiveHospitalId();
       const est = window.HospitalPortal?.currentEstablishmentFields?.() || {};
       let mc = document.getElementById('rc-mc').value.trim().toUpperCase();
-      let patient = mc ? (window.DB?.getPatients?.() || []).find(x => String(x.id||'').toUpperCase() === mc) : null;
+      // Correctif (section 5) : même recherche cloud-first que
+      // lookupPatient() — l'agent peut saisir directement le numéro MC
+      // et enregistrer sans avoir cliqué "Rechercher" au préalable ; un
+      // lookup purement local aurait alors raté un patient déjà créé
+      // ailleurs et jamais synchronisé sur ce poste.
+      let patient = mc ? (await _lookupPatientCloud(mc)).patient : null;
 
       // Nouveau patient si non trouvé.
       if (!patient) {
@@ -183,12 +248,30 @@ const HospitalReceptionModule = (() => {
           App.toast(subErr.message || "Enregistrement bloqué : abonnement de l'établissement expiré.", 'error');
           return;
         }
-        patient = window.DB?.addPatient?.({
+        // Correctif (chantier sécurité, section 4) : bug confirmé — la
+        // réception n'avait aucune clause Firestore create sur
+        // mc_patients/patients/medical_records ; la fiche restait
+        // provisoire en cache local, jamais confirmée, et la prise en
+        // charge (receptionVisits/admissions) se créait quand même
+        // dessus. addPatientAndConfirmAtomic() (js/db.js) attend un
+        // batch atomique réellement confirmé (les 3 documents ensemble,
+        // ou aucun) avant qu'on continue — jamais de fire-and-forget ici.
+        const { patient: createdPatient, confirmed } = await window.DB.addPatientAndConfirmAtomic({
           firstname: fn, lastname: ln,
           dob: document.getElementById('rc-dob').value,
           phone: document.getElementById('rc-phone').value.trim(),
           ...est,
         });
+        if (!confirmed) {
+          // addPatientAndConfirmAtomic() a déjà retiré la fiche
+          // provisoire du cache local en cas d'échec — on n'crée ni
+          // receptionVisits ni admission, et on laisse la modale ouverte
+          // pour que l'agent puisse réessayer sans ressaisir le
+          // formulaire.
+          App.toast("La fiche patient n'a pas été confirmée par Firestore. Vérifiez la connexion puis réessayez.", 'error');
+          return;
+        }
+        patient = createdPatient;
         mc = patient.id;
       }
 
@@ -200,8 +283,17 @@ const HospitalReceptionModule = (() => {
       const bedId = bedSel.value;
       const bedLabel = bedSel.selectedOptions[0]?.dataset?.label || '';
 
+      // Correctif (chantier sécurité, section 6) : bug confirmé — la
+      // réception (rôle sans admit_patient/manage_beds, voir
+      // js/hospital-capabilities.js MATRIX) créait pourtant directement
+      // une admission ET occupait le lit, sans aucune vérification de
+      // capacité ni décision d'un soignant. La sélection d'un lit par la
+      // réception ne crée plus qu'une PRÉ-ADMISSION (receptionVisit) —
+      // jamais d'admissions ni d'occupation de lit ici. Seul un
+      // doctor/nurse/admin_hospital/admin peut la confirmer (voir
+      // HospitalBedsModule.confirmAdmission, écran "Lits").
       let status = 'waiting';
-      if (bedId) status = 'hospitalized';
+      if (bedId) status = 'pre_admission';
       else if (doctorUid) status = 'oriented';
 
       const visitId = DB.makeId('RCV');
@@ -212,55 +304,17 @@ const HospitalReceptionModule = (() => {
         patientName: `${patient.firstname||''} ${patient.lastname||''}`.trim(),
         reason,
         doctorUid, doctorName,
-        bedId, bedLabel,
         status,
         arrivedAt: new Date().toISOString(),
+        ...(bedId ? {
+          requestedBedId: bedId,
+          requestedBedLabel: bedLabel,
+          admissionRequestedAt: new Date().toISOString(),
+          admissionRequestedByUid: window.Auth?.getUser?.()?.uid || '',
+          admissionStatus: 'pending',
+        } : {}),
         ...est,
       }, visitId);
-
-      // Hospitalisation → crée l'admission (collection existante) et
-      // occupe le lit. On réutilise le contrat admissions, pas de doublon.
-      if (bedId) {
-        const admissionId = DB.makeId('ADM');
-        await CloudDB.createDoc('admissions', {
-          establishmentId: hospitalId, hospitalId,
-          patientMc: mc,
-          patientName: `${patient.firstname||''} ${patient.lastname||''}`.trim(),
-          bedId, ward: bedLabel,
-          reason,
-          doctorUid, doctorName,
-          status: 'admitted',
-          admittedAt: new Date().toISOString(),
-          dischargedAt: '',
-          ...est,
-        }, admissionId);
-        try {
-          await CloudDB.updateDoc('beds', bedId, { status: 'occupied' });
-        } catch (bedErr) {
-          // L'admission a réussi mais le lit n'a pas pu être marqué
-          // occupé : incohérence à signaler (sinon le lit paraît libre).
-          console.error('[Reception] Occupation du lit échouée :', bedErr);
-          App.toast('⚠️ Patient admis, mais le lit n\'a pas pu être marqué occupé. Vérifiez l\'état des lits.', 'error');
-        }
-
-        // Miroir vers mc_admissions — correctif (audit) : même besoin
-        // que hospital-beds.js saveAdmission(), sinon cette admission-là
-        // (créée depuis le flux réception) reste elle aussi invisible
-        // au patient.
-        if (window.DB?.addAdmissionRecord) {
-          DB.addAdmissionRecord({
-            // Lien vers l'admission desktop pour que la sortie mette à
-            // jour ce miroir (cf. DB.updateAdmissionRecord).
-            sourceAdmissionId: admissionId,
-            patient_id: mc,
-            patient_uid: patient?.patient_uid || patient?.patientAuthUid || '',
-            bedId, ward: bedLabel, reason,
-            status: 'admitted',
-            admittedAt: new Date().toISOString(),
-            hospital_id: hospitalId, establishmentId: hospitalId,
-          });
-        }
-      }
 
       // Notifie le médecin orienté (file de travail côté mobile/desktop).
       if (doctorUid) {

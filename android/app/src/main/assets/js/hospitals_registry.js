@@ -589,13 +589,20 @@ const HospitalsRegistry = (() => {
      hospitalMembers immédiatement en local, sans jamais attendre la
      confirmation Firestore — un échec réseau silencieux laissait
      croire à une approbation qui n'avait jamais atteint le serveur. */
+  // Correctif (audit sécurité, chantier "reception/affiliation sans
+  // régression", section 7) : retourne désormais un résultat
+  // standardisé sur TOUS les chemins ({ok:true,status,requestId} ou
+  // {ok:false,reason,requestId}) — auparavant la fonction ne retournait
+  // rien, obligeant l'appelant desktop (respondAffiliationDesktop) à
+  // deviner le succès et à toujours rafraîchir l'écran, y compris après
+  // un échec silencieux.
   async function respondAffiliation(requestId, approved, event) {
     const btn = _lockAffButton(event, approved ? '⏳ Approbation en cours…' : '⏳ Refus en cours…');
-    if (btn === 'locked') return;
+    if (btn === 'locked') return { ok: false, reason: 'locked', requestId };
     try {
       if (typeof navigator !== 'undefined' && navigator.onLine === false) {
         App?.toast?.('Connexion internet requise pour traiter cette affiliation.', 'error');
-        return;
+        return { ok: false, reason: 'offline', requestId };
       }
 
       const affs = getAffiliations();
@@ -609,12 +616,15 @@ const HospitalsRegistry = (() => {
       }
       if (idx === -1) {
         App?.toast?.('Demande introuvable (elle a peut-être déjà été traitée).', 'error');
-        return;
+        return { ok: false, reason: 'not_found', requestId };
       }
 
       const req = normalizeRequest(affs[idx]);
       const h = getHospitalById(req.establishmentId);
-      if (!h) { App?.toast?.('Établissement introuvable pour cette demande.', 'error'); return; }
+      if (!h) {
+        App?.toast?.('Établissement introuvable pour cette demande.', 'error');
+        return { ok: false, reason: 'establishment_not_found', requestId: req.requestId };
+      }
 
       if (approved) {
         // Le compte professionnel doit être approuvé AVANT toute
@@ -625,11 +635,11 @@ const HospitalsRegistry = (() => {
         const accStatus = String(account?.status || '').toLowerCase();
         if (!account || !['approved', 'active'].includes(accStatus)) {
           App?.toast?.('Le compte professionnel doit d\'abord être approuvé par l\'administration MedConnect.', 'error');
-          return;
+          return { ok: false, reason: 'account_not_approved', requestId: req.requestId };
         }
         if (account.role !== req.requesterRole) {
           App?.toast?.('Le rôle du compte ne correspond pas à la demande d\'affiliation.', 'error');
-          return;
+          return { ok: false, reason: 'role_mismatch', requestId: req.requestId };
         }
         // Correctif (audit) : 'add_member' figure dans
         // ExchangeBridge.DESKTOP_BLOCKED_ACTIONS depuis l'introduction du
@@ -644,19 +654,42 @@ const HospitalsRegistry = (() => {
           const gate = await window.ExchangeBridge.canWriteForHospital(h.establishmentId, 'add_member');
           if (!gate.allowed) {
             App?.toast?.(gate.message || 'Abonnement expiré : impossible d\'approuver une nouvelle affiliation.', 'error');
-            return;
+            return { ok: false, reason: 'subscription_expired', requestId: req.requestId };
           }
         }
       }
 
+      // decidedByUid/decidedByRole : exigés par la règle Firestore
+      // canManageAffiliation (section 9) pour qu'un admin_hospital
+      // puisse décider d'une demande de SON établissement — traçabilité
+      // de la décision, absente jusqu'ici.
+      const actor = window.Auth?.getUser?.() || {};
+      const actorRole = window.HospitalPermissions?.getCurrentRole?.() || actor.role || '';
+      const actorUid = window.HospitalAuth?.getSession?.()?.agentUid || actor.uid || '';
       const nextReq = normalizeRequest({
         ...req,
         status: approved ? 'approved' : 'rejected',
         updatedAt: now(),
         decided_at: now(),
+        decidedByUid: actorUid,
+        decidedByRole: actorRole,
       });
 
-      const writes = [['affiliation_requests', nextReq.requestId, nextReq]];
+      // Correctif (audit sécurité, section 9) : affiliation_requests +
+      // hospitalMembers restent les 2 SEULES écritures CRITIQUES
+      // (batch atomique) — establishments/hospitals/mc_hospitals (miroir
+      // staff[]) ne sont plus qu'un best-effort NON bloquant, écrit
+      // séparément ci-dessous. Raison : Firestore autorise désormais
+      // admin_hospital à approuver une affiliation de SON établissement
+      // (affiliation_requests + hospitalMembers), mais ne lui donne PAS
+      // le droit d'écrire establishments/hospitals/mc_hospitals (non
+      // élargi, décision "B" du chantier — hospitalMembers +
+      // affiliation_requests restent la source de vérité réelle, déjà
+      // le cas pour la connexion, voir resolveAgentAffiliation). Inclure
+      // ces 3 écritures dans le MÊME batch atomique que pour un admin
+      // plateforme ferait échouer TOUT le batch pour admin_hospital (un
+      // batch Firestore est tout-ou-rien).
+      const criticalWrites = [['affiliation_requests', nextReq.requestId, nextReq]];
       let staffAfter = null;
       if (approved) {
         const staff = Array.isArray(h.staff) ? h.staff.slice() : [];
@@ -669,36 +702,58 @@ const HospitalsRegistry = (() => {
         };
         if (sidx === -1) staff.push(member); else staff[sidx] = { ...staff[sidx], ...member };
         staffAfter = staff;
-        const nextEst = normalizeEstablishment({ ...h, staff, updatedAt: now() });
-        writes.push(['establishments', h.establishmentId, nextEst]);
-        writes.push(['hospitals', h.establishmentId, nextEst]);
-        writes.push(['mc_hospitals', h.establishmentId, nextEst]);
-        writes.push(['hospitalMembers', `${h.establishmentId}_${req.requesterUid}`, {
+        criticalWrites.push(['hospitalMembers', `${h.establishmentId}_${req.requesterUid}`, {
           hospitalId: h.establishmentId, uid: req.requesterUid, role: req.requesterRole,
           status: 'active', updatedAt: now(),
         }]);
       }
 
-      // Revue Codex (P1, PR #39) : affiliation_requests + establishments/
-      // hospitals/mc_hospitals + hospitalMembers sont écrits en un seul
-      // batch ATOMIQUE (js/db.js pushBatchAndReportDetailed) plutôt qu'en
-      // écritures indépendantes — sinon un échec partiel pouvait laisser
-      // hospitalMembers actif sans que establishments.staff soit à jour
-      // (ou l'inverse), et une pièce en échec repartait en file pour un
-      // rejeu automatique ultérieur, potentiellement en conflit avec une
-      // décision opposée prise entre-temps.
+      // Revue Codex (P1, PR #39) : affiliation_requests + hospitalMembers
+      // écrits en un seul batch ATOMIQUE (js/db.js
+      // pushBatchAndReportDetailed) plutôt qu'en écritures indépendantes
+      // — sinon un échec partiel pouvait laisser hospitalMembers actif
+      // sans que affiliation_requests soit à jour (ou l'inverse), et une
+      // pièce en échec repartait en file pour un rejeu automatique
+      // ultérieur, potentiellement en conflit avec une décision opposée
+      // prise entre-temps.
       const result = DB.pushBatchAndReportDetailed
-        ? await DB.pushBatchAndReportDetailed(writes, { timeoutMs: 20000, label: 'Approbation affiliation' })
-        : { ok: DB.pushAndReport ? await DB.pushAndReport(writes) : false };
+        ? await DB.pushBatchAndReportDetailed(criticalWrites, { timeoutMs: 20000, label: 'Approbation affiliation' })
+        : { ok: DB.pushAndReport ? await DB.pushAndReport(criticalWrites) : false };
 
       if (!result.ok) {
         // La demande reste pending — jamais de membre actif ajouté
         // localement tant que Firestore n'a pas confirmé.
         App?.toast?.('❌ Une erreur est survenue — la demande reste en attente. Réessayez.', 'error');
-        return;
+        return { ok: false, reason: 'write_failed', requestId: req.requestId };
       }
 
-      // Cache local mis à jour SEULEMENT après confirmation complète.
+      // Miroir staff[] (establishments/hospitals/mc_hospitals) : best-
+      // effort NON bloquant, écrit après confirmation des écritures
+      // critiques — un admin_hospital n'a pas ce droit d'écriture (voir
+      // plus haut), et la connexion ne dépend déjà plus de ce miroir
+      // (hospitalMembers fait foi, voir resolveAgentAffiliation). Un
+      // admin plateforme (isAdmin()) réussira toujours cette écriture.
+      if (approved && staffAfter) {
+        try {
+          const nextEst = normalizeEstablishment({ ...h, staff: staffAfter, updatedAt: now() });
+          const mirrorWrites = [
+            ['establishments', h.establishmentId, nextEst],
+            ['hospitals', h.establishmentId, nextEst],
+            ['mc_hospitals', h.establishmentId, nextEst],
+          ];
+          const mirrorResult = DB.pushBatchAndReportDetailed
+            ? await DB.pushBatchAndReportDetailed(mirrorWrites, { timeoutMs: 20000, label: 'Miroir staff établissement' })
+            : { ok: DB.pushAndReport ? await DB.pushAndReport(mirrorWrites) : false };
+          if (!mirrorResult.ok) {
+            console.warn('[HospitalsRegistry] Miroir staff établissement non confirmé (best-effort, sans impact sur la connexion) :', mirrorResult);
+          }
+        } catch (e) {
+          console.warn('[HospitalsRegistry] Miroir staff établissement échoué (best-effort) :', e);
+        }
+      }
+
+      // Cache local mis à jour SEULEMENT après confirmation complète des
+      // écritures critiques.
       saveAffiliations(affs.map((a, i) => (i === idx ? nextReq : a)));
       if (approved && staffAfter) {
         updateHospital(h.establishmentId, { staff: staffAfter });
@@ -720,6 +775,7 @@ const HospitalsRegistry = (() => {
       }
       App?.toast?.(approved ? '✅ Affiliation approuvée' : '❌ Affiliation refusée');
       renderManagePage(document.getElementById('main-content'), 'requests');
+      return { ok: true, status: nextReq.status, requestId: nextReq.requestId };
     } finally {
       _unlockAffButton(btn);
     }
@@ -777,6 +833,37 @@ const HospitalsRegistry = (() => {
       saveAffiliations(all);
     }
     return stillPending;
+  }
+
+  /* Correctif (chantier sécurité, section 8-9) : setupRealtimeListeners()
+     (js/db.js) maintient un listener GLOBAL non filtré sur
+     affiliation_requests — Firestore refuse ce type de requête pour tout
+     rôle dont la seule branche de règle viable dépend de resource.data
+     (ici belongsToSameEstablishment), ce qui inclut admin_hospital ; seul
+     l'admin plateforme (branche isAdmin(), indépendante de resource.data)
+     reçoit ce flux. Résultat : le cache local affiliation_requests d'un
+     admin_hospital ne se remplit jamais tout seul, même une fois la
+     règle Firestore corrigée pour autoriser sa lecture/décision.
+     Ce correctif appelle une requête CIBLÉE (déjà filtrée par
+     establishmentId, donc valide côté règles) à la demande, et fusionne
+     le résultat DIRECTEMENT dans le stockage local — jamais via
+     saveAffiliations(), qui republie chaque entrée vers Firestore
+     (pushCloud) et casserait la contrainte « transition pending →
+     approved/rejected réelle » de la nouvelle règle d'update, en plus
+     d'être inutile ici (les documents viennent déjà de Firestore). */
+  async function refreshAffiliationsForHospital(establishmentId) {
+    if (!establishmentId || !window.CloudDB?.listByHospital) return [];
+    try {
+      const remote = await window.CloudDB.listByHospital('affiliation_requests', establishmentId);
+      if (!remote.length) return getAffiliations();
+      const local = getAffiliations();
+      const merged = mergeById([...local, ...remote.map(r => normalizeRequest(r))], 'requestId');
+      store(REQ_KEY, merged);
+      return merged;
+    } catch (e) {
+      console.warn('[HospitalsRegistry] refreshAffiliationsForHospital :', e);
+      return getAffiliations();
+    }
   }
 
   /* ── CONTEXTE ACTIF ─────────────────────────────── */
@@ -1358,7 +1445,7 @@ const HospitalsRegistry = (() => {
   return {
     getHospitals, saveHospitals, addHospital, addHospitalAndConfirm, migratePasswordHashToAuth, updateHospital, getHospitalById, cacheHospital,
     getAffiliations, saveAffiliations, requestAffiliation, requestAffiliationAndConfirm, respondAffiliation, removeStaff, validateEstablishment,
-    getDoctorHospitals, getPendingAffiliations, ensureHospitalMembership,
+    getDoctorHospitals, getPendingAffiliations, refreshAffiliationsForHospital, ensureHospitalMembership,
     getHospitalMemberDirect, getAffiliationRequestDirect, resolveAgentAffiliation,
     getCurrentHospital, setCurrentHospital, clearCurrentHospital,
     getPatientsForContext, getAppointmentsForContext, getPatientsForEstablishment,

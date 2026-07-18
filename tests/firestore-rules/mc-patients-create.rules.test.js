@@ -75,3 +75,71 @@ test('mc_patients : la création ne lève plus d\'erreur et réussit quand ni es
     id: 'MC-CREATE-5', firstname: 'Sans', lastname: 'Hopital', created_by: 'doctor-no-hosp',
   }));
 });
+
+/* ── Chantier "reception/affiliation sans régression" — section 4 ──
+   Bug confirmé : la matrice client (js/hospital-capabilities.js)
+   autorise déjà la réception à créer un patient, mais aucune clause
+   create ne couvrait ce rôle — receptionPatientCreateOk() couvre
+   désormais ce cas, limité à des champs administratifs. */
+async function seedReceptionMember(env, uid, hospitalId) {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'hospitalMembers', `${hospitalId}_${uid}`),
+      { hospitalId, uid, status: 'active' });
+  });
+}
+
+test('mc_patients : la réception peut créer une fiche (champs administratifs) pour son établissement', async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await seedReceptionMember(env, 'reception-1', 'HOSP-RC');
+  const reception = env.authenticatedContext('reception-1', { role: 'reception' }).firestore();
+  await assertSucceeds(setDoc(doc(reception, 'mc_patients', 'MC-RC-1'), {
+    id: 'MC-RC-1', firstname: 'Jean', lastname: 'Réception', dob: '1990-01-01',
+    gender: 'M', phone: '0102030405', establishmentId: 'HOSP-RC',
+    created_by: 'reception-1', created_by_role: 'reception', created_at: '2026-01-01',
+  }));
+});
+
+test("mc_patients : la réception NE PEUT PAS poser un champ clinique (allergies) à la création", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await seedReceptionMember(env, 'reception-2', 'HOSP-RC');
+  const reception = env.authenticatedContext('reception-2', { role: 'reception' }).firestore();
+  await assertFails(setDoc(doc(reception, 'mc_patients', 'MC-RC-2'), {
+    id: 'MC-RC-2', firstname: 'Jean', lastname: 'Réception', establishmentId: 'HOSP-RC',
+    created_by: 'reception-2', allergies: 'Pénicilline',
+  }));
+});
+
+test("mc_patients : la réception NE PEUT PAS créer de fiche pour un AUTRE établissement (non-membre)", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await seedReceptionMember(env, 'reception-3', 'HOSP-RC');
+  const reception = env.authenticatedContext('reception-3', { role: 'reception' }).firestore();
+  await assertFails(setDoc(doc(reception, 'mc_patients', 'MC-RC-3'), {
+    id: 'MC-RC-3', firstname: 'Jean', lastname: 'Réception', establishmentId: 'HOSP-OTHER',
+    created_by: 'reception-3',
+  }));
+});
+
+test('medical_records : la réception peut créer le document racine patient_record', async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await seedReceptionMember(env, 'reception-4', 'HOSP-RC');
+  const reception = env.authenticatedContext('reception-4', { role: 'reception' }).firestore();
+  await assertSucceeds(setDoc(doc(reception, 'medical_records', 'MC-RC-4'), {
+    recordId: 'MC-RC-4', patientId: 'MC-RC-4', establishmentId: 'HOSP-RC',
+    type: 'patient_record', status: 'active', created_by: 'reception-4',
+  }));
+});
+
+test("medical_records : la réception NE PEUT PAS créer un document de type clinique (consultation)", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await seedReceptionMember(env, 'reception-5', 'HOSP-RC');
+  const reception = env.authenticatedContext('reception-5', { role: 'reception' }).firestore();
+  await assertFails(setDoc(doc(reception, 'medical_records', 'MC-RC-5'), {
+    recordId: 'MC-RC-5', patientId: 'MC-RC-5', establishmentId: 'HOSP-RC',
+    type: 'consultation', created_by: 'reception-5',
+  }));
+});

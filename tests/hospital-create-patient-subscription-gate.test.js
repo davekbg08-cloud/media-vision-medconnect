@@ -30,16 +30,21 @@ test("URGENCES : la création de patient pose emergencyIntake:true et n'est PAS 
     "l'intake d'urgence ne doit JAMAIS appeler requireWritableSubscription (le soin d'urgence n'est pas coupé)");
 });
 
-for (const [label, file, marker] of [
-  ['réception', 'js/hospital-reception.js', 'rc-dob'],
-  ['maternité', 'js/hospital-maternity.js', "gender: 'F'"],
+for (const [label, file, addCallMarker] of [
+  // Chantier sécurité (section 4) : réception appelle désormais
+  // addPatientAndConfirmAtomic() (batch atomique réellement confirmé,
+  // jamais fire-and-forget) au lieu de addPatient() — voir
+  // js/db.js et le rapport du chantier "reception/affiliation sans
+  // régression".
+  ['réception', 'js/hospital-reception.js', 'window.DB.addPatientAndConfirmAtomic('],
+  ['maternité', 'js/hospital-maternity.js', 'DB?.addPatient?.('],
 ]) {
-  test(`${label} : la création de patient vérifie requireWritableSubscription('create_patient') AVANT addPatient`, () => {
+  test(`${label} : la création de patient vérifie requireWritableSubscription('create_patient') AVANT la création`, () => {
     const src = read(file);
     const subIdx = src.indexOf("requireWritableSubscription('create_patient')");
-    const addIdx = src.indexOf('DB?.addPatient?.(');
+    const addIdx = src.indexOf(addCallMarker);
     assert.ok(subIdx !== -1, `${label} : requireWritableSubscription('create_patient') doit être appelé`);
-    assert.ok(addIdx !== -1, `${label} : DB.addPatient doit être appelé`);
+    assert.ok(addIdx !== -1, `${label} : ${addCallMarker} doit être appelé`);
     assert.ok(subIdx < addIdx, `${label} : le contrôle d'abonnement doit précéder la création du patient`);
     // Pas de marqueur d'urgence dans un flux normal.
     assert.ok(!src.slice(subIdx, addIdx + 120).includes('emergencyIntake'),

@@ -86,9 +86,19 @@ test('firestore.rules : hasNoSecretFields interdit password/pin/passwordHash/adm
 test('firestore.rules : mc_accounts applique hasNoSecretFields en create ET en update', () => {
   const block = matchBlock(rules, 'mc_accounts');
   assert.ok(block);
-  const createClause = block.match(/allow create:[\s\S]*?;/)[0];
+  // Chantier sécurité (section 2) : la clause "allow create" n'appelle
+  // plus directement hasNoSecretFields — chacun des 3 chemins de
+  // self-create non-admin (validMcAccountSelfCreate/
+  // legacyDegradedProfessionalCreate/validPatientAccountSelfCreate,
+  // fonctions imbriquées dans ce même bloc match) l'appelle désormais
+  // individuellement. On vérifie donc la garantie sur le bloc entier
+  // plutôt que sur le seul texte de la clause "allow create".
   const updateClause = block.match(/allow update:[\s\S]*?;/)[0];
-  assert.match(createClause, /hasNoSecretFields/, 'create doit vérifier hasNoSecretFields');
+  for (const helper of ['validMcAccountSelfCreate', 'legacyDegradedProfessionalCreate', 'validPatientAccountSelfCreate']) {
+    const fnMatch = block.match(new RegExp(`function ${helper}\\([^)]*\\)\\s*\\{([\\s\\S]*?)\\n\\s*\\}`));
+    assert.ok(fnMatch, `${helper} doit exister dans le bloc mc_accounts`);
+    assert.match(fnMatch[1], /hasNoSecretFields/, `${helper} doit vérifier hasNoSecretFields`);
+  }
   assert.match(updateClause, /hasNoSecretFields/, 'update doit vérifier hasNoSecretFields');
 });
 

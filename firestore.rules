@@ -118,6 +118,33 @@ service cloud.firestore {
              hasRole('reception') || hasRole('admin_hospital');
     }
 
+    /* ── Chantier "reception/affiliation sans régression" — section 4 ──
+       Bug confirmé : la matrice client (js/hospital-capabilities.js)
+       autorise la réception à créer un patient, mais AUCUNE clause
+       create de mc_patients/patients/medical_records ne couvrait ce
+       rôle avant ce correctif (seuls isAdmin()/doctor/nurse pouvaient
+       écrire) — la fiche restait provisoire en cache local, jamais
+       confirmée. La réception ne doit créer QUE des champs
+       d'identité/administratifs — jamais de contenu clinique
+       (diagnostic, allergies, antécédents, traitement, consultation,
+       ordonnance, résultat labo, historique clinique, notes médecin) :
+       hasOnly() sur le document entier fait échouer toute écriture
+       portant une clé hors de cette liste. Inclut created_by_role/
+       created_by_name/establishmentName, déjà posés par le helper
+       partagé currentEstablishmentFields() (js/hospital.js), utilisé
+       tel quel par la réception — ne pas les omettre casserait sa
+       création dès ce correctif. */
+    function receptionPatientCreateOk(data) {
+      return hasRole('reception') &&
+        data.keys().hasOnly([
+          'id', 'firstname', 'lastname', 'dob', 'birthdate', 'gender', 'phone',
+          'address', 'country_code', 'firstAccessCode',
+          'establishmentId', 'hospital_id', 'establishmentName',
+          'created_by', 'created_by_role', 'created_by_name',
+          'created_at', 'updated_at', 'emergencyIntake', 'sourceDevice'
+        ]);
+    }
+
     /* ── Transitions de statut labRequests (chantier "modales
        laboratoire") ── Empêche qu'un client modifié fasse revenir une
        demande completed à requested, ou saute directement de requested
@@ -208,6 +235,30 @@ service cloud.firestore {
     // `request.auth.token.deviceType` ici, sans toucher aux appelants.
     function hospitalCanWriteFromDevice(hospitalId, deviceValue) {
       return hospitalSubscriptionOk(hospitalId) || deviceValue != 'desktop';
+    }
+
+    /* ── Chantier "reception/affiliation sans régression" — section 12 ──
+       Bug confirmé : mc_messages.create ne vérifiait JAMAIS l'identité
+       de l'expéditeur — n'importe quel compte connecté pouvait poser
+       fromUid/from_id/senderUid/createdByUid à l'identité de N'IMPORTE
+       QUI (usurpation), y compris pour se faire passer pour un médecin
+       ou un administrateur dans une notification. Network.notify()
+       (js/network.js) pose toujours `fromUid: from?.uid` (le SEUL champ
+       réellement utilisé en écriture aujourd'hui) — mais on accepte ici
+       aussi les variantes historiques du même concept (from_id,
+       senderUid, createdByUid) par prudence/rétro-compatibilité, sans
+       jamais les exiger toutes à la fois : seul un champ RÉELLEMENT
+       présent doit correspondre à request.auth.uid, et si PLUSIEURS de
+       ces champs sont présents ils doivent tous pointer vers la même
+       identité (jamais deux identités contradictoires dans un même
+       document). Un document n'en posant AUCUN passe (comme
+       aujourd'hui : notifications système historiques sans expéditeur
+       humain identifié — ne durcit pas ce cas, hors scope). */
+    function messageSenderIdentityOk(data) {
+      return (data.get('fromUid', null) == null || data.get('fromUid', null) == request.auth.uid) &&
+        (data.get('from_id', null) == null || data.get('from_id', null) == request.auth.uid) &&
+        (data.get('senderUid', null) == null || data.get('senderUid', null) == request.auth.uid) &&
+        (data.get('createdByUid', null) == null || data.get('createdByUid', null) == request.auth.uid);
     }
 
     /* ── LECTURE mobile du dossier médical par le personnel clinique ──
@@ -307,6 +358,82 @@ service cloud.firestore {
       return isHospitalMember(resolveHospitalId(data));
     }
 
+    /* ── Chantier "reception/affiliation sans régression" — section 9/10 ──
+       Bug confirmé : belongsToSameEstablishment() seule (membre actif,
+       n'importe quel rôle) était utilisée comme clause de lecture sur
+       mc_consultations/mc_prescriptions/mc_lab_results/labRequests/
+       labResults — donnant à la réception ET au laborantin un accès en
+       lecture au contenu clinique complet (consultations, ordonnances)
+       auquel leur rôle ne donne aucune capacité côté client
+       (js/hospital-capabilities.js). isClinicalHospitalMember() réserve
+       ces lectures au personnel réellement clinique de l'établissement
+       (doctor/nurse/admin_hospital) — jamais lab, jamais reception.
+       Ajout ADDITIF : remplace SEULEMENT le branchement
+       belongsToSameEstablishment() sur ces 5 collections précises ;
+       belongsToSameEstablishment() elle-même reste inchangée partout
+       ailleurs (beds/admissions/receptionVisits/mc_admissions...), où
+       reception a légitimement besoin d'un accès établissement complet. */
+    function isClinicalHospitalMember(data) {
+      return (hasRole('doctor') || hasRole('nurse') || hasRole('admin_hospital')) &&
+        belongsToSameEstablishment(data);
+    }
+    // Le laborantin lit les données de LABO (demandes/résultats) de son
+    // établissement — jamais les consultations/ordonnances (voir
+    // isClinicalHospitalMember ci-dessus, qui ne l'inclut jamais).
+    function labCanReadLabData(data) {
+      return hasRole('lab') && belongsToSameEstablishment(data);
+    }
+    // Identité administrative seulement (numéro MC, nom, naissance...) —
+    // Firestore ne peut pas restreindre des CHAMPS au sein d'un même
+    // document lu : tant qu'aucune vue dédiée (ex. patient_directory)
+    // n'existe, ce helper documente l'intention sans pouvoir la faire
+    // respecter seul ; mc_patients reste donc, pour l'instant, un accès
+    // établissement complet pour reception/lab (limite connue, cf.
+    // rapport final — la recherche patient de réception/labo en dépend
+    // directement, voir js/hospital-reception.js/js/hospital-lab.js).
+    function receptionCanReadPatientIdentity(data) {
+      return hasRole('reception') && belongsToSameEstablishment(data);
+    }
+    function labCanReadPatientIdentity(data) {
+      return hasRole('lab') && belongsToSameEstablishment(data);
+    }
+
+    /* ── Chantier "reception/affiliation sans régression" — section 9 ──
+       Décider d'une affiliation (approuver/refuser) : l'admin plateforme
+       garde un accès global ; l'admin_hospital ne peut décider QUE pour
+       SON PROPRE établissement (membre actif de l'établissement de la
+       demande). Correctif d'un bug confirmé : l'interface (bouton
+       "Approuver"/"Refuser" du tableau de bord desktop hôpital) affichait
+       cette action à admin_hospital, mais Firestore ne l'autorisait
+       jusqu'ici qu'à isAdmin() — la décision échouait toujours
+       silencieusement pour admin_hospital. */
+    function canManageAffiliation(data) {
+      return isAdmin() ||
+        (hasRole('admin_hospital') && isHospitalMember(resolveHospitalId(data)));
+    }
+    // Champs qu'une décision (approbation/refus) peut modifier — jamais
+    // requesterUid/requesterRole/establishmentId/professionalNumber, qui
+    // restent tels que déposés à la création de la demande.
+    function affiliationDecisionFieldsOk(before, after) {
+      return after.diff(before).affectedKeys().hasOnly([
+        'status', 'updatedAt', 'decided_at', 'decidedByUid', 'decidedByRole', 'decisionReason'
+      ]);
+    }
+    // Variante de hasApprovedAffiliation() (définie plus bas, pour
+    // l'auto-écriture de SA PROPRE affiliation) qui vérifie l'affiliation
+    // d'un uid ARBITRAIRE — nécessaire pour que admin_hospital puisse
+    // activer hospitalMembers au nom du professionnel dont il vient
+    // d'approuver la demande (l'acteur est l'admin_hospital, jamais le
+    // membre lui-même — même principe déjà documenté pour isAdmin() plus
+    // bas). Exige que la demande existe et soit pending OU déjà approved
+    // pour CE uid et CET établissement — jamais une élévation
+    // indépendante d'une demande inexistante ou refusée.
+    function hasPendingOrApprovedAffiliationFor(uid, hospitalId) {
+      return uid != null && hospitalId != null &&
+        exists(/databases/$(database)/documents/affiliation_requests/$('AFF_' + uid + '_' + hospitalId)) &&
+        get(/databases/$(database)/documents/affiliation_requests/$('AFF_' + uid + '_' + hospitalId)).data.status in ['pending', 'approved'];
+    }
+
     function ownsUid(uid) {
       return signedIn() && uid == request.auth.uid;
     }
@@ -364,6 +491,24 @@ service cloud.firestore {
         data.get('receivedByPharmacyUid', null) == request.auth.uid ||
         uidIn(data.get('pharmacyUids', []))
       );
+    }
+
+    /* ── Chantier "reception/affiliation sans régression" — section 11 ──
+       Bug confirmé : mc_medicines/mc_sales n'avaient jamais de champ
+       pharmacyUid, et leur règle write/read se limitait à
+       "currentRoleIs('pharmacist')" — N'IMPORTE QUEL pharmacien pouvait
+       lire/modifier/supprimer le stock ou les ventes de N'IMPORTE QUEL
+       AUTRE pharmacien. js/db.js addMedicine()/addSale() posent
+       désormais pharmacyUid à la création. Les documents créés AVANT ce
+       correctif n'ont pas ce champ (aucune Cloud Function/migration de
+       masse pour ce chantier) : ils restent, de façon temporaire et
+       documentée, accessibles à tout pharmacien (repli rétro-compatible
+       explicite) — jusqu'à ce qu'une prochaine écriture les fasse
+       passer sous ce même correctif (updateMedicine() préserve
+       pharmacyUid une fois posé). */
+    function pharmacyOwnsOrLegacy(data) {
+      return currentRoleIs('pharmacist') &&
+        (data.get('pharmacyUid', null) == request.auth.uid || data.get('pharmacyUid', null) == null);
     }
 
     /* ── PARTIE D — consentements (mc_consents) ──
@@ -518,6 +663,14 @@ service cloud.firestore {
       allow create: if isAdmin() ||
         ((currentRoleIs('doctor') || currentRoleIs('nurse')) &&
          (isEmergencyIntake(request.resource.data) ||
+          hospitalCanWrite(resolveHospitalId(request.resource.data)))) ||
+        // Correctif (section 4) : miroir exact de la clause ajoutée
+        // ci-dessous sur /mc_patients (collection réellement lue) —
+        // /patients (miroir) doit rester acceptée pour ne pas faire
+        // échouer le batch atomique DB.addPatientAndConfirmAtomic().
+        (receptionPatientCreateOk(request.resource.data) &&
+         belongsToSameEstablishment(request.resource.data) &&
+         (isEmergencyIntake(request.resource.data) ||
           hospitalCanWrite(resolveHospitalId(request.resource.data))));
       allow update, delete: if isAdmin() || doctorCanRead(resource.data);
     }
@@ -601,7 +754,16 @@ service cloud.firestore {
 
     match /medical_records/{recordId} {
       allow read: if canReadMedicalData(resource.data);
-      allow create: if isAdmin() || currentRoleIs('doctor') || currentRoleIs('nurse');
+      // Correctif (section 4) : la réception ne peut créer QUE le
+      // document RACINE posé à la création d'une fiche (type
+      // 'patient_record', voir DB.addPatient/addPatientAndConfirmAtomic)
+      // — jamais un contenu clinique. La modification ultérieure (update)
+      // reste réservée à doctor/nurse/admin (clause existante ci-dessous,
+      // inchangée) : la réception ne modifie jamais le contenu clinique
+      // après création.
+      allow create: if isAdmin() || currentRoleIs('doctor') || currentRoleIs('nurse') ||
+        (hasRole('reception') && belongsToSameEstablishment(request.resource.data) &&
+         request.resource.data.get('type', null) == 'patient_record');
       allow update, delete: if isAdmin() || doctorCanRead(resource.data);
     }
 
@@ -708,9 +870,29 @@ service cloud.firestore {
       allow create: if signedIn() &&
         request.resource.data.requesterUid == request.auth.uid &&
         request.resource.data.status == 'pending';
+      // Correctif (audit sécurité, section 9) : admin_hospital peut
+      // désormais lire les demandes de SON établissement (nécessaire
+      // pour afficher la file "Demandes d'affiliation en attente" du
+      // tableau de bord desktop) — ajout ADDITIF, jamais en remplacement
+      // du droit déjà existant du demandeur sur sa propre demande.
       allow read: if isAdmin() ||
-        (signedIn() && resource.data.requesterUid == request.auth.uid);
-      allow update: if isAdmin();
+        (signedIn() && resource.data.requesterUid == request.auth.uid) ||
+        canManageAffiliation(resource.data);
+      // Correctif (audit sécurité, section 9) : seul isAdmin() pouvait
+      // mettre à jour ce document — un admin_hospital qui approuvait/
+      // refusait une demande depuis le tableau de bord desktop hôpital
+      // (bouton visible côté interface) voyait systématiquement
+      // l'écriture rejetée par Firestore. admin_hospital ne peut décider
+      // que pour SON établissement, uniquement depuis 'pending', vers
+      // 'approved'/'rejected', et seulement les champs de décision —
+      // jamais requesterUid/requesterRole/establishmentId.
+      allow update: if isAdmin() ||
+        (canManageAffiliation(resource.data) &&
+         resource.data.get('status', 'pending') == 'pending' &&
+         request.resource.data.get('status', null) in ['approved', 'rejected'] &&
+         affiliationDecisionFieldsOk(resource.data, request.resource.data) &&
+         request.resource.data.get('decidedByUid', null) == request.auth.uid &&
+         currentRoleIs(request.resource.data.get('decidedByRole', '')));
       allow delete: if isAdmin();
     }
 
@@ -742,13 +924,74 @@ service cloud.firestore {
     // hors ligne par l'hôpital à la création de la fiche (voir
     // js/db.js addPatient / js/hospital.js showFirstAccessCodeModal),
     // pas seulement la connaissance du numéro MC-xxx.
+    //
+    // Correctif (audit sécurité, chantier "reception/affiliation sans
+    // régression") : la clause create ci-dessus ne restreignait AUCUNEMENT
+    // le champ role — un utilisateur (même non authentifié, voir le mode
+    // dégradé ci-dessous) pouvait poser role:'admin' ou
+    // role:'admin_hospital' sur un nouveau document. scripts/sync-
+    // account-security.mjs lit ce même rôle pour poser un VRAI custom
+    // claim Firebase Auth (admin:true) sur les comptes approuvés/actifs —
+    // ce document forgé pouvait donc aboutir à une élévation de privilège
+    // réelle. Fermé ADDITIVEMENT ci-dessous, sans toucher à la logique
+    // existante des rôles déjà admis (doctor/nurse/pharmacist/lab/
+    // reception/patient) ni au mode dégradé déjà toléré et testé
+    // (tests/firestore-rules/mc-accounts.rules.test.js).
     match /mc_accounts/{docId} {
       allow read: if true;
+      // 'hospital' inclus pour cohérence avec le reste du produit, même
+      // si aucun code actuel n'écrit ce rôle dans mc_accounts (le compte
+      // établissement vit dans users/{authUid}, pas ici) — inoffensif.
+      // 'admin' et 'admin_hospital' SONT VOLONTAIREMENT ABSENTS : aucune
+      // inscription ordinaire ne doit jamais pouvoir se les attribuer.
+      function selfRegistrableProfessionalRole(role) {
+        return role in ['doctor', 'nurse', 'pharmacist', 'hospital', 'lab', 'reception'];
+      }
+      // Cas strict : identité Firebase Auth réelle de bout en bout —
+      // toujours le cas pour lab/reception (js/auth.js _regAgentStrict,
+      // aucun mode dégradé), et pour doctor/nurse/pharmacist quand la
+      // création Firebase Auth a réussi (js/auth.js _reg/_createFirebaseUser).
+      function validMcAccountSelfCreate(id, data) {
+        return signedIn() &&
+          data.get('authUid', null) == request.auth.uid &&
+          data.get('uid', null) == request.auth.uid &&
+          id == request.auth.uid &&
+          selfRegistrableProfessionalRole(data.get('role', '')) &&
+          data.get('status', null) == 'pending' &&
+          hasNoSecretFields(data);
+      }
+      // Cas hérité ("mode dégradé", js/auth.js _reg/_createFirebaseUser) :
+      // doctor/nurse/pharmacist SANS identité Firebase Auth (échec réseau
+      // ou autre à la création) — comportement DÉJÀ existant et DÉJÀ
+      // testé (mc-accounts.rules.test.js, "création SANS secret ET sans
+      // authUid... est acceptée"), y compris sans signedIn(). Jamais
+      // utilisé par lab/reception. Resserré au strict nécessaire pour
+      // fermer la vraie faille : rôle borné (jamais admin/admin_hospital),
+      // statut toujours 'pending'.
+      function legacyDegradedProfessionalCreate(data) {
+        return data.get('authUid', null) == null &&
+          data.get('role', '') in ['doctor', 'nurse', 'pharmacist'] &&
+          data.get('status', null) == 'pending' &&
+          hasNoSecretFields(data);
+      }
+      // Cas patient : inchangé par rapport à la logique existante
+      // (docId PAT_{patientId}, authUid optionnel mais s'il est posé il
+      // doit correspondre à l'utilisateur connecté — anti-préemption déjà
+      // en place), avec en plus le rôle explicitement borné à 'patient'.
+      function validPatientAccountSelfCreate(data) {
+        return data.get('role', '') == 'patient' &&
+          (data.get('authUid', null) == null ||
+           (signedIn() && data.get('authUid', null) == request.auth.uid)) &&
+          hasNoSecretFields(data);
+      }
       allow create: if !exists(/databases/$(database)/documents/mc_accounts/$(docId)) &&
-        (request.resource.data.get('authUid', null) == null ||
-         (signedIn() && request.resource.data.get('authUid', null) == request.auth.uid)) &&
         patientFirstAccessOk(request.resource.data.get('patient_id', null), request.resource.data.get('firstAccessCode', null)) &&
-        hasNoSecretFields(request.resource.data);
+        (
+          isAdmin() ||
+          validMcAccountSelfCreate(docId, request.resource.data) ||
+          legacyDegradedProfessionalCreate(request.resource.data) ||
+          validPatientAccountSelfCreate(request.resource.data)
+        );
       // Correctif (chantier "durcissement sans Cloud Functions") :
       // contrairement à users/doctors/nurses/pharmacies
       // (safeSelfUserUpdate/status ET rôle figés sauf isAdmin()), cette
@@ -763,14 +1006,25 @@ service cloud.firestore {
       // safeSelfUserUpdate, qui gèle déjà request.resource.data.role) —
       // un compte lab/reception approuvé aurait pu changer son propre
       // rôle (ex. vers 'doctor') sans jamais toucher au statut.
+      // Correctif (audit sécurité) : authUid/uid/patient_id/
+      // professionalNumber/matricule n'étaient pas encore figés — un
+      // propriétaire pouvait en théorie réécrire ces champs d'identité
+      // après création. Ajout ADDITIF, même principe.
+      function mcAccountImmutableFieldsOk(before, after) {
+        return after.get('status', null) == before.get('status', null) &&
+          after.get('role', null) == before.get('role', null) &&
+          after.get('authUid', null) == before.get('authUid', null) &&
+          after.get('uid', null) == before.get('uid', null) &&
+          after.get('patient_id', null) == before.get('patient_id', null) &&
+          after.get('professionalNumber', null) == before.get('professionalNumber', null) &&
+          after.get('matricule', null) == before.get('matricule', null);
+      }
       allow update: if hasNoSecretFields(request.resource.data) && (
         isAdmin() ||
         ((signedIn() && request.auth.uid == docId) &&
-         request.resource.data.get('status', null) == resource.data.get('status', null) &&
-         request.resource.data.get('role', null) == resource.data.get('role', null)) ||
+         mcAccountImmutableFieldsOk(resource.data, request.resource.data)) ||
         ((signedIn() && resource.data.get('authUid', null) == request.auth.uid) &&
-         request.resource.data.get('status', null) == resource.data.get('status', null) &&
-         request.resource.data.get('role', null) == resource.data.get('role', null))
+         mcAccountImmutableFieldsOk(resource.data, request.resource.data))
       );
       // Correctif (chantier "suppression de compte") : le propriétaire
       // peut supprimer son propre document mc_accounts — cas pro
@@ -806,8 +1060,14 @@ service cloud.firestore {
       // n'est visible au médecin/infirmier(ère) que si l'abonnement de
       // l'établissement est actif (voir définition plus haut) — jamais
       // appliqué au patient (ownsPatientData reste inconditionnel).
+      // Correctif (chantier sécurité, section 9/10) : belongsToSameEstablishment()
+      // seule donnait à TOUT membre actif de l'établissement — y
+      // compris reception et lab, sans capacité client correspondante —
+      // un accès en lecture au contenu clinique complet. Resserré à
+      // isClinicalHospitalMember() (doctor/nurse/admin_hospital
+      // uniquement).
       allow read: if (canReadMedicalData(resource.data) ||
-        belongsToSameEstablishment(resource.data)) &&
+        isClinicalHospitalMember(resource.data)) &&
         subscriptionReadGateOk(resource.data);
       // Créer/valider une consultation = acte médical : médecin
       // uniquement (l'infirmier peut lire, pas créer). Verrouillage
@@ -837,7 +1097,12 @@ service cloud.firestore {
       // n'est visible au médecin/infirmier(ère) que si l'abonnement de
       // l'établissement est actif (jamais appliqué au patient, ni au
       // laborantin/admin_hospital qui traitent la demande).
-      allow read: if (canReadMedicalData(resource.data) || belongsToSameEstablishment(resource.data)) &&
+      // Correctif (chantier sécurité, section 9/10) : lab (son propre
+      // résultat, légitime) ET clinique (doctor/nurse/admin_hospital) —
+      // jamais reception (belongsToSameEstablishment() seule le
+      // permettait avant ce correctif).
+      allow read: if (canReadMedicalData(resource.data) ||
+        isClinicalHospitalMember(resource.data) || labCanReadLabData(resource.data)) &&
         subscriptionReadGateOk(resource.data);
       // Correctif (chantier "modales laboratoire") : "allow write" sans
       // aucune autre condition permettait à un laborantin (ou médecin/
@@ -918,13 +1183,24 @@ service cloud.firestore {
     }
 
     match /mc_medicines/{docId} {
+      // Catalogue public inchangé (spec explicite) : la lecture reste
+      // ouverte à tout compte connecté (js/map.js — disponibilité des
+      // médicaments par pharmacie). Seule l'ÉCRITURE est isolée.
       allow read: if signedIn();
-      allow write: if isAdmin() || currentRoleIs('pharmacist');
+      allow create: if isAdmin() ||
+        (currentRoleIs('pharmacist') && request.resource.data.get('pharmacyUid', null) == request.auth.uid);
+      allow update, delete: if isAdmin() || pharmacyOwnsOrLegacy(resource.data);
     }
 
     match /mc_sales/{docId} {
-      allow read: if isAdmin() || currentRoleIs('pharmacist');
-      allow write: if isAdmin() || currentRoleIs('pharmacist');
+      // Correctif (chantier sécurité, section 11) : bug confirmé — tout
+      // pharmacien pouvait lire/modifier/supprimer les ventes de
+      // N'IMPORTE QUEL autre pharmacien (aucune isolation). Repli legacy
+      // documenté pour les ventes créées avant pharmacyUid.
+      allow read: if isAdmin() || pharmacyOwnsOrLegacy(resource.data);
+      allow create: if isAdmin() ||
+        (currentRoleIs('pharmacist') && request.resource.data.get('pharmacyUid', null) == request.auth.uid);
+      allow update, delete: if isAdmin() || pharmacyOwnsOrLegacy(resource.data);
     }
 
     /* PARTIE D — un utilisateur connecté quelconque pouvait auparavant
@@ -980,6 +1256,17 @@ service cloud.firestore {
       allow create: if isAdmin() ||
         ((currentRoleIs('doctor') || currentRoleIs('nurse')) &&
          (isEmergencyIntake(request.resource.data) ||
+          hospitalCanWrite(resolveHospitalId(request.resource.data)))) ||
+        // Correctif (chantier sécurité, section 4) : bug confirmé — la
+        // matrice client autorise déjà la réception à créer un patient
+        // (js/hospital-capabilities.js), mais AUCUNE clause create ne
+        // couvrait ce rôle ici ; la fiche restait provisoire, jamais
+        // confirmée par Firestore. receptionPatientCreateOk() limite le
+        // document à des champs administratifs — jamais de contenu
+        // clinique.
+        (receptionPatientCreateOk(request.resource.data) &&
+         belongsToSameEstablishment(request.resource.data) &&
+         (isEmergencyIntake(request.resource.data) ||
           hospitalCanWrite(resolveHospitalId(request.resource.data))));
       allow update, delete: if isAdmin();
     }
@@ -994,8 +1281,11 @@ service cloud.firestore {
       // visible au médecin/infirmier(ère) que si l'abonnement de
       // l'établissement est actif (jamais appliqué au patient, ni au
       // pharmacien qui la traite).
+      // Correctif (chantier sécurité, section 9/10) : même resserrement
+      // que mc_consultations — belongsToSameEstablishment() seule
+      // donnait aussi à reception/lab un accès aux ordonnances.
       allow read: if (canReadMedicalData(resource.data) ||
-        belongsToSameEstablishment(resource.data) ||
+        isClinicalHospitalMember(resource.data) ||
         pharmacyCanReadPrescription(resource.data)) &&
         subscriptionReadGateOk(resource.data);
       // Correctif (audit) : même défaut que mc_consultations — le
@@ -1052,19 +1342,37 @@ service cloud.firestore {
     }
 
     match /mc_messages/{docId} {
-      allow read, update: if isAdmin() || (signedIn() && resource.data.to_id == request.auth.uid);
+      allow read: if isAdmin() || (signedIn() && resource.data.to_id == request.auth.uid);
+      // Correctif (chantier sécurité, section 12) : "update" acceptait
+      // n'importe quel champ (corps, expéditeur, destinataire, pièce
+      // jointe...) dès lors que le destinataire était le bon — un
+      // destinataire pouvait donc réécrire le message reçu après coup.
+      // Resserré aux seuls champs de statut de lecture/suppression
+      // locale ; le contenu (body/subject/from*/to*/attachedRecord*)
+      // reste IMMUABLE après création.
+      allow update: if isAdmin() ||
+        (signedIn() && resource.data.to_id == request.auth.uid &&
+         request.resource.data.diff(resource.data).affectedKeys()
+           .hasOnly(['readStatus', 'read', 'readAt', 'deletedFor', 'updatedAt']));
       // Correctif (audit) : seuls les messages qui portent explicitement
       // un hospitalId (messagerie pro→pro, js/transfer_ui_patch.js) sont
       // soumis à hospitalCanWriteFromDevice — les 8 autres types de
       // notification (rendez-vous, ordonnance, labo, affiliation...) ne
       // posent jamais ce champ et restent donc toujours autorisés,
       // inchangés.
+      // Correctif (chantier sécurité, section 12) : aucune vérification
+      // de l'identité de l'expéditeur n'existait — messageSenderIdentityOk()
+      // ferme l'usurpation. Quand hospitalId est posé, exige en plus que
+      // l'expéditeur soit RÉELLEMENT membre actif de cet établissement
+      // (hospitalCanWriteFromDevice ne vérifiait que l'abonnement, jamais
+      // l'appartenance).
       allow create: if isAdmin() ||
-        (signedIn() &&
+        (signedIn() && messageSenderIdentityOk(request.resource.data) &&
          ((!('hospitalId' in request.resource.data)) ||
           request.resource.data.hospitalId in [null, ''] ||
-          hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data),
-                                      request.resource.data.sourceDevice)));
+          (isHospitalMember(resolveHospitalId(request.resource.data)) &&
+           hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data),
+                                       request.resource.data.sourceDevice))));
       allow delete: if isAdmin();
     }
 
@@ -1110,8 +1418,12 @@ service cloud.firestore {
     // demande de N'IMPORTE QUEL hôpital, y compris ses champs
     // d'identification (patientMc, requestedByUid...).
     match /labRequests/{docId} {
+      // Correctif (chantier sécurité, section 9/10) : belongsToSameEstablishment()
+      // seule donnait aussi à reception l'accès aux demandes d'analyse
+      // (contenu labo, hors capacités reception). Lab (labCanReadLabData)
+      // et clinique (isClinicalHospitalMember) seulement.
       allow read: if canReadMedicalData(resource.data) ||
-        belongsToSameEstablishment(resource.data);
+        isClinicalHospitalMember(resource.data) || labCanReadLabData(resource.data);
       allow create: if isAdmin() ||
         (canRequestLab() &&
          belongsToSameEstablishment(request.resource.data) &&
@@ -1134,8 +1446,10 @@ service cloud.firestore {
       // résultats de son hôpital (affichage desktop) ; le destinataire
       // désigné (resultRecipientUids) y accède quel que soit
       // l'établissement où il exerce habituellement.
+      // Correctif (chantier sécurité, section 9/10) : même resserrement
+      // que mc_lab_results — reception n'a plus accès aux résultats.
       allow read: if isAdmin() || canReadMedicalData(resource.data) ||
-        belongsToSameEstablishment(resource.data) ||
+        isClinicalHospitalMember(resource.data) || labCanReadLabData(resource.data) ||
         uidIn(resource.data.get('resultRecipientUids', []));
       // Saisir un résultat = capacité labo/médecin ET affiliation à
       // L'ÉTABLISSEMENT DE LA DEMANDE ET abonnement actif (collection
@@ -1159,8 +1473,11 @@ service cloud.firestore {
     match /messages/{docId} {
       allow read: if isAdmin() ||
         (signedIn() && (resource.data.toUid == request.auth.uid || resource.data.fromUid == request.auth.uid));
+      // Correctif (chantier sécurité, section 12) : même durcissement
+      // que mc_messages — vérifie désormais l'identité de l'expéditeur.
       allow create: if isAdmin() ||
-        (signedIn() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
+        (signedIn() && messageSenderIdentityOk(request.resource.data) &&
+         hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
       allow update: if isAdmin() ||
         (signedIn() && resource.data.toUid == request.auth.uid &&
          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readStatus','readAt']));
@@ -1196,19 +1513,32 @@ service cloud.firestore {
       // autre établissement) lire l'affiliation hôpital↔personnel↔rôle
       // de n'importe qui, en devinant simplement le docId
       // ({hospitalId}_{uid}). Resserré au même principe que le reste du
-      // fichier (PARTIE E) : admin, ou le titulaire du document lui-même
-      // — les 2 seuls lecteurs réels identifiés côté client
-      // (auth.js verifyAgent → requête where('uid','==',soi-même),
-      // hospitals_registry.js getHospitalMemberDirect → lecture de SA
-      // PROPRE affiliation lors de la connexion).
+      // fichier (PARTIE E) : admin, le titulaire du document lui-même, ou
+      // un admin_hospital pour les membres de SON PROPRE établissement
+      // (ajout ADDITIF, chantier "reception/affiliation sans régression"
+      // section 9 — nécessaire pour la gestion du personnel affilié).
       allow read: if isAdmin() ||
-        (signedIn() && resource.data.get('uid', null) == request.auth.uid);
+        (signedIn() && resource.data.get('uid', null) == request.auth.uid) ||
+        (hasRole('admin_hospital') && isHospitalMember(resource.data.get('hospitalId', null)));
       allow create, update: if isAdmin() ||
         (signedIn() &&
          docId == (resolveHospitalId(request.resource.data) + '_' + request.auth.uid) &&
          request.resource.data.uid == request.auth.uid &&
          request.resource.data.status == 'active' &&
-         hasApprovedAffiliation(resolveHospitalId(request.resource.data)));
+         hasApprovedAffiliation(resolveHospitalId(request.resource.data))) ||
+        // Correctif (audit sécurité, section 9) : sans cette clause,
+        // même une fois affiliation_requests.update autorisé pour
+        // admin_hospital, le batch d'approbation échouait quand même sur
+        // CETTE écriture (hospitalMembers du REQUÉRANT, pas de
+        // l'admin_hospital lui-même — le principe self-write seul ne
+        // pouvait jamais couvrir ce cas). Un admin_hospital ne peut
+        // activer que le membre d'une demande pending/approved qu'il a
+        // lui-même le droit de gérer, pour SON établissement — jamais une
+        // élévation indépendante d'un tiers sans dossier de demande.
+        (hasRole('admin_hospital') &&
+         isHospitalMember(resolveHospitalId(request.resource.data)) &&
+         request.resource.data.get('status', null) == 'active' &&
+         hasPendingOrApprovedAffiliationFor(request.resource.data.get('uid', null), resolveHospitalId(request.resource.data)));
       // Correctif (chantier "suppression de compte") : un membre peut
       // supprimer son propre document d'affiliation (utilisé lors de
       // la suppression de compte pour nettoyer hospitalMembers).

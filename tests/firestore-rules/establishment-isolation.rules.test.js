@@ -25,6 +25,21 @@ async function seedDoc(env, collection, id, data) {
   });
 }
 
+// Chantier sécurité (section 9/10, isClinicalHospitalMember/labCanReadLabData) :
+// ces deux fonctions vérifient le RÔLE réel (hasRole(), via users/{uid}
+// ou un custom claim), pas seulement l'appartenance à hospitalMembers.
+// Un compte de test sans AUCUN signal de rôle (ni claim, ni users/{uid})
+// n'est représentatif d'aucun compte réel (chaque professionnel a
+// toujours l'un des deux) et fait inutilement évaluer les 3 branches
+// hasRole() jusqu'à épuiser le budget d'évaluation de l'émulateur —
+// seedRole() reflète l'état réel d'un compte approuvé.
+async function seedRole(env, uid, role) {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, 'users', uid), { uid, role, status: 'approved' });
+  });
+}
+
 test('mc_patients : médecin membre du même établissement, NON auteur, lit la fiche SANS mc_consents', async () => {
   const env = await getTestEnv();
   await clearAll(env);
@@ -57,6 +72,7 @@ test('mc_consultations : infirmier membre du même établissement lit sans être
   const env = await getTestEnv();
   await clearAll(env);
   await seedMember(env, 'HOSP-A', 'nurse-member-1');
+  await seedRole(env, 'nurse-member-1', 'nurse');
   await seedDoc(env, 'mc_consultations', 'CONS1', { patient_id: 'MC-E4', establishmentId: 'HOSP-A', doctor_uid: 'doctor-author-1' });
   const nurse = env.authenticatedContext('nurse-member-1').firestore();
   await assertSucceeds(getDoc(doc(nurse, 'mc_consultations', 'CONS1')));
@@ -75,6 +91,7 @@ test('labRequests : membre du même établissement lit sans être auteur', async
   const env = await getTestEnv();
   await clearAll(env);
   await seedMember(env, 'HOSP-A', 'lab-member-1');
+  await seedRole(env, 'lab-member-1', 'lab');
   await seedDoc(env, 'labRequests', 'LR1', { patient_id: 'MC-E6', establishmentId: 'HOSP-A' });
   const member = env.authenticatedContext('lab-member-1').firestore();
   await assertSucceeds(getDoc(doc(member, 'labRequests', 'LR1')));

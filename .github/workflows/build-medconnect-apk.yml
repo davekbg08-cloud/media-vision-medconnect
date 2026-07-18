@@ -23,7 +23,7 @@ permissions:
   contents: read
 
 env:
-  APK_NAME: medconnect-v2.9.31.apk
+  APK_NAME: medconnect-v2.9.32.apk
 
 jobs:
   test:
@@ -62,7 +62,7 @@ jobs:
         run: npm run test:rules
 
   build-apk:
-    name: Build signed APK v2.9.31
+    name: Build signed APK v2.9.32
     runs-on: ubuntu-latest
     needs: test
 
@@ -145,8 +145,8 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: medconnect-v2.9.31-apk
-          path: build-output/medconnect-v2.9.31.apk
+          name: medconnect-v2.9.32-apk
+          path: build-output/medconnect-v2.9.32.apk
           if-no-files-found: error
 
       - name: Supprimer le keystore et ses secrets

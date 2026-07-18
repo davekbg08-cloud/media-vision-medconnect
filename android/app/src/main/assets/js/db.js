@@ -613,6 +613,53 @@ const DB = (() => {
     return { patient: p, confirmed: ok };
   }
 
+  /* Chantier "sécurité/réception/affiliation sans régression" (section
+     4) : variante STRICTE d'addPatientAndConfirm(), réservée à la
+     réception. Contrairement à addPatientAndConfirm() (confirme
+     seulement mc_patients, tolère une synchronisation différée des 2
+     autres documents via l'outbox — comportement déjà validé pour
+     médecin/infirmier, volontairement inchangé ci-dessus), la réception
+     ne doit JAMAIS créer une prise en charge (receptionVisits/admissions)
+     sur une fiche dont les 3 documents ne sont pas RÉELLEMENT confirmés
+     ensemble par Firestore. Utilise le batch atomique existant
+     (pushBatchAndReportDetailed, déjà utilisé par
+     HospitalsRegistry.respondAffiliation) — tout ou rien, sans repli
+     outbox pièce par pièce (cf. commentaire ligne ~208) : un échec ici
+     signifie qu'AUCUN des 3 documents n'a atteint Firestore, jamais un
+     état partiel. addPatient() a déjà lancé ses propres écritures
+     fire-and-forget (comportement historique inchangé pour ses autres
+     appelants directs, maternité/urgences) ; ce second passage est
+     redondant mais idempotent (set() par id identique), et c'est le
+     seul dont le résultat est réellement attendu ici. */
+  async function addPatientAndConfirmAtomic(data) {
+    const p = addPatient(data);
+    const medicalRecord = {
+      recordId: p.id,
+      patientId: p.id,
+      patientUid: p.uid || p.patient_uid || '',
+      created_by: p.created_by || '',
+      establishmentId: p.establishmentId || p.hospital_id || '',
+      type: 'patient_record',
+      status: 'active',
+      createdAt: p.created_at,
+      updatedAt: p.created_at,
+    };
+    const result = await pushBatchAndReportDetailed([
+      ['mc_patients', p.id, p],
+      ['patients', p.id, p],
+      ['medical_records', p.id, medicalRecord],
+    ], { label: 'Création patient (réception)' });
+    if (!result.ok) {
+      // Retire la fiche provisoire du cache local — la réception ne
+      // doit jamais garder ni afficher une fiche que Firestore n'a pas
+      // réellement acceptée (contrairement au cas médecin/infirmier
+      // ci-dessus, où une fiche non confirmée reste visible avec un
+      // avertissement en attendant l'outbox).
+      store('mc_patients', getPatients().filter(x => x.id !== p.id));
+    }
+    return { patient: p, confirmed: result.ok };
+  }
+
   function updatePatient(id, data) {
     const list = getPatients();
     const idx  = list.findIndex(p => p.id === id);
@@ -1044,9 +1091,16 @@ const DB = (() => {
   ══════════════════════════════════════════════════ */
   function getMedicines() { return load('mc_medicines'); }
 
+  // Chantier sécurité (section 11) : bug confirmé — mc_medicines
+  // n'avait jamais de pharmacyUid, et firestore.rules autorisait
+  // "write: if currentRoleIs('pharmacist')" sans aucune isolation —
+  // n'importe quel pharmacien pouvait modifier/supprimer le stock d'un
+  // AUTRE pharmacien. pharmacyUid identifie désormais le propriétaire
+  // dès la création (lecture catalogue publique inchangée : seule
+  // l'écriture est concernée, voir firestore.rules).
   function addMedicine(data) {
     const list = getMedicines();
-    const m = { ...data, mid: makeId('M'), created_at: new Date().toISOString() };
+    const m = { ...data, mid: makeId('M'), pharmacyUid: window.Auth?.getUser?.()?.uid || '', created_at: new Date().toISOString() };
     list.push(m); store('mc_medicines', list);
     _push('mc_medicines', m.mid, m);
     return m;
@@ -1079,6 +1133,11 @@ const DB = (() => {
       total: parseFloat(total).toFixed(2),
       patient_id: patientId || null,
       date: today(), time: new Date().toLocaleTimeString(),
+      // Chantier sécurité (section 11) : même correctif que
+      // addMedicine() — mc_sales n'avait aucun identifiant de
+      // propriétaire, et firestore.rules autorisait tout pharmacien à
+      // lire/écrire les ventes de N'IMPORTE QUEL AUTRE pharmacien.
+      pharmacyUid: window.Auth?.getUser?.()?.uid || '',
     };
     list.push(s); store('mc_sales', list);
     _push('mc_sales', s.sid, s);
@@ -1158,7 +1217,7 @@ const DB = (() => {
     pushCloud: _push, deleteCloud: _delete, roleCollection,
     getAccounts, saveAccounts, getUsers, saveUsers, upsertUserProfile,
     getRegistrationRequests, saveRegistrationRequests, createRegistrationRequest,
-    getPatients, savePatients, addPatient, addPatientAndConfirm, updatePatient, deletePatient, getPatientById, searchPatients,
+    getPatients, savePatients, addPatient, addPatientAndConfirm, addPatientAndConfirmAtomic, updatePatient, deletePatient, getPatientById, searchPatients,
     accountExistsForPatient, getPatientAccessCode,
     getConsultations, addConsultation, getPatientConsultations, deleteConsultation,
     getPrescriptions, addPrescription, updatePrescription, updatePrescriptionAndConfirm, getPatientPrescriptions,
