@@ -295,12 +295,28 @@ const ExchangeBridge = (() => {
 
     if (user.role === 'doctor') {
       listenFiltered('consultations', [['hospitalId','==',hospitalId], ['doctorUid','==',user.uid]], docs => notify('consultations', docs));
-      listenFiltered('labResults',    [['hospitalId','==',hospitalId], ['doctorUid','==',user.uid]], docs => notify('labResults', docs));
+      // Correctif (chantier "modales laboratoire") : ne filtrer que sur
+      // doctorUid ratait les résultats d'une demande faite par un
+      // infirmier où ce médecin n'est que destinataire
+      // (resultRecipientUids) — un médecin listé uniquement comme
+      // destinataire ne recevait jamais la notification.
+      listenFiltered('labResults',    [['hospitalId','==',hospitalId], ['resultRecipientUids','array-contains',user.uid]], docs => notify('labResults', docs));
       listenFiltered('prescriptions', [['hospitalId','==',hospitalId], ['doctorUid','==',user.uid]], docs => notify('prescriptions', docs));
     } else if (user.role === 'pharmacist') {
       listenFiltered('prescriptions', [['hospitalId','==',hospitalId], ['status','in',['sent_to_pharmacy','prepared']]], docs => notify('prescriptions', docs));
     } else if (user.role === 'nurse') {
-      // Labo/laborantin partage le rôle infirmier dans ce projet si absent en tant que tel.
+      // Correctif : un infirmier reçoit ses résultats de labo via
+      // resultRecipientUids (demande qu'il a lui-même passée) — il
+      // n'écoute PAS labRequests (ce n'est pas lui qui traite les
+      // demandes, seul le rôle lab le fait, voir branche 'lab'
+      // ci-dessous).
+      listenFiltered('labResults', [['hospitalId','==',hospitalId], ['resultRecipientUids','array-contains',user.uid]], docs => notify('labResults', docs));
+    } else if (user.role === 'lab') {
+      // Correctif (chantier "modales laboratoire") : le rôle lab
+      // n'écoutait RIEN — aucun listener n'existait pour lui, alors que
+      // c'est le rôle qui traite les demandes d'analyse. Écoute les
+      // demandes en attente/en cours de son établissement uniquement
+      // (isolation appliquée aussi côté règles Firestore).
       listenFiltered('labRequests', [['hospitalId','==',hospitalId], ['status','in',['requested','sample_pending','in_progress']]], docs => notify('labRequests', docs));
     } else if (user.role === 'admin') {
       listenFiltered('registration_requests', [['status','==','pending']], docs => notify('registration_requests', docs));
