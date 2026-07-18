@@ -221,6 +221,40 @@ const HospitalsRegistry = (() => {
     return getHospitals().find(h => h.establishmentId === establishmentId || h.hid === establishmentId) || null;
   }
 
+  /* Correctif (bug confirmé) : HospitalAuth.findByOfficialId() peut
+     trouver l'établissement directement dans Firestore sans jamais
+     l'ajouter au cache local — requestAffiliation() (via
+     getHospitalById) échouait alors silencieusement pour un agent
+     lab/reception se connectant/s'inscrivant sur un poste qui n'a
+     jamais synchronisé cet établissement. cacheHospital() rend le
+     document cloud disponible localement SANS écriture Firestore, sans
+     changer son statut ni son propriétaire, et sans écraser un staff
+     déjà connu localement si le document entrant n'en porte pas. */
+  function cacheHospital(establishment) {
+    if (!establishment) return null;
+    const id = establishment.establishmentId || establishment.hid || establishment.id;
+    if (!id) return null;
+    const list = getHospitals();
+    const idx = list.findIndex(h => h.establishmentId === id || h.hid === id);
+    const incomingStaff = Array.isArray(establishment.staff) ? establishment.staff : null;
+    const merged = idx === -1
+      ? normalizeEstablishment({ ...establishment, establishmentId: id })
+      : normalizeEstablishment({
+          ...list[idx],
+          ...establishment,
+          establishmentId: id,
+          status: list[idx].status || establishment.status,
+          staff: (incomingStaff && incomingStaff.length) ? incomingStaff : list[idx].staff,
+        });
+    if (idx === -1) list.push(merged); else list[idx] = merged;
+    // Écriture LOCALE uniquement — jamais pushCloud ici (voir saveHospitals) :
+    // ce document vient déjà du cloud, le lui renvoyer serait un aller-retour inutile.
+    const normalizedList = list.map(normalizeEstablishment);
+    store(EST_KEY, normalizedList);
+    store(LEGACY_EST_KEY, normalizedList);
+    return merged;
+  }
+
   /* ── DEMANDES D'AFFILIATION ─────────────────────── */
   function getAffiliations() {
     const modern = load(REQ_KEY).map(normalizeRequest);
@@ -247,35 +281,63 @@ const HospitalsRegistry = (() => {
     return user?.order_num || user?.matricule || user?.username || '';
   }
 
-  function requestAffiliation(requesterUid, requesterName, establishmentId, options = {}) {
+  /* Correctif (bug confirmé) : getHospitalById(establishmentId) échouait
+     silencieusement (retour false) lorsque l'établissement, bien que
+     trouvé dans Firestore par HospitalAuth.findByOfficialId(), n'avait
+     jamais été mis en cache localement — empêchant la création de la
+     demande d'affiliation d'un agent lab/reception sur un poste qui
+     n'a jamais synchronisé cet établissement. Accepte désormais
+     options.establishment (transmis directement par l'appelant qui l'a
+     déjà en mémoire) et, à défaut, tente une lecture Firestore ciblée
+     avant de conclure à un échec. Devenue async pour cette raison —
+     TOUS les appelants doivent désormais l'attendre (await).
+     Contrat de retour : succès → l'objet affiliation normalisé
+     (toujours porteur de .requestId) ; échec → { ok:false, reason }
+     (jamais requestId) — les appelants doivent tester `.requestId`,
+     jamais la simple troncature JS (un objet {ok:false} est truthy). */
+  async function requestAffiliation(requesterUid, requesterName, establishmentId, options = {}) {
     const user = Auth.getUser() || {};
     const account = DB.getAccounts().find(a => a.uid === requesterUid) || user;
     const requesterRole = options.role || options.requesterRole || account.role || user.role || 'doctor';
     // Tous les rôles hospitaliers peuvent demander une affiliation
     // (médecin, infirmier, pharmacie, laboratoire, réception).
-    if (!['doctor','nurse','pharmacist','lab','reception'].includes(requesterRole)) return false;
+    if (!['doctor','nurse','pharmacist','lab','reception'].includes(requesterRole)) {
+      return { ok: false, reason: 'invalid_role' };
+    }
 
-    const h = getHospitalById(establishmentId);
-    if (!h) return false;
+    let h = options.establishment || getHospitalById(establishmentId);
+    if (!h && establishmentId && typeof firebaseDB !== 'undefined' && firebaseDB) {
+      try {
+        const doc = await firebaseDB.collection('establishments').doc(String(establishmentId)).get();
+        if (doc.exists) h = { id: doc.id, ...doc.data() };
+      } catch (e) {
+        console.warn('[HospitalsRegistry] Lecture établissement (affiliation) :', e?.message || e);
+      }
+    }
+    if (!h) return { ok: false, reason: 'establishment_not_found' };
+    // Rend le document disponible localement (jamais d'écriture Firestore).
+    h = cacheHospital(h) || h;
 
+    const finalEstablishmentId = h.establishmentId || establishmentId;
     const affs = getAffiliations();
     const existing = affs.find(a =>
       a.requesterUid === requesterUid &&
-      a.establishmentId === establishmentId &&
+      a.establishmentId === finalEstablishmentId &&
       ['pending','approved'].includes(a.status)
     );
-    if (existing) return false;
+    if (existing) return { ok: false, reason: 'already_exists', affiliation: existing };
 
     const a = normalizeRequest({
       // ID déterministe (cohérent avec normalizeRequest) : évite les
       // doublons et garantit que les boutons admin retrouvent la demande.
-      requestId: `AFF_${requesterUid}_${establishmentId}`,
+      requestId: `AFF_${requesterUid}_${finalEstablishmentId}`,
       requesterUid,
       requesterName,
       requesterRole,
       professionalNumber: options.professionalNumber || professionalNumberFor(account),
-      establishmentId,
+      establishmentId: finalEstablishmentId,
       establishmentName: h.name,
+      officialId: h.officialId || options.officialId || '',
       status: 'pending',
       createdAt: now(),
       updatedAt: now(),
@@ -287,18 +349,29 @@ const HospitalsRegistry = (() => {
   }
 
   /* Variante confirmée de requestAffiliation() : attend la confirmation
-     Firestore réelle de affiliation_requests avant de résoudre — utilisée
-     à l'inscription lab/reception (js/auth.js _regAgentStrict), où
-     annoncer une affiliation "envoyée" sans confirmation cloud tromperait
-     l'agent (même principe que addHospitalAndConfirm). saveAffiliations()
-     a déjà écrit en local + tenté le cloud en fire-and-forget (pushCloud) ;
-     on réécrit ici la même donnée via pushAndReport pour obtenir un
-     résultat réellement attendu. */
+     Firestore réelle de affiliation_requests (avec délai maximal) avant
+     de résoudre — utilisée à l'inscription lab/reception (js/auth.js
+     _regAgentStrict), où annoncer une affiliation "envoyée" sans
+     confirmation cloud tromperait l'agent (même principe que
+     addHospitalAndConfirm). Retourne toujours une raison précise
+     (establishment_not_found / permission_denied / timeout) plutôt
+     qu'un booléen nu, pour un message d'erreur exploitable. */
   async function requestAffiliationAndConfirm(requesterUid, requesterName, establishmentId, options = {}) {
-    const a = requestAffiliation(requesterUid, requesterName, establishmentId, options);
-    if (!a) return { affiliation: null, confirmed: false };
-    const confirmed = await DB.pushAndReport([['affiliation_requests', a.requestId, a]]);
-    return { affiliation: a, confirmed };
+    const result = await requestAffiliation(requesterUid, requesterName, establishmentId, options);
+    if (!result?.requestId) {
+      return { affiliation: null, confirmed: false, reason: result?.reason || 'unknown' };
+    }
+    const timeoutMs = options.timeoutMs || 15000;
+    if (DB.pushAndReportDetailed) {
+      const report = await DB.pushAndReportDetailed(
+        [['affiliation_requests', result.requestId, result]],
+        { timeoutMs, label: 'Affiliation' }
+      );
+      const reason = report.ok ? null : (report.timedOut ? 'timeout' : 'permission_denied');
+      return { affiliation: result, confirmed: report.ok, reason };
+    }
+    const confirmed = DB.pushAndReport ? await DB.pushAndReport([['affiliation_requests', result.requestId, result]]) : false;
+    return { affiliation: result, confirmed, reason: confirmed ? null : 'permission_denied' };
   }
 
   function notifyAffiliationRequest(affiliation) {
@@ -373,6 +446,83 @@ const HospitalsRegistry = (() => {
     getAffiliations()
       .filter(a => a.requesterUid === uid && a.status === 'approved')
       .forEach(a => writeHospitalMemberDoc(a.establishmentId, uid, a.requesterRole || account?.role, 'active'));
+  }
+
+  /* ── SOURCES DE VÉRITÉ DIRECTES (hospitalMembers / affiliation_requests) ──
+     Correctif (bug confirmé) : la connexion ne s'appuyait que sur
+     establishments.staff[] (cache local, potentiellement obsolète) —
+     alors que ce sont hospitalMembers/{estId}_{uid} et
+     affiliation_requests/AFF_{uid}_{estId} que lisent réellement les
+     règles Firestore et l'administration. Un staff local en retard
+     bloquait alors à tort un agent pourtant réellement affilié. */
+  async function getHospitalMemberDirect(establishmentId, uid) {
+    if (!establishmentId || !uid || typeof firebaseDB === 'undefined' || !firebaseDB) return null;
+    try {
+      const doc = await firebaseDB.collection('hospitalMembers').doc(`${establishmentId}_${uid}`).get();
+      return doc.exists ? doc.data() : null;
+    } catch (e) {
+      console.warn('[HospitalsRegistry] Lecture hospitalMembers directe :', e?.message || e);
+      return null;
+    }
+  }
+
+  async function getAffiliationRequestDirect(uid, establishmentId) {
+    if (!establishmentId || !uid || typeof firebaseDB === 'undefined' || !firebaseDB) return null;
+    try {
+      const doc = await firebaseDB.collection('affiliation_requests').doc(`AFF_${uid}_${establishmentId}`).get();
+      return doc.exists ? normalizeRequest(doc.data()) : null;
+    } catch (e) {
+      console.warn('[HospitalsRegistry] Lecture affiliation directe :', e?.message || e);
+      return null;
+    }
+  }
+
+  /* Résout l'affiliation réelle d'un agent à la connexion, en donnant
+     la priorité à hospitalMembers (source des règles serveur) et à
+     affiliation_requests (source de la décision administrative) sur le
+     cache local establishments.staff, qui ne sert plus que de miroir
+     d'affichage. Réconciliation CONTRÔLÉE du cache local uniquement
+     dans le sens Firestore → local (jamais l'inverse : hospitalMembers
+     n'est jamais créé sur la seule foi du cache local). */
+  async function resolveAgentAffiliation(establishmentId, uid, role) {
+    const [member, affiliation] = await Promise.all([
+      getHospitalMemberDirect(establishmentId, uid),
+      getAffiliationRequestDirect(uid, establishmentId),
+    ]);
+    const memberActive = !!member && member.role === role && String(member.status || '').toLowerCase() === 'active';
+
+    if (memberActive) {
+      // hospitalMembers actif : réconcilie le miroir staff local s'il est
+      // en retard, mais n'empêche jamais la connexion à cause de lui.
+      const h = getHospitalById(establishmentId);
+      if (h) {
+        const staff = Array.isArray(h.staff) ? h.staff.slice() : [];
+        const idx = staff.findIndex(s => s.uid === uid);
+        const entry = {
+          uid, role, status: 'active', updatedAt: now(),
+          name: affiliation?.requesterName || staff[idx]?.name || '',
+          professionalNumber: affiliation?.professionalNumber || staff[idx]?.professionalNumber || '',
+          linkedAt: staff[idx]?.linkedAt || now(),
+        };
+        if (idx === -1) staff.push(entry); else staff[idx] = { ...staff[idx], ...entry };
+        updateHospital(establishmentId, { staff });
+      }
+      return { status: 'active', member, affiliation };
+    }
+
+    if (affiliation?.status === 'approved') {
+      // Affiliation approuvée côté Firestore mais hospitalMembers pas
+      // (ou plus) confirmé actif : réparation UNIQUEMENT parce que
+      // l'affiliation Firestore l'autorise explicitement — jamais sur
+      // la seule foi d'un cache local.
+      writeHospitalMemberDoc(establishmentId, uid, role, 'active');
+      const h = getHospitalById(establishmentId);
+      if (h) upsertStaffMember(h, affiliation);
+      return { status: 'active', member, affiliation };
+    }
+    if (affiliation?.status === 'pending') return { status: 'pending', member, affiliation };
+    if (affiliation?.status === 'rejected') return { status: 'rejected', member, affiliation };
+    return { status: 'none', member, affiliation };
   }
 
   function updateUserAffiliation(request, establishment, attach) {
@@ -771,11 +921,12 @@ const HospitalsRegistry = (() => {
       </form>`);
   }
 
-  function submitAffiliation(e) {
+  async function submitAffiliation(e) {
     e.preventDefault();
     const user = Auth.getUser();
     const id = document.getElementById('aff-hid').value;
-    const ok = requestAffiliation(user.uid, user.name, id);
+    const result = await requestAffiliation(user.uid, user.name, id);
+    const ok = !!result?.requestId;
     App.closeModal();
     App.toast(ok ? '📤 Demande d’affiliation enregistrée' : '⚠️ Demande déjà envoyée ou rôle non autorisé', ok?'success':'error');
   }
@@ -784,7 +935,7 @@ const HospitalsRegistry = (() => {
     App.openModal('🏥 Ajouter un établissement', renderEstablishmentForm());
   }
 
-  function saveHospital(e) {
+  async function saveHospital(e) {
     e.preventDefault();
     const user = Auth.getUser() || {};
     const h = addHospital({
@@ -807,12 +958,13 @@ const HospitalsRegistry = (() => {
       // l'admin. (L'ancien code appelait respondAffiliation(...,true)
       // ici, ce qui transformait la demande en enregistrement validé
       // et court-circuitait l'administrateur.)
-      const a = requestAffiliation(user.uid, user.name, h.establishmentId);
+      const result = await requestAffiliation(user.uid, user.name, h.establishmentId, { establishment: h });
+      const ok = !!result?.requestId;
       App.closeModal();
-      App.toast(a
+      App.toast(ok
         ? '📤 Établissement créé. Demande d’affiliation envoyée à l’administrateur.'
         : '⚠️ Établissement créé, mais une demande existe déjà ou le rôle n’est pas autorisé.',
-        a ? 'success' : 'error');
+        ok ? 'success' : 'error');
     } else {
       App.closeModal();
       App.toast(`✅ Établissement enregistré — ${h.name}`);
@@ -1188,9 +1340,10 @@ const HospitalsRegistry = (() => {
   }
 
   return {
-    getHospitals, saveHospitals, addHospital, addHospitalAndConfirm, migratePasswordHashToAuth, updateHospital, getHospitalById,
+    getHospitals, saveHospitals, addHospital, addHospitalAndConfirm, migratePasswordHashToAuth, updateHospital, getHospitalById, cacheHospital,
     getAffiliations, saveAffiliations, requestAffiliation, requestAffiliationAndConfirm, respondAffiliation, removeStaff, validateEstablishment,
     getDoctorHospitals, getPendingAffiliations, ensureHospitalMembership,
+    getHospitalMemberDirect, getAffiliationRequestDirect, resolveAgentAffiliation,
     getCurrentHospital, setCurrentHospital, clearCurrentHospital,
     getPatientsForContext, getAppointmentsForContext, getPatientsForEstablishment,
     renderHospitalSwitcher, openRequestAffiliation, submitAffiliation,

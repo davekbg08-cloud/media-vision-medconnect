@@ -392,7 +392,7 @@ for (const role of ROLES) {
     const firebaseAuthImpl = { signInWithEmailAndPassword: async () => ({ user: { uid: `${role}-fb-real-21` } }) };
     const { win } = setup({
       firebaseAuthImpl,
-      firestoreSeed: { users: { U: { uid: 'local-id', role, matricule: 'LAB-21', email: 'a@b.com', status: 'approved' } } },
+      firestoreSeed: { users: { U: { uid: 'local-id', role, matricule: 'LAB-21', email: 'a@b.com', status: 'approved', authUid: `${role}-fb-real-21` } } },
     });
     const result = await win.Auth.loginProfessionalSilently(role, 'LAB-21', 'goodpass');
     assert.ok(result);
@@ -440,7 +440,7 @@ for (const role of ROLES) {
       });
       win.HospitalsRegistry.addHospital({ establishmentId: 'EST-27', name: 'Hôpital 27' });
       if (affStatus !== 'pending') {
-        win.HospitalsRegistry.requestAffiliation(`${role}-fb-aff`, 'Agent', 'EST-27', { role });
+        await win.HospitalsRegistry.requestAffiliation(`${role}-fb-aff`, 'Agent', 'EST-27', { role });
         const affs = win.HospitalsRegistry.getAffiliations();
         win.HospitalsRegistry.saveAffiliations(affs.map(a => ({ ...a, status: affStatus })));
       }
@@ -553,6 +553,41 @@ for (const role of ROLES) {
     assert.strictEqual(result, null);
     assert.strictEqual(signInCalls, 0);
   });
+
+  test(`[${role}] 14bis. un faux mc_accounts sans authUid ne masque pas le vrai compte`, async () => {
+    const firebaseAuthImpl = { signInWithEmailAndPassword: async () => ({ user: { uid: `${role}-real-uid-14` } }) };
+    const { win } = setup({
+      firebaseAuthImpl,
+      firestoreSeed: {
+        mc_accounts: {
+          FAKE: { role, matricule: 'LAB-14', email: 'fake@x.com', status: 'approved' }, // pas d'authUid : ne doit jamais être choisi
+          REAL: { uid: 'REAL', role, matricule: 'LAB-14', email: 'a@b.com', status: 'approved', authUid: `${role}-real-uid-14` },
+        },
+      },
+    });
+    const result = await win.Auth.loginProfessionalSilently(role, 'LAB-14', 'goodpass');
+    assert.ok(result, 'le vrai compte doit permettre la connexion malgré le faux document sans authUid');
+    assert.strictEqual(result.uid, `${role}-real-uid-14`);
+  });
+
+  test(`[${role}] account_ambiguous : deux comptes valides distincts pour le même matricule refusent la connexion sans tenter signIn`, async () => {
+    let signInCalls = 0;
+    const firebaseAuthImpl = { signInWithEmailAndPassword: async () => { signInCalls++; return { user: { uid: 'should-not' } }; } };
+    const { win } = setup({
+      firebaseAuthImpl,
+      firestoreSeed: {
+        mc_accounts: {
+          A: { uid: 'A', role, matricule: 'LAB-AMBIG', email: 'a@x.com', status: 'approved', authUid: 'uidA' },
+          B: { uid: 'B', role, matricule: 'LAB-AMBIG', email: 'b@x.com', status: 'approved', authUid: 'uidB' },
+        },
+      },
+    });
+    const precheck = await win.Auth.resolveAgentAccountForLogin(role, 'LAB-AMBIG');
+    assert.strictEqual(precheck?.ambiguous, true);
+    const result = await win.Auth.loginProfessionalSilently(role, 'LAB-AMBIG', 'whatever');
+    assert.strictEqual(result, null);
+    assert.strictEqual(signInCalls, 0, 'signIn ne doit jamais être tenté pour un compte ambigu');
+  });
 }
 
 /* =====================================================
@@ -565,7 +600,7 @@ for (const role of ROLES) {
     win.sessionStorage.setItem('mc_user', JSON.stringify({ uid: 'admin_root', role: 'admin' }));
     win.DB.saveAccounts([{ uid: `${role}-u36`, authUid: `${role}-u36`, role, status: 'approved' }]);
     win.HospitalsRegistry.addHospital({ establishmentId: 'EST-36', name: 'Hôpital 36' });
-    win.HospitalsRegistry.requestAffiliation(`${role}-u36`, 'Agent 36', 'EST-36', { role, professionalNumber: 'LAB-36' });
+    await win.HospitalsRegistry.requestAffiliation(`${role}-u36`, 'Agent 36', 'EST-36', { role, professionalNumber: 'LAB-36' });
 
     await win.HospitalsRegistry.respondAffiliation(`AFF_${role}-u36_EST-36`, true);
 
@@ -582,7 +617,7 @@ for (const role of ROLES) {
     win.sessionStorage.setItem('mc_user', JSON.stringify({ uid: 'admin_root', role: 'admin' }));
     win.DB.saveAccounts([{ uid: `${role}-u38`, authUid: `${role}-u38`, role, status: 'approved' }]);
     win.HospitalsRegistry.addHospital({ establishmentId: 'EST-38', name: 'Hôpital 38' });
-    win.HospitalsRegistry.requestAffiliation(`${role}-u38`, 'Agent 38', 'EST-38', { role, professionalNumber: 'LAB-38' });
+    await win.HospitalsRegistry.requestAffiliation(`${role}-u38`, 'Agent 38', 'EST-38', { role, professionalNumber: 'LAB-38' });
 
     // Simule une panne Firestore sur toute écriture.
     sandbox.window.DB.pushBatchAndReportDetailed = async () => ({ ok: false, succeeded: [], failed: [['affiliation_requests', 'x']], timedOut: false, error: new Error('down') });
@@ -601,7 +636,7 @@ for (const role of ROLES) {
     win.sessionStorage.setItem('mc_user', JSON.stringify({ uid: 'admin_root', role: 'admin' }));
     win.DB.saveAccounts([{ uid: `${role}-u40`, authUid: `${role}-u40`, role, status: 'approved' }]);
     win.HospitalsRegistry.addHospital({ establishmentId: 'EST-40', name: 'Hôpital 40' });
-    win.HospitalsRegistry.requestAffiliation(`${role}-u40`, 'Agent 40', 'EST-40', { role, professionalNumber: 'LAB-40' });
+    await win.HospitalsRegistry.requestAffiliation(`${role}-u40`, 'Agent 40', 'EST-40', { role, professionalNumber: 'LAB-40' });
     await win.HospitalsRegistry.respondAffiliation(`AFF_${role}-u40_EST-40`, false);
     const req = win.HospitalsRegistry.getAffiliations().find(a => a.requestId === `AFF_${role}-u40_EST-40`);
     assert.strictEqual(req.status, 'rejected');
@@ -614,7 +649,7 @@ for (const role of ROLES) {
       firestoreSeed: { mc_accounts: { [`${role}-u41`]: { uid: `${role}-u41`, role, status: 'pending' } } },
     });
     win.HospitalsRegistry.addHospital({ establishmentId: 'EST-41', name: 'Hôpital 41' });
-    win.HospitalsRegistry.requestAffiliation(`${role}-u41`, 'Agent 41', 'EST-41', { role, professionalNumber: 'LAB-41' });
+    await win.HospitalsRegistry.requestAffiliation(`${role}-u41`, 'Agent 41', 'EST-41', { role, professionalNumber: 'LAB-41' });
     await win.HospitalsRegistry.respondAffiliation(`AFF_${role}-u41_EST-41`, true);
     const req = win.HospitalsRegistry.getAffiliations().find(a => a.requestId === `AFF_${role}-u41_EST-41`);
     assert.strictEqual(req.status, 'pending', 'l\'affiliation ne doit jamais être approuvée tant que le compte professionnel est pending');
@@ -624,11 +659,106 @@ for (const role of ROLES) {
   test(`[${role}] 42. un requestId identique ne crée jamais deux demandes`, async () => {
     const { win } = setup();
     win.HospitalsRegistry.addHospital({ establishmentId: 'EST-42', name: 'Hôpital 42' });
-    const first = win.HospitalsRegistry.requestAffiliation(`${role}-u42`, 'Agent 42', 'EST-42', { role });
-    const second = win.HospitalsRegistry.requestAffiliation(`${role}-u42`, 'Agent 42', 'EST-42', { role });
-    assert.ok(first, 'la première demande doit réussir');
-    assert.strictEqual(second, false, 'une seconde demande identique doit être refusée (déjà pending)');
+    const first = await win.HospitalsRegistry.requestAffiliation(`${role}-u42`, 'Agent 42', 'EST-42', { role });
+    const second = await win.HospitalsRegistry.requestAffiliation(`${role}-u42`, 'Agent 42', 'EST-42', { role });
+    assert.ok(first?.requestId, 'la première demande doit réussir');
+    assert.strictEqual(second?.requestId, undefined, 'une seconde demande identique doit être refusée (déjà pending)');
+    assert.strictEqual(second?.reason, 'already_exists');
     assert.strictEqual(win.HospitalsRegistry.getAffiliations().filter(a => a.requestId === first.requestId).length, 1);
+  });
+}
+
+/* =====================================================
+   SECTIONS 2, 4-5, 10 — cache établissement, résolution d'affiliation
+   robuste, hospitalMembers comme source de vérité
+   ===================================================== */
+test('cacheHospital() rend un établissement Firestore disponible localement sans écriture cloud ni écrasement du staff', () => {
+  const { win } = setup();
+  // Établissement DÉJÀ connu localement avec un staff existant.
+  win.HospitalsRegistry.addHospital({
+    establishmentId: 'EST-CACHE', name: 'Ancien nom',
+    staff: [{ uid: 'staff-1', role: 'doctor', status: 'active' }],
+  });
+  // Document "frais" venu de Firestore (findByOfficialId), sans champ staff.
+  const fromCloud = { establishmentId: 'EST-CACHE', name: 'Hôpital Cache', officialId: 'OID-1', status: 'active' };
+  const merged = win.HospitalsRegistry.cacheHospital(fromCloud);
+  assert.strictEqual(merged.name, 'Hôpital Cache', 'les champs du document cloud doivent être repris');
+  assert.strictEqual(merged.staff.length, 1, 'le staff local existant ne doit jamais être écrasé par un document sans staff');
+  assert.strictEqual(merged.staff[0].uid, 'staff-1');
+});
+
+test('requestAffiliation() : établissement trouvé dans Firestore mais absent du cache local — la demande réussit quand même', async () => {
+  const { win, firestore } = setup();
+  // L'établissement existe SEULEMENT dans le mock Firestore, jamais mis en cache localement au préalable.
+  firestore._store.establishments = new Map([['EST-REMOTE', { establishmentId: 'EST-REMOTE', name: 'Hôpital Distant', officialId: 'OID-9' }]]);
+  assert.strictEqual(win.HospitalsRegistry.getHospitalById('EST-REMOTE'), null, 'précondition : absent du cache local');
+
+  const result = await win.HospitalsRegistry.requestAffiliation('agent-remote-1', 'Agent Distant', 'EST-REMOTE', { role: 'reception' });
+  assert.ok(result?.requestId, 'la demande doit réussir malgré l\'absence initiale du cache local');
+  assert.ok(win.HospitalsRegistry.getHospitalById('EST-REMOTE'), 'l\'établissement doit être mis en cache après résolution Firestore');
+});
+
+test('requestAffiliation() : établissement introuvable partout retourne { ok:false, reason: establishment_not_found }', async () => {
+  const { win } = setup();
+  const result = await win.HospitalsRegistry.requestAffiliation('agent-x', 'Agent X', 'EST-INTROUVABLE', { role: 'reception' });
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.reason, 'establishment_not_found');
+});
+
+for (const role of ROLES) {
+  test(`[${role}] section 10 : la connexion fonctionne même si establishments.staff local est ancien, via hospitalMembers actif`, async () => {
+    const firebaseAuthImpl = {
+      signInWithEmailAndPassword: async () => ({ user: { uid: `${role}-hm-uid` } }),
+      get currentUser() { return { uid: `${role}-hm-uid` }; },
+      signOut: async () => {},
+    };
+    const { win, sandbox, getEl } = setup({
+      firebaseAuthImpl,
+      firestoreSeed: {
+        users: { U: { uid: 'local-id', role, matricule: 'LAB-HM', email: 'a@b.com', status: 'approved', authUid: `${role}-hm-uid` } },
+        hospitalMembers: { [`EST-HM_${role}-hm-uid`]: { hospitalId: 'EST-HM', uid: `${role}-hm-uid`, role, status: 'active' } },
+      },
+    });
+    // establishments.staff local ne connaît PAS cet agent (cache en retard) — aucune entrée.
+    win.HospitalsRegistry.addHospital({ establishmentId: 'EST-HM', name: 'Hôpital HM', staff: [] });
+    getEl('ha-agent-role').value = role;
+    getEl('ha-agent-num').value = 'LAB-HM';
+    getEl('ha-agent-pw').value = 'whatever';
+    let opened = false;
+    sandbox.HospitalDesktopUI = win.HospitalDesktopUI = { openForSession: () => { opened = true; } };
+    await win.HospitalAuth.verifyAgent('EST-HM');
+    assert.strictEqual(opened, true, 'hospitalMembers actif doit ouvrir le tableau de bord même si staff local est vide/ancien');
+  });
+
+  test(`[${role}] section 9 : affiliation approved en Firestore mais hospitalMembers absent — réparation contrôlée puis connexion`, async () => {
+    const firebaseAuthImpl = {
+      signInWithEmailAndPassword: async () => ({ user: { uid: `${role}-aff-uid` } }),
+      get currentUser() { return { uid: `${role}-aff-uid` }; },
+      signOut: async () => {},
+    };
+    const { win, sandbox, getEl } = setup({
+      firebaseAuthImpl,
+      firestoreSeed: {
+        users: { U: { uid: 'local-id', role, matricule: 'LAB-AFF9', email: 'a@b.com', status: 'approved', authUid: `${role}-aff-uid` } },
+        affiliation_requests: {
+          [`AFF_${role}-aff-uid_EST-AFF9`]: {
+            requestId: `AFF_${role}-aff-uid_EST-AFF9`, requesterUid: `${role}-aff-uid`, requesterName: 'Agent',
+            requesterRole: role, establishmentId: 'EST-AFF9', status: 'approved',
+          },
+        },
+        // hospitalMembers volontairement ABSENT : doit être réparé, jamais créé sur la seule foi du cache local.
+      },
+    });
+    win.HospitalsRegistry.addHospital({ establishmentId: 'EST-AFF9', name: 'Hôpital Aff9', staff: [] });
+    getEl('ha-agent-role').value = role;
+    getEl('ha-agent-num').value = 'LAB-AFF9';
+    getEl('ha-agent-pw').value = 'whatever';
+    let opened = false;
+    sandbox.HospitalDesktopUI = win.HospitalDesktopUI = { openForSession: () => { opened = true; } };
+    await win.HospitalAuth.verifyAgent('EST-AFF9');
+    assert.strictEqual(opened, true, 'une affiliation approuvée côté Firestore doit permettre la connexion malgré hospitalMembers manquant');
+    const h = win.HospitalsRegistry.getHospitalById('EST-AFF9');
+    assert.ok(h.staff.find(s => s.uid === `${role}-aff-uid`), 'le staff local doit être réconcilié après réparation');
   });
 }
 

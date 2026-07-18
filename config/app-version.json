@@ -1,8 +1,21 @@
 {
-  "version": "2.9.26",
-  "build": "2026.07.17.2",
-  "buildDate": "2026-07-17",
+  "version": "2.9.27",
+  "build": "2026.07.18.1",
+  "buildDate": "2026-07-18",
   "changelog": [
+    {
+      "version": "2.9.27",
+      "date": "2026-07-18",
+      "notes": [
+        "Correctif Laboratoire/Réception : un établissement retrouvé dans Firestore lors de la connexion mais absent du cache local (fusions manquées) empêchait la création de la demande d'affiliation à l'inscription — l'établissement est désormais mis en cache localement dès sa lecture, sans jamais écraser le personnel déjà connu ni écrire sur Firestore",
+        "Correctif : la demande d'affiliation ne renvoyait plus d'échec exploitable (false silencieux) quand l'établissement n'était pas immédiatement disponible — elle tente désormais une lecture ciblée Firestore, sinon retourne un motif précis (« établissement introuvable ») affiché tel quel au lieu d'un message générique",
+        "Correctif sécurité : la recherche du compte Laboratoire/Réception au moment de la connexion se limitait au premier document trouvé (limit(1)) — un faux document sans identité Firebase pouvait masquer le vrai compte ; la recherche est désormais élargie et filtrée (identité Firebase + rôle + email requis), avec refus explicite (\"identités ambiguës\") si plusieurs comptes valides coexistent au lieu d'un choix arbitraire",
+        "Correctif : après connexion, le profil Firestore (rôle, statut, identité) est désormais revérifié directement et comparé au compte public local — toute incohérence bloque l'ouverture du tableau de bord au lieu de l'autoriser sur la seule foi du cache",
+        "Correctif : l'affiliation à l'établissement n'était vérifiée que via le cache local du personnel (establishments.staff), pouvant devenir périmé — la connexion consulte désormais directement hospitalMembers et affiliation_requests, avec réparation contrôlée du cache uniquement si Firestore confirme une affiliation approuvée (jamais l'inverse)",
+        "Amélioration : messages d'erreur distincts à la connexion Laboratoire/Réception selon la cause réelle (compte introuvable, en attente de validation, affiliation en attente/refusée, mot de passe incorrect, identité incohérente) au lieu d'un message générique unique",
+        "Interface : retour à l'écran de connexion établissement (au lieu d'un état intermédiaire ambigu) après l'inscription Laboratoire/Réception, avec indication claire de reconnexion ; retour visuel immédiat (bouton verrouillé, étapes affichées) sur les boutons d'inscription et de connexion de ces rôles"
+      ]
+    },
     {
       "version": "2.9.26",
       "date": "2026-07-17",
