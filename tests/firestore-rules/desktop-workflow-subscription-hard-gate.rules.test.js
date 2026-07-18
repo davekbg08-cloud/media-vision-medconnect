@@ -18,7 +18,13 @@
 const { test } = require('node:test');
 const { assertSucceeds, assertFails } = require('@firebase/rules-unit-testing');
 const { doc, setDoc } = require('firebase/firestore');
-const { getTestEnv, clearAll } = require('./helpers');
+const { getTestEnv, clearAll, seed } = require('./helpers');
+
+async function seedMember(env, hospitalId, uid) {
+  await seed(env, async (db, doc, setDoc) => {
+    await setDoc(doc(db, 'hospitalMembers', `${hospitalId}_${uid}`), { hospitalId, uid, status: 'active' });
+  });
+}
 
 async function seedExpiredSubscription(env, hospitalId) {
   await env.withSecurityRulesDisabled(async (ctx) => {
@@ -54,6 +60,11 @@ for (const [collection, role, data] of CASES) {
 test("beds : abonnement actif (défaut permissif sans document subscriptions) → création acceptée (non-régression du flux normal)", async () => {
   const env = await getTestEnv();
   await clearAll(env);
+  // Correctif (audit sécurité) : beds exige désormais aussi
+  // belongsToSameEstablishment (isolation inter-hôpitaux, voir
+  // firestore.rules) — ce test doit donc affilier l'auteur à
+  // l'établissement ciblé pour continuer à vérifier le flux normal.
+  await seedMember(env, 'HOSP-HARD-2', 'u-ok');
   const user = env.authenticatedContext('u-ok', { role: 'doctor' }).firestore();
   await assertSucceeds(setDoc(doc(user, 'beds', 'BED-OK'), {
     label: 'Lit B1', ward: 'Médecine', status: 'free',

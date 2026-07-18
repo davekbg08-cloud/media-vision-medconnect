@@ -130,8 +130,15 @@ const I18n = (() => {
     const authVisible = authScreen && authScreen.style.display !== 'none' && authScreen.innerHTML.trim() !== '';
 
     if (authVisible) {
-      // Relancer l'écran de connexion dans la nouvelle langue
-      if (window.Auth) Auth.showLogin();
+      // Correctif (audit) : #auth-screen est partagé entre l'écran de
+      // connexion mobile générique (Auth.showLogin) et le sélecteur de
+      // rôle desktop hôpital (HospitalAuth.renderScreen/renderRolePicker)
+      // — même pattern déjà corrigé sur le bouton "Retour" d'un compte
+      // rejeté (voir HospitalAuth.isAgentLoginActive()). Sans ce test,
+      // changer de langue pendant un écran hôpital desktop basculerait
+      // à tort vers l'écran mobile générique.
+      if (window.HospitalAuth?.isAgentLoginActive?.()) HospitalAuth.renderScreen();
+      else if (window.Auth) Auth.showLogin();
     } else if (window.App) {
       App.refresh();
     }

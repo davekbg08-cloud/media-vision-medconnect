@@ -707,6 +707,15 @@ const HospitalPortal = (() => {
 
   /* ── CONSULTATIONS LIST ─────────────────────────── */
   function renderConsultations(main) {
+    // Correctif (audit) : appelée directement par
+    // HospitalDesktopUI.NATIVE_ROUTES.consultations, sans passer par
+    // render(section) — rien ne vérifiait la capacité RÉELLE au moment
+    // du rendu, seul le menu filtré protégeait cet écran. Sans effet
+    // sur le flux mobile existant : ROUTES.consultations autorise déjà
+    // exactement les rôles qui y accèdent aujourd'hui (doctor/admin, pas
+    // nurse — cohérent avec le menu mobile nurse qui n'a jamais eu cette
+    // entrée).
+    HospitalPermissions.requireRoute('consultations');
     const list = consultationsForContext().slice().reverse();
     main.innerHTML = `
       <div class="page-header"><h2>🩺 ${t('nav_consultations')}</h2></div>
@@ -729,6 +738,11 @@ const HospitalPortal = (() => {
 
   /* ── PRESCRIPTIONS LIST ─────────────────────────── */
   function renderPrescriptions(main) {
+    // Correctif (audit) : même défaut que renderConsultations ci-dessus
+    // — appelée directement par NATIVE_ROUTES.prescriptions sans garde.
+    // ROUTES.prescriptions autorise déjà doctor/nurse/pharmacist/admin,
+    // cohérent avec les menus mobiles existants.
+    HospitalPermissions.requireRoute('prescriptions');
     const list = prescriptionsForContext().slice().reverse();
     const curs = t('currency');
     main.innerHTML = `

@@ -30,6 +30,13 @@
 
     Auth.getUser = function () { return originalGetUser?.() || readBackup(); };
     Auth.logout  = function () { clearBackup(); return originalLogout?.(); };
+    // Correctif (audit) : les routines de nettoyage de session DESKTOP
+    // (HospitalAuth.logout/invalidateSession/_abortAgentSession) ne
+    // passent jamais par Auth.logout() — ce backup pouvait donc
+    // survivre à une déconnexion desktop si ce même poste avait, à un
+    // moment donné, servi le flux mobile générique. Exposé ici pour
+    // qu'elles puissent le purger aussi, sans dupliquer BACKUP_KEY.
+    Auth.clearLocalBackup = clearBackup;
     Auth._doPatient = async function () {
       const result = await originalDoPatient?.();
       saveBackup(Auth.getUser?.());

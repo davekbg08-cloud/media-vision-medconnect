@@ -16,6 +16,15 @@ const PharmacyPortal = (() => {
   let currentContainer = null;
 
   function renderInto(container, section) {
+    // Correctif (audit) : contrairement aux autres modules du bundle
+    // desktop (hospital-lab.js, hospital-reception.js, etc.), rien ici
+    // ne vérifiait la capacité RÉELLE au moment du rendu — seul le menu
+    // filtré (HospitalPermissions.visibleMenuFor) empêchait un rôle non
+    // autorisé d'atteindre cet écran. Ne casse pas le flux mobile
+    // pharmacien existant : HospitalPermissions.getCurrentRole() se
+    // replie déjà sur Auth.getUser()?.role quand aucune session desktop
+    // n'est active, et ROUTES.pharmacy inclut 'pharmacist'.
+    HospitalPermissions.requireRoute('pharmacy');
     currentContainer = container;
     switch (section) {
       case 'dashboard':     renderDashboard(container);     break;

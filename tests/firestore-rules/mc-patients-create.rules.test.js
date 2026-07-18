@@ -56,3 +56,22 @@ test("mc_patients : la création reste bloquée pour un établissement à l'abon
     id: 'MC-CREATE-4', establishmentId: 'HOSP-EXPIRED', created_by: 'nurse-expired',
   }));
 });
+
+// Correctif (audit sécurité) : la clause create accédait en notation
+// pointée directe à request.resource.data.establishmentId/hospital_id
+// — un document sans AUCUN des deux champs (flux mobile générique,
+// js/patient.js saveNew(), hors contexte hôpital desktop) levait une
+// erreur d'évaluation Firestore ("Property X is undefined") plutôt que
+// d'être simplement refusé/accepté selon la règle métier, faisant
+// systématiquement échouer la création. Remplacé par resolveHospitalId()
+// (.get() sûr) : sans hospitalId du tout, l'abonnement par défaut reste
+// "actif" (comportement rétro-compatible documenté), donc la création
+// doit désormais réussir au lieu de crasher.
+test('mc_patients : la création ne lève plus d\'erreur et réussit quand ni establishmentId ni hospital_id ne sont fournis (hors contexte hôpital)', async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  const doctor = env.authenticatedContext('doctor-no-hosp', { role: 'doctor' }).firestore();
+  await assertSucceeds(setDoc(doc(doctor, 'mc_patients', 'MC-CREATE-5'), {
+    id: 'MC-CREATE-5', firstname: 'Sans', lastname: 'Hopital', created_by: 'doctor-no-hosp',
+  }));
+});

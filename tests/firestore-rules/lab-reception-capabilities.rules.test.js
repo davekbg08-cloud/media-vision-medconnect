@@ -55,10 +55,16 @@ test("45. reception approved : peut créer une admission (visite d'accueil)", as
   await clearAll(env);
   await seed(env, async (db, doc, setDoc) => {
     await setDoc(doc(db, 'users', 'reception-approved-1'), { uid: 'reception-approved-1', role: 'reception', status: 'approved' });
+    // Correctif (audit sécurité) : mc_admissions exige désormais aussi
+    // belongsToSameEstablishment (isolation inter-hôpitaux).
+    await setDoc(doc(db, 'hospitalMembers', 'EST-45_reception-approved-1'), {
+      hospitalId: 'EST-45', uid: 'reception-approved-1', role: 'reception', status: 'active',
+    });
   });
   const reception = env.authenticatedContext('reception-approved-1', { role: 'reception' }).firestore();
   await assertSucceeds(setDoc(doc(reception, 'mc_admissions', 'ADM-R1'), {
     aid: 'ADM-R1', patient_id: 'MC-ADM-R1', bedId: 'B1', reason: 'Accueil', status: 'admitted',
+    establishmentId: 'EST-45',
   }));
 });
 

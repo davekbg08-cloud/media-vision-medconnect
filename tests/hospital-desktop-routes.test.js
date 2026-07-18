@@ -270,12 +270,17 @@ test('PharmacyPortal.renderInto(container, section) rend dans le container reçu
     I18n: { t: (k) => k },
     DB: { getStats: () => ({ totalSales: 0, todaySales: 0 }), getMedicines: () => [], getMessages: () => [] },
     App: { navigateTo(){} },
+    // Correctif (audit sécurité) : renderInto() vérifie désormais
+    // HospitalPermissions.requireRoute('pharmacy') au premier rendu —
+    // ce test porte sur le container reçu, pas sur les permissions
+    // (déjà couvertes ailleurs dans ce fichier), d'où ce stub minimal.
+    HospitalPermissions: { requireRoute: () => true },
   };
   win.window = win;
   const container = { innerHTML: '' };
   const sandbox = {
     window: win, document: { body: { contains: (el) => el === container } }, console,
-    I18n: win.I18n, DB: win.DB, App: win.App,
+    I18n: win.I18n, DB: win.DB, App: win.App, HospitalPermissions: win.HospitalPermissions,
   };
   vm.createContext(sandbox);
   vm.runInContext(code, sandbox, { filename: 'js/pharmacy.js' });

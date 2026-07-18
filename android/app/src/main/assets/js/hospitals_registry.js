@@ -631,6 +631,22 @@ const HospitalsRegistry = (() => {
           App?.toast?.('Le rôle du compte ne correspond pas à la demande d\'affiliation.', 'error');
           return;
         }
+        // Correctif (audit) : 'add_member' figure dans
+        // ExchangeBridge.DESKTOP_BLOCKED_ACTIONS depuis l'introduction du
+        // contrat d'abonnement, mais n'était en réalité vérifié NULLE
+        // PART — un établissement dont l'abonnement desktop est expiré/
+        // suspendu pouvait quand même valider indéfiniment l'arrivée de
+        // nouveau personnel. Même mécanisme que les autres actions
+        // premium (ExchangeBridge.canWriteForHospital), sans effet si
+        // ExchangeBridge est indisponible (repli déjà utilisé ailleurs
+        // dans le projet : "allowed: true" par défaut).
+        if (window.ExchangeBridge?.canWriteForHospital) {
+          const gate = await window.ExchangeBridge.canWriteForHospital(h.establishmentId, 'add_member');
+          if (!gate.allowed) {
+            App?.toast?.(gate.message || 'Abonnement expiré : impossible d\'approuver une nouvelle affiliation.', 'error');
+            return;
+          }
+        }
       }
 
       const nextReq = normalizeRequest({
