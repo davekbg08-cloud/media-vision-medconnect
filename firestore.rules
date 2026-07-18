@@ -107,10 +107,39 @@ service cloud.firestore {
     function canEnterLabResult() {
       return isAdmin() || hasRole('lab') || hasRole('doctor') || hasRole('admin_hospital');
     }
+    // Demander une analyse : médecin, infirmier, admin hôpital (jamais
+    // le laborantin lui-même — voir chantier "modales laboratoire").
+    function canRequestLab() {
+      return isAdmin() || hasRole('doctor') || hasRole('nurse') || hasRole('admin_hospital');
+    }
     // Enregistrer une arrivée / créer patient à l'accueil : réception + soignants
     function canRegisterPatient() {
       return isAdmin() || hasRole('doctor') || hasRole('nurse') ||
              hasRole('reception') || hasRole('admin_hospital');
+    }
+
+    /* ── Transitions de statut labRequests (chantier "modales
+       laboratoire") ── Empêche qu'un client modifié fasse revenir une
+       demande completed à requested, ou saute directement de requested
+       à completed sans passer par un laborantin. oldStatus == newStatus
+       est toujours autorisé (une mise à jour peut ne toucher aucun
+       champ de statut). */
+    function labStatusTransitionOk(oldStatus, newStatus) {
+      return oldStatus == newStatus ||
+        (oldStatus == 'requested' && (newStatus == 'sample_pending' || newStatus == 'in_progress')) ||
+        (oldStatus == 'sample_pending' && newStatus == 'in_progress') ||
+        (oldStatus == 'in_progress' && newStatus == 'completed');
+    }
+    // Champs modifiables sur labRequests après création — tout le
+    // reste (patientMc, patientName, establishmentId, hospitalId,
+    // requestedByUid, requestedByRole, type, createdAt...) est
+    // immuable une fois la demande créée.
+    function labRequestUpdateKeysOk(before, after) {
+      return after.diff(before).affectedKeys().hasOnly([
+        'status', 'sampleCollectedAt', 'startedAt', 'assignedLabUid', 'assignedLabName',
+        'value', 'unit', 'comment', 'completedAt', 'completedByUid', 'completedByName',
+        'completedByRole', 'updatedAt'
+      ]);
     }
 
     /* ── Abonnement établissement (contrat mobile ↔ desktop) ──
@@ -758,15 +787,23 @@ service cloud.firestore {
     }
 
     match /mc_lab_results/{docId} {
-      allow read: if canReadMedicalData(resource.data);
-      // Correctif (audit) : hospital-lab.js saveResult() (saisie labo
-      // desktop) est aussi accessible aux rôles lab/admin_hospital via
-      // canEnterLabResult() (utilisée par la collection sœur
-      // labResults) — cette règle ne couvrait jusqu'ici que doctor/
-      // nurse, rejetant systématiquement l'écriture du miroir
-      // mc_lab_results pour ces deux rôles.
-      allow write: if isAdmin() || currentRoleIs('doctor') || currentRoleIs('nurse') ||
-        hasRole('lab') || hasRole('admin_hospital');
+      allow read: if canReadMedicalData(resource.data) || belongsToSameEstablishment(resource.data);
+      // Correctif (chantier "modales laboratoire") : "allow write" sans
+      // aucune autre condition permettait à un laborantin (ou médecin/
+      // infirmier) de N'IMPORTE QUEL hôpital de créer/modifier/
+      // supprimer le miroir patient mc_lab_results de N'IMPORTE QUEL
+      // AUTRE établissement — aucune isolation par établissement
+      // n'était appliquée ici (contrairement à labRequests/labResults
+      // ci-dessus, dont c'était déjà l'objet). Resserré au même
+      // principe : rôle habilité + affilié à l'établissement de la
+      // fiche ; aucune modification/suppression après création (miroir
+      // patient, jamais réécrit par l'app une fois émis).
+      allow create: if isAdmin() ||
+        (canEnterLabResult() &&
+         belongsToSameEstablishment(request.resource.data) &&
+         desktopWorkflowCanWrite(resolveHospitalId(request.resource.data)) &&
+         request.resource.data.get('created_by', null) == request.auth.uid);
+      allow update, delete: if isAdmin();
     }
 
     // Correctif (audit) : miroir patient de la collection desktop
@@ -969,27 +1006,58 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Correctif (chantier "modales laboratoire") : AUCUNE clause create
+    // ne vérifiait le rôle réel (n'importe quel compte signé pouvait
+    // créer une demande d'analyse, y compris un laborantin ou un
+    // patient) ; AUCUNE clause update ne restreignait ni le rôle, ni
+    // l'établissement, ni les champs modifiables — un laborantin non
+    // affilié à l'établissement pouvait modifier N'IMPORTE QUELLE
+    // demande de N'IMPORTE QUEL hôpital, y compris ses champs
+    // d'identification (patientMc, requestedByUid...).
     match /labRequests/{docId} {
-      // PARTIE E : remplace le "currentRoleIs('doctor') ||
-      // currentRoleIs('nurse')" non filtré par belongsToSameEstablishment.
       allow read: if canReadMedicalData(resource.data) ||
         belongsToSameEstablishment(resource.data);
       allow create: if isAdmin() ||
-        (signedIn() && desktopWorkflowCanWrite(resolveHospitalId(request.resource.data)));
+        (canRequestLab() &&
+         belongsToSameEstablishment(request.resource.data) &&
+         desktopWorkflowCanWrite(resolveHospitalId(request.resource.data)) &&
+         request.resource.data.get('status', null) == 'requested' &&
+         request.resource.data.get('requestedByUid', null) == request.auth.uid &&
+         currentRoleIs(request.resource.data.get('requestedByRole', '')));
       allow update: if isAdmin() ||
-        (signedIn() && desktopWorkflowCanWrite(resolveHospitalId(resource.data)));
+        (canEnterLabResult() &&
+         belongsToSameEstablishment(resource.data) &&
+         desktopWorkflowCanWrite(resolveHospitalId(resource.data)) &&
+         labRequestUpdateKeysOk(resource.data, request.resource.data) &&
+         labStatusTransitionOk(resource.data.get('status', 'requested'),
+                                request.resource.data.get('status', resource.data.get('status', 'requested'))));
       allow delete: if isAdmin();
     }
 
     match /labResults/{docId} {
-      allow read: if isAdmin() || canReadMedicalData(resource.data);
-      // Saisir un résultat = capacité labo/médecin ET abonnement actif
-      // (collection desktop-only : contrôle infalsifiable, sans
-      // dépendance au champ sourceDevice — voir desktopWorkflowCanWrite).
+      // Un laborantin/médecin de l'établissement peut consulter les
+      // résultats de son hôpital (affichage desktop) ; le destinataire
+      // désigné (resultRecipientUids) y accède quel que soit
+      // l'établissement où il exerce habituellement.
+      allow read: if isAdmin() || canReadMedicalData(resource.data) ||
+        belongsToSameEstablishment(resource.data) ||
+        uidIn(resource.data.get('resultRecipientUids', []));
+      // Saisir un résultat = capacité labo/médecin ET affiliation à
+      // L'ÉTABLISSEMENT DE LA DEMANDE ET abonnement actif (collection
+      // desktop-only : contrôle infalsifiable, sans dépendance au champ
+      // sourceDevice — voir desktopWorkflowCanWrite). completedByUid
+      // doit être l'auteur réel : personne ne peut signer le résultat
+      // d'un autre.
       allow create: if isAdmin() ||
-        (canEnterLabResult() && desktopWorkflowCanWrite(resolveHospitalId(request.resource.data)));
-      allow update: if isAdmin() ||
-        (canEnterLabResult() && desktopWorkflowCanWrite(resolveHospitalId(resource.data)));
+        (canEnterLabResult() &&
+         belongsToSameEstablishment(request.resource.data) &&
+         desktopWorkflowCanWrite(resolveHospitalId(request.resource.data)) &&
+         request.resource.data.get('completedByUid', null) == request.auth.uid);
+      // Aucun chemin client ne modifie un résultat déjà émis — resserré
+      // à l'admin (l'ancienne clause canEnterLabResult() permettait à
+      // un laborantin non affilié de modifier le résultat d'un AUTRE
+      // hôpital, sans aucune vérification d'établissement).
+      allow update: if isAdmin();
       allow delete: if isAdmin();
     }
 

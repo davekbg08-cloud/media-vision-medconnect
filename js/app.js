@@ -341,14 +341,46 @@ const App = (() => {
     localStorage.setItem('mc_theme', document.body.classList.contains('light-theme') ? 'light' : 'dark');
   }
 
+  // Durcissement (chantier "modales laboratoire") : openModal() supposait
+  // toujours les 3 éléments présents et ne retournait rien — un appelant
+  // (ex. HospitalLabModule.openNew()) ne pouvait jamais savoir si
+  // l'ouverture avait réellement eu lieu. Vérifie la structure avant
+  // d'écrire, retourne true/false, et gère le focus/la classe body pour
+  // que le clavier (Tab, Échap) fonctionne dès l'ouverture.
   function openModal(title, html) {
-    document.getElementById('modal-title').textContent = title;
-    document.getElementById('modal-body').innerHTML    = html;
-    document.getElementById('global-modal').classList.add('active');
+    const overlay  = document.getElementById('global-modal');
+    const titleNode = document.getElementById('modal-title');
+    const bodyNode  = document.getElementById('modal-body');
+
+    if (!overlay || !titleNode || !bodyNode) {
+      console.error('[App.openModal] Structure de modale introuvable.');
+      try { toast?.('Impossible d\'ouvrir cette fenêtre.', 'error'); } catch (_) {}
+      return false;
+    }
+
+    titleNode.textContent = title || '';
+    bodyNode.innerHTML = html || '';
+    overlay.classList.add('active');
+    document.body.classList.add('modal-open');
+
+    try {
+      requestAnimationFrame(() => {
+        const focusable = bodyNode.querySelector(
+          'input, select, textarea, button, [tabindex]:not([tabindex="-1"])'
+        );
+        focusable?.focus?.();
+      });
+    } catch (_) {}
+
+    return true;
   }
+
   function closeModal() {
-    document.getElementById('global-modal').classList.remove('active');
-    document.getElementById('modal-body').innerHTML = '';
+    const overlay  = document.getElementById('global-modal');
+    const bodyNode = document.getElementById('modal-body');
+    if (overlay) overlay.classList.remove('active');
+    if (bodyNode) bodyNode.innerHTML = '';
+    document.body.classList.remove('modal-open');
   }
 
   function toast(msg, type = 'success') {
@@ -375,6 +407,13 @@ const App = (() => {
     document.getElementById('main-content')?.addEventListener('click', closeMobileSidebar);
     document.getElementById('global-modal')?.addEventListener('click', e => {
       if (e.target === document.getElementById('global-modal')) closeModal();
+    });
+    // Fermeture au clavier (Échap) — absente jusqu'ici, seuls la croix et
+    // le clic sur le fond fermaient la modale.
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && document.getElementById('global-modal')?.classList.contains('active')) {
+        closeModal();
+      }
     });
 
     ACL.initRegistry();

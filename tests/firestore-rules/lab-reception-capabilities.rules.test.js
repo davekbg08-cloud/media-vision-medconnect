@@ -29,16 +29,22 @@ test('43. lab pending : ne peut pas écrire un résultat de laboratoire (mc_lab_
   }));
 });
 
-// 44. lab approved peut écrire un résultat pour son établissement autorisé.
-test('44. lab approved : peut écrire un résultat de laboratoire', async () => {
+// 44. lab approved ET affilié à l'établissement de la fiche peut écrire
+// un résultat (isolation par établissement, chantier "modales
+// laboratoire" : hospitalMembers + created_by désormais exigés).
+test('44. lab approved et affilié : peut écrire un résultat de laboratoire', async () => {
   const env = await getTestEnv();
   await clearAll(env);
   await seed(env, async (db, doc, setDoc) => {
     await setDoc(doc(db, 'users', 'lab-approved-1'), { uid: 'lab-approved-1', role: 'lab', status: 'approved' });
+    await setDoc(doc(db, 'hospitalMembers', 'EST-44_lab-approved-1'), {
+      hospitalId: 'EST-44', uid: 'lab-approved-1', role: 'lab', status: 'active',
+    });
   });
   const lab = env.authenticatedContext('lab-approved-1', { role: 'lab' }).firestore();
   await assertSucceeds(setDoc(doc(lab, 'mc_lab_results', 'LABR-A1'), {
     lid: 'LABR-A1', patient_id: 'MC-LABR-A1', type: 'Glycémie', value: '0.95',
+    establishmentId: 'EST-44', created_by: 'lab-approved-1',
   }));
 });
 

@@ -1,8 +1,21 @@
 {
-  "version": "2.9.27",
-  "build": "2026.07.18.1",
+  "version": "2.9.28",
+  "build": "2026.07.18.2",
   "buildDate": "2026-07-18",
   "changelog": [
+    {
+      "version": "2.9.28",
+      "date": "2026-07-18",
+      "notes": [
+        "Correctif Laboratoire (desktop hôpital) : le bouton « + Nouvelle demande » ouvrait une fenêtre affichée SOUS le tableau de bord (invisible à l'écran, clic apparemment sans effet) — la fenêtre passe désormais au-dessus, se ferme par la croix, la touche Échap ou un clic en dehors",
+        "Correctif sécurité : le bouton « + Nouvelle demande » et la création de demandes d'analyses étaient accessibles à tous les rôles, y compris au laborantin lui-même — réservés désormais au médecin, à l'infirmier(ère) et à l'administration hospitalière, vérifié à l'affichage ET au moment de l'action, y compris côté serveur (règles Firestore)",
+        "Correctif : la prise en charge et la saisie de résultat n'étaient plus limitées par établissement — un laborantin pouvait modifier une demande ou un résultat d'un AUTRE hôpital ; l'accès est désormais strictement limité à l'établissement d'affiliation, avec des transitions de statut contrôlées (impossible de revenir en arrière ou de sauter une étape)",
+        "Correctif : la saisie d'un résultat de laboratoire effectuait 3 écritures Firestore séparées — un échec après la première pouvait clôturer une demande sans résultat associé (invisible pour le médecin et le patient) ; les 3 écritures sont désormais atomiques (tout ou rien)",
+        "Correctif : un résultat demandé par un(e) infirmier(ère) ne parvenait qu'au médecin (jamais à l'infirmier(ère) demandeur) et pouvait confondre son identifiant avec celui du médecin responsable — les deux rôles reçoivent désormais correctement le résultat, sans confusion d'identité",
+        "Correctif : le rôle Laboratoire n'était notifié d'AUCUNE nouvelle demande d'analyse en temps réel — corrigé",
+        "Interface : recherche du patient par numéro MC (cache local puis vérification cloud ciblée), retour visuel et verrou anti double-clic sur tous les boutons du module laboratoire (nouvelle demande, prise en charge, saisie de résultat)"
+      ]
+    },
     {
       "version": "2.9.27",
       "date": "2026-07-18",
