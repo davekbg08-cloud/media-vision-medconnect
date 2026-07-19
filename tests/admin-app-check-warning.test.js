@@ -21,9 +21,9 @@ function fnBody() {
   return src.slice(start, end);
 }
 
-test('appCheckWarningBanner() lit APP_CHECK_SITE_KEY sans jamais lever (typeof, pas d\'accès direct)', () => {
+test('appCheckWarningBanner() résout la clé par domaine sans jamais lever (typeof, pas d\'accès direct)', () => {
   const body = fnBody();
-  assert.match(body, /typeof APP_CHECK_SITE_KEY !== 'undefined'/);
+  assert.match(body, /typeof resolveAppCheckSiteKey === 'function'/);
 });
 
 test("appCheckWarningBanner() ne bloque aucune action (retourne une chaîne vide quand configuré, jamais une modale/redirection)", () => {

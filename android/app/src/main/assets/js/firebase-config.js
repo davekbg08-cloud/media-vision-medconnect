@@ -15,13 +15,25 @@ const firebaseConfig = {
 };
 
 /* ── App Check (voir docs/FIREBASE_APP_CHECK_SETUP.md) ──
-   Vide par défaut : l'activation ci-dessous est un no-op tant qu'aucune
-   clé n'est renseignée ici — aucun risque pour les utilisateurs actuels
-   tant que la clé reCAPTCHA Enterprise n'a pas été créée manuellement
-   dans Google Cloud Console (action hors de cet environnement). Ne
-   JAMAIS mettre autre chose ici qu'une clé reCAPTCHA publique (site
-   key) — jamais de clé secrète/serveur. */
-const APP_CHECK_SITE_KEY = "";
+   La même PWA est chargée depuis 2 origines distinctes : GitHub Pages
+   (davekbg08-cloud.github.io — APK Android via MainActivity.java) et
+   le miroir Firebase Hosting (medconnect-e81ba.web.app/.firebaseapp.com
+   — Electron via main.js, et navigateur direct). reCAPTCHA Enterprise
+   restreint chaque clé à ses domaines déclarés : une seule clé fixe ne
+   fonctionnerait donc que sur UNE des deux origines. La clé est résolue
+   ici selon window.location.hostname ; domaine non reconnu (tests,
+   file://, développement local) → chaîne vide → activateAppCheck() reste
+   un no-op sûr, jamais de faux positif. Ne JAMAIS mettre autre chose ici
+   qu'une clé reCAPTCHA publique (site key) — jamais de clé secrète/serveur. */
+const APP_CHECK_SITE_KEYS = {
+  'davekbg08-cloud.github.io': '6Lc8RjctAAAAAHMhYy1HuKAFqB55vFQqnbkSeCfC',
+  'medconnect-e81ba.web.app': '6Lc8RjctAAAAAGRsiWiaaKdHBAJptn54Q0oO724q',
+  'medconnect-e81ba.firebaseapp.com': '6Lc8RjctAAAAAGRsiWiaaKdHBAJptn54Q0oO724q',
+};
+function resolveAppCheckSiteKey() {
+  const hostname = (typeof window !== 'undefined' && window.location && window.location.hostname) || '';
+  return APP_CHECK_SITE_KEYS[hostname] || '';
+}
 
 /* ── INITIALISATION ─────────────────────────────── */
 let firebaseDB   = null;
@@ -34,12 +46,13 @@ let firebaseReady = false;
 // caches PWA pas encore rafraîchis — ne fasse jamais échouer
 // l'initialisation Firebase principale.
 function activateAppCheck() {
-  if (!APP_CHECK_SITE_KEY) return;
+  const siteKey = resolveAppCheckSiteKey();
+  if (!siteKey) return;
   try {
     if (!firebase.appCheck) return;
     const appCheck = firebase.appCheck();
     appCheck.activate(
-      new firebase.appCheck.ReCaptchaEnterpriseProvider(APP_CHECK_SITE_KEY),
+      new firebase.appCheck.ReCaptchaEnterpriseProvider(siteKey),
       true // isTokenAutoRefreshEnabled
     );
   } catch (err) {

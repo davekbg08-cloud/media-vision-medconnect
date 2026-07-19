@@ -3,10 +3,19 @@
 
    Verrouille : initFirebase() reste fonctionnel sans clé App Check
    configurée (comportement actuel en production, aucune régression),
-   activateAppCheck() est un no-op tant que APP_CHECK_SITE_KEY est vide
-   (ne doit jamais planter faute du SDK firebase.appCheck), et une fois
-   une clé configurée, firebase.appCheck().activate() est bien appelé
-   avec un ReCaptchaEnterpriseProvider et isTokenAutoRefreshEnabled=true.
+   activateAppCheck() est un no-op tant qu'aucune clé n'est résolue pour
+   le domaine courant (ne doit jamais planter faute du SDK
+   firebase.appCheck, ni faute de window.location dans un sandbox de
+   test), et firebase.appCheck().activate() est bien appelé avec un
+   ReCaptchaEnterpriseProvider et isTokenAutoRefreshEnabled=true une fois
+   une clé résolue.
+
+   Chantier "App Check par domaine" : la même PWA est chargée depuis 2
+   origines (GitHub Pages pour l'APK/Electron, miroir Firebase Hosting) —
+   reCAPTCHA Enterprise restreint chaque clé à ses domaines déclarés,
+   donc resolveAppCheckSiteKey() choisit la clé selon
+   window.location.hostname (voir js/firebase-config.js,
+   APP_CHECK_SITE_KEYS) plutôt qu'une seule constante fixe.
    ===================================================== */
 const { test } = require('node:test');
 const assert = require('node:assert');
@@ -36,8 +45,9 @@ function fakeFirebase({ withAppCheckSdk = false } = {}) {
   return { firebase, activateCalls };
 }
 
-function loadFirebaseConfig({ firebase, sourceOverride } = {}) {
+function loadFirebaseConfig({ firebase, sourceOverride, hostname } = {}) {
   const win = { addEventListener() {} };
+  if (hostname) win.location = { hostname };
   const sandbox = {
     window: win,
     document: { getElementById: () => fakeElement(), addEventListener() {} },
@@ -60,7 +70,7 @@ function loadFirebaseConfig({ firebase, sourceOverride } = {}) {
   return { ...sandbox, ...state };
 }
 
-test("initFirebase() fonctionne normalement sans clé App Check configurée (APP_CHECK_SITE_KEY vide en production)", () => {
+test("initFirebase() fonctionne normalement sur un domaine non reconnu (aucune clé App Check résolue, sandbox de test sans window.location)", () => {
   const { firebase } = fakeFirebase({ withAppCheckSdk: true });
   const sandbox = loadFirebaseConfig({ firebase });
   assert.strictEqual(sandbox.firebaseReady, true);
@@ -70,25 +80,44 @@ test("initFirebase() fonctionne normalement sans clé App Check configurée (APP
 
 test("activateAppCheck() ne plante jamais si firebase.appCheck (le SDK) n'est pas chargé", () => {
   const { firebase } = fakeFirebase({ withAppCheckSdk: false });
-  const sandbox = loadFirebaseConfig({ firebase });
+  const sandbox = loadFirebaseConfig({ firebase, hostname: 'davekbg08-cloud.github.io' });
   assert.strictEqual(sandbox.firebaseReady, true, "l'absence du SDK App Check ne doit jamais casser l'initialisation Firebase principale");
 });
 
-test("activateAppCheck() est un no-op tant que APP_CHECK_SITE_KEY est vide, même si le SDK est chargé", () => {
+test("activateAppCheck() est un no-op sur un domaine sans clé résolue (aucun window.location, ex. sandbox de test)", () => {
   const { firebase, activateCalls } = fakeFirebase({ withAppCheckSdk: true });
   loadFirebaseConfig({ firebase });
-  assert.strictEqual(activateCalls.length, 0, "aucune activation ne doit être tentée sans clé configurée");
+  assert.strictEqual(activateCalls.length, 0, "aucune activation ne doit être tentée sans clé résolue pour ce domaine");
 });
 
-test('activateAppCheck() active bien App Check (ReCaptchaEnterpriseProvider, isTokenAutoRefreshEnabled=true) une fois une clé configurée', () => {
+test("activateAppCheck() est un no-op sur un domaine INCONNU (ni GitHub Pages ni Firebase Hosting) même avec le SDK chargé", () => {
   const { firebase, activateCalls } = fakeFirebase({ withAppCheckSdk: true });
-  const realSource = fs.readFileSync(path.resolve(__dirname, '..', 'js/firebase-config.js'), 'utf8');
-  const withKey = realSource.replace('const APP_CHECK_SITE_KEY = "";', 'const APP_CHECK_SITE_KEY = "test-site-key-123";');
-  assert.notStrictEqual(withKey, realSource, "le remplacement doit avoir trouvé la ligne exacte à substituer");
+  loadFirebaseConfig({ firebase, hostname: 'exemple-quelconque.invalid' });
+  assert.strictEqual(activateCalls.length, 0, "un domaine non déclaré dans APP_CHECK_SITE_KEYS ne doit jamais activer App Check");
+});
 
-  loadFirebaseConfig({ firebase, sourceOverride: withKey });
+test('activateAppCheck() active App Check sur davekbg08-cloud.github.io (APK/Electron) avec la clé dédiée à ce domaine', () => {
+  const { firebase, activateCalls } = fakeFirebase({ withAppCheckSdk: true });
+  loadFirebaseConfig({ firebase, hostname: 'davekbg08-cloud.github.io' });
 
   assert.strictEqual(activateCalls.length, 1);
-  assert.strictEqual(activateCalls[0].provider.siteKey, 'test-site-key-123');
+  assert.strictEqual(activateCalls[0].provider.siteKey, '6Lc8RjctAAAAAHMhYy1HuKAFqB55vFQqnbkSeCfC');
   assert.strictEqual(activateCalls[0].autoRefresh, true);
+});
+
+test('activateAppCheck() active App Check sur medconnect-e81ba.web.app (miroir Firebase Hosting) avec la clé dédiée à ce domaine', () => {
+  const { firebase, activateCalls } = fakeFirebase({ withAppCheckSdk: true });
+  loadFirebaseConfig({ firebase, hostname: 'medconnect-e81ba.web.app' });
+
+  assert.strictEqual(activateCalls.length, 1);
+  assert.strictEqual(activateCalls[0].provider.siteKey, '6Lc8RjctAAAAAGRsiWiaaKdHBAJptn54Q0oO724q');
+  assert.strictEqual(activateCalls[0].autoRefresh, true);
+});
+
+test('activateAppCheck() active App Check sur medconnect-e81ba.firebaseapp.com avec la même clé que .web.app', () => {
+  const { firebase, activateCalls } = fakeFirebase({ withAppCheckSdk: true });
+  loadFirebaseConfig({ firebase, hostname: 'medconnect-e81ba.firebaseapp.com' });
+
+  assert.strictEqual(activateCalls.length, 1);
+  assert.strictEqual(activateCalls[0].provider.siteKey, '6Lc8RjctAAAAAGRsiWiaaKdHBAJptn54Q0oO724q');
 });

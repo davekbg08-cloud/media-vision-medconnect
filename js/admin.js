@@ -285,8 +285,10 @@ const AdminModule = (() => {
 
   /* Chantier "reception/affiliation sans régression" (section 13) :
      avertissement NON BLOQUANT quand Firebase App Check n'est pas
-     configuré (APP_CHECK_SITE_KEY vide, voir js/firebase-config.js et
-     docs/FIREBASE_APP_CHECK_SETUP.md). `typeof` évite toute
+     configuré POUR LE DOMAINE COURANT (résolu par
+     resolveAppCheckSiteKey(), voir js/firebase-config.js et
+     docs/FIREBASE_APP_CHECK_SETUP.md — une clé reCAPTCHA Enterprise par
+     domaine, jamais une seule clé fixe). `typeof` évite toute
      ReferenceError si ce fichier est chargé isolément (sandbox de
      test) sans firebase-config.js. Purement informatif : App Check
      n'est JAMAIS présenté ici comme un remplacement des règles
@@ -294,7 +296,7 @@ const AdminModule = (() => {
      Aucun blocage d'aucune action admin — un admin qui n'a pas encore
      configuré la clé continue de travailler normalement. */
   function appCheckWarningBanner() {
-    const configured = typeof APP_CHECK_SITE_KEY !== 'undefined' && !!APP_CHECK_SITE_KEY;
+    const configured = typeof resolveAppCheckSiteKey === 'function' && !!resolveAppCheckSiteKey();
     if (configured) return '';
     return `
       <div class="card" style="border-left:3px solid var(--accent);margin-bottom:1rem">
