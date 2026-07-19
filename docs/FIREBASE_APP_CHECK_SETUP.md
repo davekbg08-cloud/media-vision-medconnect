@@ -65,25 +65,43 @@ les jetons émis soient acceptés côté serveur.
 
 ## Pour Android
 
-1. Dans la Firebase Console → App Check → ajouter l'app Android → fournisseur
-   **Play Integrity** (remplace SafetyNet, déprécié).
-2. Prérequis : l'app doit être signée avec le certificat de production
-   (déjà le cas — voir `.github/workflows/build-medconnect-apk.yml`,
-   keystore géré via GitHub Secrets) et son **empreinte SHA-256** doit
-   être enregistrée dans la Firebase Console (Paramètres du projet →
+⚠️ **Nuance architecturale importante avant de configurer Play Integrity** :
+`MainActivity.java` est un `WebView` "nu" qui charge la PWA en direct
+depuis GitHub Pages (`davekbg08-cloud.github.io`) — l'app Android
+n'utilise AUCUN SDK Firebase natif, tous les appels Firestore
+proviennent du JavaScript exécuté DANS ce WebView (même code que la
+PWA web). La clé reCAPTCHA Enterprise déjà configurée pour
+`davekbg08-cloud.github.io` (voir section précédente) protège donc
+DÉJÀ ces appels. Play Integrity ajouterait une couche d'attestation
+supplémentaire (intégrité de l'app + de l'appareil natifs), mais
+nécessiterait d'intégrer le SDK Firebase App Check Android natif dans
+`MainActivity.java` (dépendance Gradle + initialisation Kotlin/Java) —
+un changement de code distinct, non fait ici, et dont l'intérêt réel
+est limité tant que l'app reste une simple coquille WebView.
+
+1. **Empreinte SHA-256 du certificat (récupérable sans exposer le
+   keystore)** : un workflow dédié,
+   `.github/workflows/print-android-signing-sha256.yml`
+   (déclenchement manuel), décode le keystore existant (secrets
+   `KEYSTORE_BASE64`/`KEYSTORE_PASSWORD`/`KEYSTORE_ALIAS`, déjà
+   configurés pour `build-medconnect-apk.yml`) et affiche l'empreinte
+   SHA-256/SHA1 dans les logs du run — une donnée **publique** par
+   construction (c'est justement ce qui se colle dans les consoles
+   Firebase/Google Play), jamais le keystore ni les mots de passe
+   eux-mêmes. Lance-le depuis l'onglet Actions → "Empreinte SHA-256 du
+   certificat de signature Android" → "Run workflow".
+2. Dans la Firebase Console → App Check → ajouter l'app Android →
+   fournisseur **Play Integrity** (remplace SafetyNet, déprécié) →
+   coller l'empreinte SHA-256 obtenue ci-dessus (Paramètres du projet →
    app Android → empreintes de certificat SHA).
-   - Récupérer le SHA-256 du certificat de release :
-     ```bash
-     keytool -list -v -keystore android/keystore.jks -alias <KEYSTORE_ALIAS>
-     ```
-     (nécessite le keystore et son mot de passe — jamais commités,
-     gérés uniquement via GitHub Secrets, voir `.gitignore`).
 3. Play Integrity nécessite que l'app soit distribuée via Google Play
    (ou testée via Play Console en interne) pour une attestation complète
    — à date, l'APK MedConnect est distribué hors Play Store (voir
    architecture WebView documentée précédemment) ; Play Integrity reste
    utilisable mais avec des garanties d'attestation réduites hors Play
-   Store. À réévaluer si une publication Play Store est envisagée.
+   Store. À réévaluer si une publication Play Store est envisagée —
+   voir aussi la nuance ci-dessus sur l'intérêt réel limité tant que
+   l'app reste une simple coquille WebView.
 
 ## Déploiement progressif (obligatoire, jamais d'activation brutale)
 
@@ -108,14 +126,18 @@ les jetons émis soient acceptés côté serveur.
   y est bien enregistrée comme fournisseur (pas seulement créée côté
   Google Cloud) — sinon les jetons émis côté client sont rejetés côté
   serveur malgré une activation apparemment réussie côté PWA.
-- Créer la clé reCAPTCHA Enterprise et l'app Android dans la Firebase
-  Console pour Play Integrity (actions manuelles, nécessitent un accès
-  administrateur au projet Firebase — non disponibles dans cet
-  environnement) — non encore fait, Android reste sur ce point à "reste
-  à faire" (voir section "Pour Android" ci-dessus).
-- Documenter le SHA de production réel une fois extrait par le
-  propriétaire du projet (le keystore n'est jamais accessible dans cet
-  environnement de développement).
+- Créer l'app Android et le fournisseur Play Integrity dans la Firebase
+  Console (action manuelle, nécessite un accès administrateur au projet
+  Firebase — non disponible dans cet environnement) — non encore fait.
+  L'empreinte SHA-256 nécessaire est récupérable sans exposer le
+  keystore via `.github/workflows/print-android-signing-sha256.yml`
+  (voir section "Pour Android" ci-dessus) — reste à la coller dans la
+  Console une fois le workflow lancé.
+- Évaluer si Play Integrity apporte une réelle valeur ajoutée tant que
+  `MainActivity.java` reste une simple coquille WebView sans SDK
+  Firebase natif (voir nuance dans "Pour Android") — la clé reCAPTCHA
+  Enterprise déjà configurée pour `davekbg08-cloud.github.io` protège
+  déjà les appels Firestore de l'APK.
 - Suivre la procédure "Déploiement progressif" ci-dessus (mode
   monitoring avant tout enforcement) avant de considérer App Check
   comme réellement actif en production.

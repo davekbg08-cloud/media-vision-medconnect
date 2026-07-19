@@ -1,0 +1,58 @@
+name: Empreinte SHA-256 du certificat de signature Android
+
+# Déclenchement manuel uniquement. Affiche l'empreinte SHA-256 du
+# certificat de signature de production (KEYSTORE_BASE64/PASSWORD/
+# ALIAS, déjà configurés pour build-medconnect-apk.yml) — nécessaire
+# pour enregistrer l'app Android dans Firebase Console → App Check →
+# fournisseur Play Integrity (voir docs/FIREBASE_APP_CHECK_SETUP.md).
+#
+# L'empreinte SHA-256 d'un certificat est une donnée PUBLIQUE par
+# construction (c'est justement ce qui est collé dans les consoles
+# Firebase/Google Play) — jamais sensible, contrairement au keystore
+# lui-même (jamais commité, décodé uniquement en mémoire du runner,
+# supprimé en fin de job). Ce workflow ne construit rien, ne publie
+# aucun artefact : uniquement une lecture du certificat.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  print-sha256:
+    name: Extraire l'empreinte SHA-256
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up JDK 17 (keytool)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Vérifier les secrets requis
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEYSTORE_ALIAS: ${{ secrets.KEYSTORE_ALIAS }}
+        run: |
+          test -n "$KEYSTORE_BASE64" || (echo "Secret manquant : KEYSTORE_BASE64" && exit 1)
+          test -n "$KEYSTORE_PASSWORD" || (echo "Secret manquant : KEYSTORE_PASSWORD" && exit 1)
+          test -n "$KEYSTORE_ALIAS" || (echo "Secret manquant : KEYSTORE_ALIAS" && exit 1)
+
+      - name: Décoder le keystore (temporaire, supprimé en fin de job)
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: echo "$KEYSTORE_BASE64" | base64 -d > /tmp/keystore.jks
+
+      - name: Afficher l'empreinte SHA-256 (donnée publique, à coller dans Firebase Console)
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEYSTORE_ALIAS: ${{ secrets.KEYSTORE_ALIAS }}
+        run: |
+          echo "=== Empreinte(s) du certificat (à coller dans Firebase Console → Paramètres du projet → app Android → Empreintes de certificat SHA) ==="
+          keytool -list -v -keystore /tmp/keystore.jks -storepass "$KEYSTORE_PASSWORD" -alias "$KEYSTORE_ALIAS" \
+            | grep -E "SHA256:|SHA1:"
+
+      - name: Supprimer le keystore décodé
+        if: always()
+        run: rm -f /tmp/keystore.jks
