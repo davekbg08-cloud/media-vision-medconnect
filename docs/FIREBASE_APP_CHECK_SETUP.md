@@ -10,32 +10,30 @@ l'API Firestore avec la clé publique du projet (voir
 `docs/FIREBASE_KEY_SECURITY.md`) en se faisant passer pour la PWA ou
 l'app Android officielles.
 
-**Mise à jour — les clés reCAPTCHA Enterprise pour la PWA sont
-configurées.** `js/firebase-config.js` résout désormais la clé selon le
-domaine réel (`APP_CHECK_SITE_KEYS`, voir `resolveAppCheckSiteKey()`) :
-une seule clé fixe ne suffirait pas puisque la même PWA est chargée
-depuis deux origines distinctes (GitHub Pages pour l'APK/Electron,
-miroir Firebase Hosting), et reCAPTCHA Enterprise restreint chaque clé
-à ses domaines déclarés. `activateAppCheck()` reste un no-op sûr sur
-tout domaine non reconnu (développement local, tests). Le déploiement
+**Mise à jour — App Check est configuré et enregistré, PWA et Android.**
+`js/firebase-config.js` résout la clé selon le domaine réel
+(`APP_CHECK_SITE_KEYS`, voir `resolveAppCheckSiteKey()`) : une seule clé
+fixe ne suffirait pas puisque la même PWA est chargée depuis deux
+origines distinctes (GitHub Pages pour l'APK/Electron, miroir Firebase
+Hosting), et reCAPTCHA Enterprise restreint chaque clé à ses domaines
+déclarés. `activateAppCheck()` reste un no-op sûr sur tout domaine non
+reconnu (développement local, tests). Côté Firebase Console, les deux
+apps sont enregistrées dans App Check : l'app Web (`medconnect-web`,
+fournisseur reCAPTCHA Enterprise) et l'app Android (`MedConnect
+Android`, `com.mediavision.medconnect`, fournisseur Play Integrity,
+empreinte SHA-256 du certificat de production ajoutée). Le déploiement
 reste volontairement progressif (mode monitoring d'abord, jamais
 d'enforcement brutal qui risquerait de bloquer des utilisateurs
 existants sans test préalable) — voir "Déploiement progressif"
 ci-dessous, qui reste une action manuelle dans la Firebase Console,
 indépendante de ce correctif de code.
 
-⚠️ **Action manuelle restant à vérifier (hors de cet environnement)** :
-confirmer dans la Firebase Console (projet `medconnect-e81ba` → App
-Check → Apps → l'app Web) que la clé reCAPTCHA Enterprise y est bien
-enregistrée comme fournisseur — la créer dans Google Cloud Console ne
-suffit pas seule, Firebase App Check doit aussi la référencer pour que
-les jetons émis soient acceptés côté serveur.
-
 ## Pour la PWA (Web) — FAIT
 
-1. Firebase Console du projet `medconnect-e81ba` → App Check → app Web →
-   fournisseur **reCAPTCHA Enterprise** (recommandé, remplace l'ancien
-   reCAPTCHA v3 App Check désormais déprécié).
+1. **Fait.** Firebase Console du projet `medconnect-e81ba` → App Check →
+   app Web (`medconnect-web`) → fournisseur **reCAPTCHA Enterprise**
+   (recommandé, remplace l'ancien reCAPTCHA v3 App Check désormais
+   déprécié) — enregistré.
 2. Deux clés reCAPTCHA Enterprise créées dans Google Cloud Console,
    chacune restreinte à l'un des domaines réels de l'app :
    - `davekbg08-cloud.github.io` (GitHub Pages, chargé par l'APK Android —
@@ -90,10 +88,12 @@ est limité tant que l'app reste une simple coquille WebView.
    Firebase/Google Play), jamais le keystore ni les mots de passe
    eux-mêmes. Lance-le depuis l'onglet Actions → "Empreinte SHA-256 du
    certificat de signature Android" → "Run workflow".
-2. Dans la Firebase Console → App Check → ajouter l'app Android →
-   fournisseur **Play Integrity** (remplace SafetyNet, déprécié) →
-   coller l'empreinte SHA-256 obtenue ci-dessus (Paramètres du projet →
-   app Android → empreintes de certificat SHA).
+2. **Fait.** Firebase Console → App Check → app Android (`MedConnect
+   Android`, `com.mediavision.medconnect`) → fournisseur **Play
+   Integrity** (remplace SafetyNet, déprécié) — enregistré, empreinte
+   SHA-256 ajoutée à la fois dans Paramètres du projet (app Android →
+   empreintes de certificat SHA) et dans le formulaire Play Integrity
+   d'App Check.
 3. Play Integrity nécessite que l'app soit distribuée via Google Play
    (ou testée via Play Console en interne) pour une attestation complète
    — à date, l'APK MedConnect est distribué hors Play Store (voir
@@ -121,26 +121,17 @@ est limité tant que l'app reste une simple coquille WebView.
 
 ## Ce qui reste à faire (actions manuelles uniquement, plus de code)
 
-- Vérifier dans la Firebase Console (App Check → Apps → app Web) que la
-  clé reCAPTCHA Enterprise `medconnect-e81ba.web.app`/`.firebaseapp.com`
-  y est bien enregistrée comme fournisseur (pas seulement créée côté
-  Google Cloud) — sinon les jetons émis côté client sont rejetés côté
-  serveur malgré une activation apparemment réussie côté PWA.
-- Créer l'app Android et le fournisseur Play Integrity dans la Firebase
-  Console (action manuelle, nécessite un accès administrateur au projet
-  Firebase — non disponible dans cet environnement) — non encore fait.
-  L'empreinte SHA-256 nécessaire est récupérable sans exposer le
-  keystore via `.github/workflows/print-android-signing-sha256.yml`
-  (voir section "Pour Android" ci-dessus) — reste à la coller dans la
-  Console une fois le workflow lancé.
-- Évaluer si Play Integrity apporte une réelle valeur ajoutée tant que
-  `MainActivity.java` reste une simple coquille WebView sans SDK
-  Firebase natif (voir nuance dans "Pour Android") — la clé reCAPTCHA
-  Enterprise déjà configurée pour `davekbg08-cloud.github.io` protège
-  déjà les appels Firestore de l'APK.
 - Suivre la procédure "Déploiement progressif" ci-dessus (mode
   monitoring avant tout enforcement) avant de considérer App Check
-  comme réellement actif en production.
+  comme réellement actif en production — les deux apps (Web + Android)
+  sont désormais enregistrées, mais l'enforcement doit rester
+  progressif.
+- Continuer à évaluer si Play Integrity apporte une réelle valeur
+  ajoutée tant que `MainActivity.java` reste une simple coquille
+  WebView sans SDK Firebase natif (voir nuance dans "Pour Android") —
+  la clé reCAPTCHA Enterprise déjà configurée pour
+  `davekbg08-cloud.github.io` protège déjà les appels Firestore de
+  l'APK ; l'attestation Play Integrity est un plus, pas un prérequis.
 
 ## Déjà fait dans ce dépôt
 
