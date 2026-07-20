@@ -414,6 +414,22 @@ service cloud.firestore {
       return hasRole('lab') && belongsToSameEstablishment(data);
     }
 
+    /* ── Correctif (audit "workflows mobile/desktop", section 18) ──────
+       Bug confirmé, même famille que isClinicalHospitalMember ci-dessus :
+       admissions/receptionVisits/emergencyCases/maternityCases/beds
+       utilisaient belongsToSameEstablishment() SEULE en lecture — tout
+       membre actif de l'établissement pouvait lire ces documents, y
+       compris lab et pharmacist, dont AUCUNE capacité côté client
+       (js/hospital-capabilities.js) ni aucune route de menu
+       (js/hospital-permissions.js ROUTES) ne couvre ces collections.
+       Coordination des soins = personnel clinique (doctor/nurse/
+       admin_hospital) ET réception (qui orchestre réellement arrivées/
+       pré-admissions/lits, cf. js/hospital-reception.js) — jamais lab,
+       jamais pharmacist. */
+    function careCoordinationCanRead(data) {
+      return isClinicalHospitalMember(data) || (hasRole('reception') && belongsToSameEstablishment(data));
+    }
+
     /* ── Chantier "reception/affiliation sans régression" — section 9 ──
        Décider d'une affiliation (approuver/refuser) : l'admin plateforme
        garde un accès global ; l'admin_hospital ne peut décider QUE pour
@@ -1595,7 +1611,12 @@ service cloud.firestore {
        belongsToSameEstablishment(request.resource.data) partout ici,
        même principe déjà appliqué à mc_lab_results/mc_admissions. */
     match /beds/{docId} {
-      allow read: if isAdmin() || signedIn();
+      // Correctif (audit "workflows mobile/desktop", section 18) :
+      // "signedIn()" seul laissait N'IMPORTE QUEL utilisateur connecté
+      // (même d'un autre établissement, même lab/pharmacist) lire TOUS
+      // les lits de la plateforme. careCoordinationCanRead() restreint
+      // à la coordination des soins de l'établissement concerné.
+      allow read: if isAdmin() || careCoordinationCanRead(resource.data);
       allow create, update: if isAdmin() ||
         (signedIn() && belongsToSameEstablishment(request.resource.data) &&
          desktopWorkflowCanWrite(resolveHospitalId(request.resource.data)));
@@ -1606,8 +1627,13 @@ service cloud.firestore {
       // PARTIE E : remplace le "currentRoleIs('doctor') ||
       // currentRoleIs('nurse')" non filtré (accès inter-établissements)
       // par belongsToSameEstablishment.
+      // Correctif (audit "workflows mobile/desktop", section 18) :
+      // belongsToSameEstablishment() SEULE rouvrait cet accès à
+      // lab/pharmacist (aucune capacité/route ne leur donne de raison
+      // de lire les admissions) — careCoordinationCanRead() restreint
+      // au personnel clinique et à la réception.
       allow read: if canReadMedicalData(resource.data) ||
-        belongsToSameEstablishment(resource.data);
+        careCoordinationCanRead(resource.data);
       allow create, update: if isAdmin() ||
         (canManageCare() && belongsToSameEstablishment(request.resource.data) &&
          desktopWorkflowCanWrite(resolveHospitalId(request.resource.data)));
@@ -1615,9 +1641,11 @@ service cloud.firestore {
     }
 
     match /receptionVisits/{docId} {
-      // PARTIE E : même correctif que admissions.
+      // PARTIE E : même correctif que admissions. Correctif (section 18) :
+      // careCoordinationCanRead() remplace belongsToSameEstablishment()
+      // seule (excluait mal lab/pharmacist).
       allow read: if canReadMedicalData(resource.data) ||
-        belongsToSameEstablishment(resource.data);
+        careCoordinationCanRead(resource.data);
       allow create, update: if isAdmin() ||
         (canRegisterPatient() && belongsToSameEstablishment(request.resource.data) &&
          desktopWorkflowCanWrite(resolveHospitalId(request.resource.data)));
@@ -1625,9 +1653,11 @@ service cloud.firestore {
     }
 
     match /emergencyCases/{docId} {
-      // PARTIE E : même correctif que admissions.
+      // PARTIE E : même correctif que admissions. Correctif (section 18) :
+      // careCoordinationCanRead() remplace belongsToSameEstablishment()
+      // seule.
       allow read: if canReadMedicalData(resource.data) ||
-        belongsToSameEstablishment(resource.data);
+        careCoordinationCanRead(resource.data);
       allow create, update: if isAdmin() ||
         (canRegisterPatient() && belongsToSameEstablishment(request.resource.data) &&
          desktopWorkflowCanWrite(resolveHospitalId(request.resource.data)));
@@ -1635,9 +1665,11 @@ service cloud.firestore {
     }
 
     match /maternityCases/{docId} {
-      // PARTIE E : même correctif que admissions.
+      // PARTIE E : même correctif que admissions. Correctif (section 18) :
+      // careCoordinationCanRead() remplace belongsToSameEstablishment()
+      // seule.
       allow read: if canReadMedicalData(resource.data) ||
-        belongsToSameEstablishment(resource.data);
+        careCoordinationCanRead(resource.data);
       allow create, update: if isAdmin() ||
         (canRegisterPatient() && belongsToSameEstablishment(request.resource.data) &&
          desktopWorkflowCanWrite(resolveHospitalId(request.resource.data)));
@@ -1667,7 +1699,14 @@ service cloud.firestore {
       // PARTIE E : remplace le "currentRoleIs('doctor') ||
       // currentRoleIs('nurse')" (accès à tout le journal, tous
       // établissements) par belongsToSameEstablishment.
-      allow read: if isAdmin() || belongsToSameEstablishment(resource.data);
+      // Correctif (audit "workflows mobile/desktop", section 18) :
+      // belongsToSameEstablishment() seule rouvrait ce journal (peut
+      // contenir du contexte clinique) à lab/pharmacist/reception,
+      // alors que l'onglet "Historique des accès" n'est jamais visible
+      // pour ces rôles côté client (js/hospital-capabilities.js
+      // RECORD_SECTIONS). isClinicalHospitalMember() restreint au
+      // personnel clinique réellement concerné.
+      allow read: if isAdmin() || isClinicalHospitalMember(resource.data);
       // Correctif (chantier "durcissement sans Cloud Functions") :
       // "if signedIn()" seul ne contraignait AUCUN champ — n'importe
       // quel utilisateur connecté pouvait créer une entrée d'audit au

@@ -110,9 +110,78 @@ test('admissions : membre du même établissement lit sans être auteur', async 
   const env = await getTestEnv();
   await clearAll(env);
   await seedMember(env, 'HOSP-A', 'nurse-member-2');
+  // Correctif (audit "workflows mobile/desktop", section 18) : la
+  // lecture d'admissions vérifie désormais le RÔLE réel
+  // (careCoordinationCanRead), plus seulement l'appartenance —
+  // seedRole() reflète un compte infirmier réellement approuvé.
+  await seedRole(env, 'nurse-member-2', 'nurse');
   await seedDoc(env, 'admissions', 'ADM1', { patient_id: 'MC-E8', establishmentId: 'HOSP-A' });
   const member = env.authenticatedContext('nurse-member-2').firestore();
   await assertSucceeds(getDoc(doc(member, 'admissions', 'ADM1')));
+});
+
+/* ── Correctif (audit "workflows mobile/desktop", section 18) ──────
+   lab/pharmacist sont membres actifs de l'établissement mais n'ont
+   AUCUNE capacité/route client sur admissions — belongsToSameEstablishment()
+   seule les laissait pourtant lire ces documents. */
+test("admissions : un membre lab de l'établissement (sans rôle clinique/réception) est refusé", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await seedMember(env, 'HOSP-A', 'lab-admissions-1');
+  await seedRole(env, 'lab-admissions-1', 'lab');
+  await seedDoc(env, 'admissions', 'ADM-LAB-1', { patient_id: 'MC-E-LAB1', establishmentId: 'HOSP-A' });
+  const lab = env.authenticatedContext('lab-admissions-1').firestore();
+  await assertFails(getDoc(doc(lab, 'admissions', 'ADM-LAB-1')));
+});
+
+test("admissions : un membre reception de l'établissement peut lire (coordination des arrivées)", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await seedMember(env, 'HOSP-A', 'reception-admissions-1');
+  await seedRole(env, 'reception-admissions-1', 'reception');
+  await seedDoc(env, 'admissions', 'ADM-REC-1', { patient_id: 'MC-E-REC1', establishmentId: 'HOSP-A' });
+  const reception = env.authenticatedContext('reception-admissions-1').firestore();
+  await assertSucceeds(getDoc(doc(reception, 'admissions', 'ADM-REC-1')));
+});
+
+test("beds : un membre pharmacist de l'établissement est refusé (aucune capacité/route sur les lits)", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await seedMember(env, 'HOSP-A', 'pharmacist-beds-1');
+  await seedRole(env, 'pharmacist-beds-1', 'pharmacist');
+  await seedDoc(env, 'beds', 'BED-PH-1', { number: '101', establishmentId: 'HOSP-A' });
+  const pharmacist = env.authenticatedContext('pharmacist-beds-1').firestore();
+  await assertFails(getDoc(doc(pharmacist, 'beds', 'BED-PH-1')));
+});
+
+test("beds : un membre reception de l'établissement peut lire (statistiques des lits)", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await seedMember(env, 'HOSP-A', 'reception-beds-1');
+  await seedRole(env, 'reception-beds-1', 'reception');
+  await seedDoc(env, 'beds', 'BED-REC-1', { number: '102', establishmentId: 'HOSP-A' });
+  const reception = env.authenticatedContext('reception-beds-1').firestore();
+  await assertSucceeds(getDoc(doc(reception, 'beds', 'BED-REC-1')));
+});
+
+test("auditLogs : un membre reception de l'établissement est refusé (onglet Historique des accès réservé au clinique)", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await seedMember(env, 'HOSP-A', 'reception-audit-1');
+  await seedRole(env, 'reception-audit-1', 'reception');
+  await seedDoc(env, 'auditLogs', 'AUDIT-REC-1', { establishmentId: 'HOSP-A', hospitalId: 'HOSP-A' });
+  const reception = env.authenticatedContext('reception-audit-1').firestore();
+  await assertFails(getDoc(doc(reception, 'auditLogs', 'AUDIT-REC-1')));
+});
+
+test("auditLogs : un membre doctor de l'établissement peut lire", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await seedMember(env, 'HOSP-A', 'doctor-audit-1');
+  await seedRole(env, 'doctor-audit-1', 'doctor');
+  await seedDoc(env, 'auditLogs', 'AUDIT-DOC-1', { establishmentId: 'HOSP-A', hospitalId: 'HOSP-A' });
+  const doctor = env.authenticatedContext('doctor-audit-1').firestore();
+  await assertSucceeds(getDoc(doc(doctor, 'auditLogs', 'AUDIT-DOC-1')));
 });
 
 test("admissions : personnel d'un autre établissement refusé", async () => {

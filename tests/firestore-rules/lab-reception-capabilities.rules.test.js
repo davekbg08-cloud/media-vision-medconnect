@@ -125,7 +125,14 @@ test('48. lab approved mais NON affilié : ne peut pas lire une admission de l\'
   await assertFails(getDoc(doc(lab, 'admissions', 'ADM-ISO-1')));
 });
 
-test('48bis. lab approved ET affilié (hospitalMembers) : peut lire une admission de son établissement', async () => {
+/* ── Correctif (audit "workflows mobile/desktop", section 18) ──────
+   Ce test verrouillait auparavant le comportement inverse
+   (assertSucceeds) : un laborantin affilié pouvait lire les admissions
+   de son établissement, alors qu'aucune capacité ni route client
+   (js/hospital-capabilities.js, js/hospital-permissions.js) ne lui
+   donne accès à cette collection — son rôle se limite au laboratoire.
+   careCoordinationCanRead() corrige ce sur-accès. */
+test("48bis. lab approved ET affilié (hospitalMembers) : NE PEUT PAS lire une admission de son établissement (hors de son rôle)", async () => {
   const env = await getTestEnv();
   await clearAll(env);
   await seed(env, async (db, doc, setDoc) => {
@@ -138,7 +145,7 @@ test('48bis. lab approved ET affilié (hospitalMembers) : peut lire une admissio
     });
   });
   const lab = env.authenticatedContext('lab-affiliated-1', { role: 'lab' }).firestore();
-  await assertSucceeds(getDoc(doc(lab, 'admissions', 'ADM-ISO-2')));
+  await assertFails(getDoc(doc(lab, 'admissions', 'ADM-ISO-2')));
 });
 
 // 49. Un utilisateur ne peut pas modifier son propre statut (lab/reception).
