@@ -143,3 +143,32 @@ test("medical_records : la réception NE PEUT PAS créer un document de type cli
     type: 'consultation', created_by: 'reception-5',
   }));
 });
+
+/* ── Correctif (audit "workflows mobile/desktop", section 6) ───────
+   Bug confirmé : la clause reception ne vérifiait QUE type ==
+   'patient_record' et l'appartenance — aucun champ n'était interdit.
+   Un document patient_record portant EN PLUS un champ clinique était
+   donc accepté tant que le type restait correct. keys().hasOnly()
+   ferme cette faille. */
+test("medical_records : la réception NE PEUT PAS glisser un champ clinique (diagnosis) même avec type == patient_record", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await seedReceptionMember(env, 'reception-6', 'HOSP-RC');
+  const reception = env.authenticatedContext('reception-6', { role: 'reception' }).firestore();
+  await assertFails(setDoc(doc(reception, 'medical_records', 'MC-RC-6'), {
+    recordId: 'MC-RC-6', patientId: 'MC-RC-6', establishmentId: 'HOSP-RC',
+    type: 'patient_record', status: 'active', created_by: 'reception-6',
+    diagnosis: 'Fabriqué par la réception',
+  }));
+});
+
+test("medical_records : la réception NE PEUT PAS poser un created_by différent de son propre uid (anti-usurpation)", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await seedReceptionMember(env, 'reception-7', 'HOSP-RC');
+  const reception = env.authenticatedContext('reception-7', { role: 'reception' }).firestore();
+  await assertFails(setDoc(doc(reception, 'medical_records', 'MC-RC-7'), {
+    recordId: 'MC-RC-7', patientId: 'MC-RC-7', establishmentId: 'HOSP-RC',
+    type: 'patient_record', status: 'active', created_by: 'quelquun-dautre',
+  }));
+});

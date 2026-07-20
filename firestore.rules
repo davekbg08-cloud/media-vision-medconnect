@@ -795,6 +795,30 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Correctif (audit "workflows mobile/desktop", section 6) : bug
+    // confirmé — la clause reception de medical_records.create vérifiait
+    // seulement type=='patient_record' et l'appartenance, mais
+    // n'interdisait AUCUN autre champ : un document portant en plus
+    // diagnosis/allergies/chronic/treatment/prescription/consultation/
+    // labResults/doctorNotes/medicalHistory aurait été accepté tant que
+    // type restait 'patient_record'. keys().hasOnly() sur l'ensemble
+    // exact posé par DB.addPatientAndConfirmAtomic (voir js/db.js)
+    // ferme cette faille — la réception ne peut plus jamais poser un
+    // champ clinique, quel qu'il soit. created_by doit en plus
+    // correspondre à l'auteur réel de l'écriture (anti-usurpation,
+    // même principe que messageSenderIdentityOk ailleurs).
+    function receptionMedicalRecordCreateOk(data) {
+      return hasRole('reception') &&
+        belongsToSameEstablishment(data) &&
+        data.get('type', null) == 'patient_record' &&
+        data.get('status', null) == 'active' &&
+        data.get('created_by', null) == request.auth.uid &&
+        data.keys().hasOnly([
+          'recordId', 'patientId', 'patientUid', 'created_by',
+          'establishmentId', 'type', 'status', 'createdAt', 'updatedAt'
+        ]);
+    }
+
     match /medical_records/{recordId} {
       allow read: if canReadMedicalData(resource.data);
       // Correctif (section 4) : la réception ne peut créer QUE le
@@ -805,8 +829,12 @@ service cloud.firestore {
       // inchangée) : la réception ne modifie jamais le contenu clinique
       // après création.
       allow create: if isAdmin() || currentRoleIs('doctor') || currentRoleIs('nurse') ||
-        (hasRole('reception') && belongsToSameEstablishment(request.resource.data) &&
-         request.resource.data.get('type', null) == 'patient_record');
+        receptionMedicalRecordCreateOk(request.resource.data);
+      // Correctif (section 6, point 5) : la réception ne doit jamais
+      // pouvoir MODIFIER le contenu clinique une fois la fiche créée —
+      // seuls doctor/nurse/admin peuvent mettre à jour ce document
+      // (doctorCanRead couvre déjà ces rôles cliniques ; reception n'y
+      // figure jamais).
       allow update, delete: if isAdmin() || doctorCanRead(resource.data);
     }
 
@@ -1325,6 +1353,54 @@ service cloud.firestore {
          (isEmergencyIntake(request.resource.data) ||
           hospitalCanWrite(resolveHospitalId(request.resource.data))));
       allow update, delete: if isAdmin();
+    }
+
+    /* ── Correctif (audit "workflows mobile/desktop", section 7) ──────
+       Bug confirmé : réception et laboratoire n'ont aujourd'hui aucun
+       autre moyen d'identifier un patient que de lire mc_patients — un
+       document CLINIQUE complet (diagnostic, allergies, antécédents…)
+       — alors que leur rôle n'a besoin que d'une identité
+       administrative minimale. patient_directory est un miroir réduit,
+       alimenté dans le MÊME batch atomique que mc_patients/patients/
+       medical_records (voir DB.addPatientAndConfirmAtomic), qui ne
+       contient jamais de contenu clinique — keys().hasOnly() l'impose
+       côté serveur, pas seulement par convention côté client.
+       Limite actuelle (voir rapport final) : la recherche réelle de
+       réception/laboratoire (js/hospital-reception.js,
+       js/hospital-lab.js) continue de lire mc_patients directement —
+       cette collection est disponible en lecture pour ces deux rôles
+       dès maintenant, mais la migration du CODE de recherche vers
+       patient_directory est un chantier distinct et progressif (spec
+       section 7, point 9), pour ne jamais casser la recherche
+       existante avant d'avoir validé la migration des données
+       historiques (script dédié, voir scripts/backfill-patient-
+       directory.mjs). */
+    function patientDirectoryFieldsOk(data) {
+      return data.keys().hasOnly([
+        'patientId', 'firstname', 'lastname', 'dob', 'gender', 'phone',
+        'establishmentId', 'hospital_id', 'administrativeStatus',
+        'createdAt', 'updatedAt'
+      ]);
+    }
+    match /patient_directory/{docId} {
+      allow read: if isAdmin() ||
+        isClinicalHospitalMember(resource.data) ||
+        (hasRole('reception') && belongsToSameEstablishment(resource.data)) ||
+        (hasRole('lab') && belongsToSameEstablishment(resource.data));
+      allow create: if isAdmin() ||
+        (patientDirectoryFieldsOk(request.resource.data) &&
+         ((currentRoleIs('doctor') || currentRoleIs('nurse')) &&
+          (isEmergencyIntake(request.resource.data) ||
+           hospitalCanWrite(resolveHospitalId(request.resource.data)))) ||
+         (patientDirectoryFieldsOk(request.resource.data) &&
+          hasRole('reception') && belongsToSameEstablishment(request.resource.data) &&
+          (isEmergencyIntake(request.resource.data) ||
+           hospitalCanWrite(resolveHospitalId(request.resource.data)))));
+      allow update: if isAdmin() ||
+        (patientDirectoryFieldsOk(request.resource.data) &&
+         (currentRoleIs('doctor') || currentRoleIs('nurse')) &&
+         belongsToSameEstablishment(resource.data));
+      allow delete: if isAdmin();
     }
 
     match /mc_prescriptions/{docId} {

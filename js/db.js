@@ -649,6 +649,26 @@ const DB = (() => {
     return { ...data, id: generatePatientId(data.country_code), firstAccessCode: generateFirstAccessCode(), created_at: new Date().toISOString() };
   }
 
+  // Correctif (audit "workflows mobile/desktop", section 7) : annuaire
+  // non clinique (patient_directory) alimenté dans le MÊME batch que
+  // mc_patients/patients/medical_records — jamais de contenu clinique,
+  // jamais écrit séparément (voir firestore.rules patientDirectoryFieldsOk).
+  function buildPatientDirectoryEntry(p) {
+    return {
+      patientId: p.id,
+      firstname: p.firstname || '',
+      lastname: p.lastname || '',
+      dob: p.dob || p.birthdate || '',
+      gender: p.gender || '',
+      phone: p.phone || '',
+      establishmentId: p.establishmentId || p.hospital_id || '',
+      hospital_id: p.hospital_id || p.establishmentId || '',
+      administrativeStatus: 'active',
+      createdAt: p.created_at,
+      updatedAt: p.created_at,
+    };
+  }
+
   async function addPatientAndConfirmAtomic(data) {
     const p = buildPatientRecord(data);
     const medicalRecord = {
@@ -666,6 +686,7 @@ const DB = (() => {
       ['mc_patients', p.id, p],
       ['patients', p.id, p],
       ['medical_records', p.id, medicalRecord],
+      ['patient_directory', p.id, buildPatientDirectoryEntry(p)],
     ], { label: 'Création patient (réception)' });
     if (result.ok) {
       // Le cache local n'est renseigné qu'APRÈS confirmation réelle du
@@ -1241,7 +1262,7 @@ const DB = (() => {
     pushCloud: _push, deleteCloud: _delete, roleCollection,
     getAccounts, saveAccounts, getUsers, saveUsers, upsertUserProfile,
     getRegistrationRequests, saveRegistrationRequests, createRegistrationRequest,
-    getPatients, savePatients, addPatient, addPatientAndConfirm, buildPatientRecord, addPatientAndConfirmAtomic, updatePatient, deletePatient, getPatientById, searchPatients,
+    getPatients, savePatients, addPatient, addPatientAndConfirm, buildPatientRecord, buildPatientDirectoryEntry, addPatientAndConfirmAtomic, updatePatient, deletePatient, getPatientById, searchPatients,
     accountExistsForPatient, getPatientAccessCode,
     getConsultations, addConsultation, getPatientConsultations, deleteConsultation,
     getPrescriptions, addPrescription, updatePrescription, updatePrescriptionAndConfirm, getPatientPrescriptions,

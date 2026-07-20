@@ -79,9 +79,29 @@ test('addPatientAndConfirmAtomic() confirmé : le patient apparaît dans le cach
   assert.strictEqual(confirmed, true);
   assert.strictEqual(win.DB.getPatients().length, 1);
   assert.strictEqual(win.DB.getPatients()[0].id, patient.id);
-  // Les 3 documents doivent être écrits dans le MÊME batch (un seul commit).
+  // Les 4 documents (dont patient_directory, section 7) doivent être
+  // écrits dans le MÊME batch (un seul commit).
   const cols = firebaseDB._sets.map(s => s.col).sort();
-  assert.deepStrictEqual(cols, ['mc_patients', 'medical_records', 'patients']);
+  assert.deepStrictEqual(cols, ['mc_patients', 'medical_records', 'patient_directory', 'patients']);
+});
+
+test('addPatientAndConfirmAtomic() alimente patient_directory sans AUCUN champ clinique', async () => {
+  const { win, firebaseDB } = setup({ firebaseReady: true, shouldFail: false });
+  await win.DB.addPatientAndConfirmAtomic({
+    firstname: 'Grace', lastname: 'Ilunga', country_code: 'CD',
+    dob: '1990-01-01', gender: 'F', phone: '+243800000000',
+    allergies: 'Pénicilline', chronic: 'Diabète', emergency: 'Frère : +243800000001',
+  });
+  const dirEntry = firebaseDB._sets.find(s => s.col === 'patient_directory');
+  assert.ok(dirEntry, 'un document patient_directory doit être écrit');
+  const keys = Object.keys(dirEntry.data).sort();
+  assert.deepStrictEqual(keys, [
+    'administrativeStatus', 'createdAt', 'dob', 'establishmentId', 'firstname',
+    'gender', 'hospital_id', 'lastname', 'patientId', 'phone', 'updatedAt',
+  ]);
+  assert.strictEqual(dirEntry.data.firstname, 'Grace');
+  assert.ok(!('allergies' in dirEntry.data), 'aucun champ clinique ne doit jamais atteindre patient_directory');
+  assert.ok(!('chronic' in dirEntry.data), 'aucun champ clinique ne doit jamais atteindre patient_directory');
 });
 
 test("addPatientAndConfirmAtomic() échoué (batch rejeté) : AUCUNE trace en cache ni en outbox (plus de 3 écritures non groupées)", async () => {
