@@ -119,6 +119,47 @@ est limité tant que l'app reste une simple coquille WebView.
    `BrowserWindow` Electron est un contexte Web du point de vue de
    Firebase).
 
+## Rapport de vérification du monitoring (section 21, audit "workflows mobile/desktop")
+
+Limite honnête : ni Claude Code ni aucun script de ce dépôt n'a accès à
+la Firebase Console ni aux vraies métriques App Check du projet — ces
+métriques (requêtes valides/invalides/inconnues) ne sont exposées QUE
+dans l'interface graphique de la Console (Firebase Console → App Check
+→ Apps → onglet "Requests metrics"), il n'existe aucune API Admin SDK
+pour les interroger programmatiquement. Ce rapport ne peut donc être
+rempli que MANUELLEMENT, par une personne ayant accès à la Console —
+voici le gabarit à suivre pour que la vérification soit exploitable et
+comparable dans le temps :
+
+```
+Date de vérification : __________
+Projet Firebase       : __________
+Application vérifiée  : ☐ Web (davekbg08-cloud.github.io / medconnect-e81ba.web.app)
+                        ☐ Android (com.mediavision.medconnect)
+Mode actuel           : ☐ Non appliqué (monitoring)   ☐ Appliqué (enforce)
+Période observée      : du __________ au __________ (recommandé : ≥ 3-7 jours)
+
+Requêtes Firestore comptabilisées :
+  - Jeton App Check valide    : _______ (_____ %)
+  - Jeton App Check absent    : _______ (_____ %)
+  - Jeton App Check invalide  : _______ (_____ %)
+
+Décision :
+  ☐ Taux de jetons invalides/absents proche de zéro → activer
+    l'enforcement pour ce service (Cloud Firestore → Enforce), à refaire
+    ensuite pour chaque autre service utilisant App Check.
+  ☐ Taux non négligeable → NE PAS activer l'enforcement ; identifier
+    d'abord la cause (client non à jour, domaine non couvert par
+    APP_CHECK_SITE_KEYS dans js/firebase-config.js, attestation Play
+    Integrity indisponible hors Play Store — voir section "Pour
+    Android" ci-dessus).
+```
+
+Ce gabarit n'a pas encore été rempli dans ce dépôt (aucune vérification
+en Console n'a pu être effectuée depuis cet environnement) — c'est la
+seule action de la section 21 qui reste réellement à faire, et elle ne
+peut être faite que manuellement.
+
 ## Ce qui reste à faire (actions manuelles uniquement, plus de code)
 
 - Suivre la procédure "Déploiement progressif" ci-dessus (mode
