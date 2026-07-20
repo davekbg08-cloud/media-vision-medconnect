@@ -149,6 +149,36 @@ const CloudDB = (() => {
     return snap.exists ? { id: snap.id, ...snap.data() } : null;
   }
 
+  // Correctif (audit "workflows mobile/desktop", section 12) : bug
+  // confirmé — l'attribution d'un lit (confirmation de pré-admission,
+  // création manuelle d'admission) lisait le statut du lit PUIS écrivait
+  // séparément (batch ou deux écritures distinctes), sans jamais
+  // relire l'état du lit AU MOMENT de l'écriture — deux confirmations
+  // concurrentes pouvaient toutes deux lire "libre" avant que l'une ou
+  // l'autre n'écrive, double-réservant le même lit. Une vraie
+  // transaction Firestore (lecture ET écriture atomiques, la seconde
+  // transaction rejouée par le SDK échoue si le document a changé entre
+  // temps) ferme cette fenêtre : le lit est relu DANS la transaction,
+  // et l'écriture échoue entièrement si son statut n'est plus 'free'.
+  async function assignBedTransaction({ bedId, admissionId, admissionData, visitId, visitUpdate }) {
+    requireAuth();
+    const database = db();
+    const bedRef = database.collection('beds').doc(cleanId(bedId));
+    const admissionRef = database.collection('admissions').doc(cleanId(admissionId));
+    const visitRef = visitId ? database.collection('receptionVisits').doc(cleanId(visitId)) : null;
+
+    return database.runTransaction(async (tx) => {
+      const bedSnap = await tx.get(bedRef);
+      if (!bedSnap.exists) { const err = new Error('bed_not_found'); err.code = 'bed_not_found'; throw err; }
+      const bed = bedSnap.data();
+      if (bed.status !== 'free') { const err = new Error('bed_not_free'); err.code = 'bed_not_free'; throw err; }
+      tx.set(admissionRef, admissionData);
+      tx.update(bedRef, { status: 'occupied', updatedAt: now() });
+      if (visitRef) tx.set(visitRef, visitUpdate, { merge: true });
+      return { bed, admissionId };
+    });
+  }
+
   /**
    * Liste les documents d'un établissement. Interroge le champ
    * canonique `establishmentId` ; fallback `hospitalId` pour les
@@ -228,7 +258,7 @@ const CloudDB = (() => {
   }
 
   return {
-    createDoc, updateDoc, deleteDoc, getDoc, listByHospital, listenByHospital,
+    createDoc, updateDoc, deleteDoc, getDoc, assignBedTransaction, listByHospital, listenByHospital,
     getCurrentUserProfile, getActiveHospitalId, getActiveHospital, getMyMembership,
     hasRole, requireRole, subscriptionAllowsWrite, requireWritableSubscription,
     createAuditLog, listAuditLogForTarget, createNotification,

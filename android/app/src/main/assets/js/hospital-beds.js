@@ -253,24 +253,42 @@ const HospitalBedsModule = (() => {
       }
 
       const hospitalId = await CloudDB.getActiveHospitalId();
-      const bed = _beds.find(b => b.id === bedId);
-      if (!bed || bed.status !== 'free') { App.toast('Ce lit n\'est plus disponible.', 'error'); return; }
-
       const admissionId = DB.makeId('ADM');
-      await CloudDB.createDoc('admissions', {
-        establishmentId: hospitalId,
-        hospitalId,
-        patientMc: mc,
-        patientName: name,
-        bedId,
-        ward: bed.ward || '',
-        reason,
-        status: 'admitted',
-        admittedAt: new Date().toISOString(),
-        dischargedAt: '',
-      }, admissionId);
+      const admittedAt = new Date().toISOString();
 
-      await CloudDB.updateDoc('beds', bedId, { status: 'occupied' });
+      // Correctif (audit "workflows mobile/desktop", section 12) : bug
+      // confirmé — le lit était vérifié via le CACHE LOCAL (_beds),
+      // potentiellement périmé, puis écrit en deux appels séparés
+      // (createDoc puis updateDoc, non atomiques) : deux admissions
+      // concurrentes pouvaient double-réserver le même lit. Même
+      // correctif que confirmAdmission() ci-dessus — assignBedTransaction()
+      // relit le lit dans une vraie transaction Firestore.
+      let txResult;
+      try {
+        txResult = await CloudDB.assignBedTransaction({
+          bedId,
+          admissionId,
+          admissionData: {
+            establishmentId: hospitalId, hospitalId,
+            patientMc: mc, patientName: name, bedId,
+            reason, status: 'admitted', admittedAt, dischargedAt: '',
+          },
+        });
+      } catch (txErr) {
+        if (txErr?.code === 'bed_not_free' || txErr?.code === 'bed_not_found') {
+          App.toast('Ce lit n\'est plus disponible.', 'error');
+          return;
+        }
+        console.error('[Beds] saveAdmission — transaction :', txErr);
+        App.toast("L'admission n'a pas pu être confirmée par Firestore. Vérifiez la connexion puis réessayez.", 'error');
+        return;
+      }
+      const bed = txResult.bed;
+      try {
+        await CloudDB.updateDoc('admissions', admissionId, { ward: bed.ward || '' });
+      } catch (wardErr) {
+        console.warn('[Beds] saveAdmission — complément ward :', wardErr);
+      }
       await CloudDB.createAuditLog('patient_admitted', 'admissions', admissionId, { patientMc: mc, bedId });
 
       // Miroir vers mc_admissions — correctif (audit) : sans lui, le
@@ -287,7 +305,7 @@ const HospitalBedsModule = (() => {
           patient_uid: patient?.patient_uid || patient?.patientAuthUid || '',
           bedId, ward: bed.ward || '', reason,
           status: 'admitted',
-          admittedAt: new Date().toISOString(),
+          admittedAt,
           hospital_id: hospitalId, establishmentId: hospitalId,
         });
       }
@@ -333,46 +351,60 @@ const HospitalBedsModule = (() => {
       await CloudDB.requireWritableSubscription('create_consultation');
 
       const hospitalId = await CloudDB.getActiveHospitalId();
-      let bed;
-      try {
-        bed = await CloudDB.getDoc('beds', bedId);
-      } catch (bedErr) {
-        console.error('[Beds] confirmAdmission — lecture du lit :', bedErr);
-        App.toast('Impossible de vérifier la disponibilité du lit. Réessayez.', 'error');
-        return;
-      }
-      if (!bed || bed.status !== 'free') {
-        App.toast("Ce lit n'est plus disponible — choisissez-en un autre.", 'error');
-        openPickAnotherBed(visitId);
-        return;
-      }
-
       const admissionId = DB.makeId('ADM');
       const admittedAt = new Date().toISOString();
-      const batchResult = await DB.pushBatchAndReportDetailed([
-        ['admissions', admissionId, {
-          establishmentId: hospitalId, hospitalId,
-          patientMc: visit.patientMc,
-          patientName: visit.patientName || '',
-          bedId, ward: bed.ward || visit.requestedBedLabel || '',
-          reason: visit.reason || '',
-          doctorUid: visit.doctorUid || '', doctorName: visit.doctorName || '',
-          status: 'admitted', admittedAt, dischargedAt: '',
-          sourceReceptionVisitId: visitId,
-        }],
-        ['beds', bedId, { ...bed, status: 'occupied' }],
-        ['receptionVisits', visitId, {
-          ...visit,
-          status: 'hospitalized', admissionStatus: 'approved',
-          bedId, bedLabel: bed.ward ? `Lit ${bed.number || ''} — ${bed.ward}` : (visit.requestedBedLabel || ''),
-          admissionConfirmedAt: admittedAt,
-          admissionConfirmedByUid: window.Auth?.getUser?.()?.uid || '',
-        }],
-      ], { label: 'Confirmation admission' });
 
-      if (!batchResult.ok) {
+      // Correctif (audit "workflows mobile/desktop", section 12) : bug
+      // confirmé — le lit était lu ICI puis écrit séparément dans le
+      // batch plus bas ; deux confirmations concurrentes pouvaient
+      // toutes deux lire "libre" avant que l'une ou l'autre n'écrive,
+      // double-réservant le même lit. assignBedTransaction() relit le
+      // lit DANS une vraie transaction Firestore et échoue entièrement
+      // si son statut n'est plus 'free' au moment de l'écriture.
+      let txResult;
+      try {
+        txResult = await CloudDB.assignBedTransaction({
+          bedId,
+          admissionId,
+          admissionData: {
+            establishmentId: hospitalId, hospitalId,
+            patientMc: visit.patientMc,
+            patientName: visit.patientName || '',
+            bedId, reason: visit.reason || '',
+            doctorUid: visit.doctorUid || '', doctorName: visit.doctorName || '',
+            status: 'admitted', admittedAt, dischargedAt: '',
+            sourceReceptionVisitId: visitId,
+          },
+          visitId,
+          visitUpdate: {
+            status: 'hospitalized', admissionStatus: 'approved',
+            bedId,
+            admissionConfirmedAt: admittedAt,
+            admissionConfirmedByUid: window.Auth?.getUser?.()?.uid || '',
+          },
+        });
+      } catch (txErr) {
+        if (txErr?.code === 'bed_not_free' || txErr?.code === 'bed_not_found') {
+          App.toast("Ce lit n'est plus disponible — choisissez-en un autre.", 'error');
+          openPickAnotherBed(visitId);
+          return;
+        }
+        console.error('[Beds] confirmAdmission — transaction :', txErr);
         App.toast("L'admission n'a pas pu être confirmée par Firestore. Vérifiez la connexion puis réessayez.", 'error');
         return;
+      }
+      const bed = txResult.bed;
+      // ward/bedLabel dépendent de `bed` (résolu par la transaction) —
+      // complétés après coup, pas dans les données de la transaction
+      // elle-même (admissionData.ward et receptionVisits.bedLabel
+      // avaient besoin de bed.ward, connu seulement après lecture).
+      try {
+        await CloudDB.updateDoc('admissions', admissionId, { ward: bed.ward || visit.requestedBedLabel || '' });
+        await CloudDB.updateDoc('receptionVisits', visitId, {
+          bedLabel: bed.ward ? `Lit ${bed.number || ''} — ${bed.ward}` : (visit.requestedBedLabel || ''),
+        });
+      } catch (wardErr) {
+        console.warn('[Beds] confirmAdmission — complément ward/bedLabel :', wardErr);
       }
 
       // Miroir vers mc_admissions (best-effort, comme saveAdmission()) —
