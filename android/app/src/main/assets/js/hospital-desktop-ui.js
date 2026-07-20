@@ -128,6 +128,7 @@ const HospitalDesktopUI = (() => {
       document.body.appendChild(root);
       document.body.classList.add('hospital-desktop-open');
       startInactivityWatch();
+      refreshMessagesBadge();
       navigate(defaultRouteFor(agent.role));
     } catch (e) {
       console.error('[HospitalDesktopUI] openForSession :', e);
@@ -200,6 +201,7 @@ const HospitalDesktopUI = (() => {
       root.innerHTML = buildShell(user, hospital);
       document.body.appendChild(root);
       document.body.classList.add('hospital-desktop-open');
+      refreshMessagesBadge();
       navigate(defaultRouteFor(user.role));
     } catch (e) {
       console.error('[HospitalDesktopUI] open :', e);
@@ -231,6 +233,7 @@ const HospitalDesktopUI = (() => {
             <button class="hospital-nav-item" data-route="${esc(m.key)}"
               onclick="HospitalDesktopUI.navigate('${esc(m.key)}')">
               <span>${m.icon}</span> ${esc(m.label)}
+              ${m.key === 'messages' ? '<span id="hd-msg-badge" class="badge-dot" style="display:none;margin-left:.4rem"></span>' : ''}
             </button>`).join('')}
         </nav>
         <button class="hospital-sidebar-exit" onclick="${isHospitalSession ? 'HospitalDesktopUI.logoutSession()' : 'HospitalDesktopUI.close()'}">
@@ -247,6 +250,29 @@ const HospitalDesktopUI = (() => {
         <div class="hospital-content" id="hospital-content"></div>
       </div>
     `;
+  }
+
+  // Correctif (audit "workflows mobile/desktop", section 10) : bug
+  // confirmé — aucun indicateur de messages non lus n'existait côté
+  // shell desktop (contrairement au mobile, App.buildNav) : un agent ne
+  // savait jamais qu'un message l'attendait sans ouvrir "Messagerie" par
+  // réflexe. Network.getUnread(role) réutilise EXACTEMENT le même
+  // comptage (par destinataire réel, pas juste par rôle) que le badge
+  // mobile — appelé par Network.refreshUnreadIndicators() après chaque
+  // notify()/markRead()/markUnread() confirmé ou mis en file.
+  function refreshMessagesBadge() {
+    const badge = document.getElementById('hd-msg-badge');
+    if (!badge) return;
+    const user = window.Auth?.getUser?.();
+    const role = user?.role || _sessionRole;
+    const count = (role && window.Network?.getUnread) ? Network.getUnread(role) : 0;
+    if (count > 0) {
+      badge.textContent = count > 99 ? '99+' : String(count);
+      badge.style.display = 'inline-block';
+    } else {
+      badge.textContent = '';
+      badge.style.display = 'none';
+    }
   }
 
   async function navigate(route) {
@@ -532,7 +558,7 @@ const HospitalDesktopUI = (() => {
 
   return {
     open, openForSession, close, navigate, isOpen, logoutSession, requestTransfer,
-    respondAffiliationDesktop, removeAffiliatedStaff,
+    respondAffiliationDesktop, removeAffiliatedStaff, refreshMessagesBadge,
   };
 })();
 

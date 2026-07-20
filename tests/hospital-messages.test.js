@@ -264,12 +264,16 @@ test("openAttachment('prescription', ...) affiche l'ordonnance depuis le cache l
   assert.match(opened.html, /Amoxicilline/);
 });
 
-test('deleteMessage() supprime le message pour l\'agent courant uniquement', () => {
+// Correctif (audit "workflows mobile/desktop", section 10) : deleteMessage()
+// est désormais async (confirmation cloud ciblée + rafraîchissement du
+// badge non-lus, voir js/hospital-messages.js) — le test attend la
+// promesse au lieu de lire un booléen synchrone.
+test('deleteMessage() supprime le message pour l\'agent courant uniquement', async () => {
   const { sandbox, messagesRef } = setup({
     currentUid: 'doc-1',
     messages: [{ mid: 'M3', to_role: 'doctor', to_id: 'doc-1', subject: 'À supprimer', body: '...', from: 'X', date: '2026-07-18' }],
   });
-  const result = sandbox.HospitalMessagesModule.deleteMessage('M3');
+  const result = await sandbox.HospitalMessagesModule.deleteMessage('M3');
   assert.strictEqual(result, true);
   const msg = messagesRef().find(m => m.mid === 'M3');
   assert.ok(msg.deletedFor.includes('doc-1'));

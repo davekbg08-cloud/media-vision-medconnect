@@ -56,7 +56,12 @@
     DB.saveMessages(messages);
   }
 
-  function deleteMessage(mid) {
+  // Correctif (audit "workflows mobile/desktop", section 10) : même bug
+  // que côté desktop (js/hospital-messages.js) — suppression écrite
+  // uniquement via DB.saveMessages() (fire-and-forget), jamais confirmée
+  // pour CE document ni suivie d'un rafraîchissement immédiat du badge
+  // de non-lus.
+  async function deleteMessage(mid) {
     const user = Auth.getUser();
     if (!user) return;
     if (!confirm('Supprimer ce message de votre boîte de réception ?')) return;
@@ -72,8 +77,10 @@
     msg.deletedByUid = user.uid || user.username || user.patient_id || '';
 
     DB.saveMessages(messages);
+    const cloudConfirmed = await window.DB?.pushCloud?.('mc_messages', mid, msg);
+    window.Network?.refreshUnreadIndicators?.();
     App.closeModal?.();
-    App.toast?.('🗑️ Message supprimé');
+    App.toast?.(cloudConfirmed ? '🗑️ Message supprimé' : '🗑️ Message supprimé localement — synchronisation en attente.');
     App.navigateTo?.('inbox');
   }
 

@@ -17,7 +17,18 @@ const Network = (() => {
      toUid/fromUid/fromRole/readStatus/priority/createdAt
      sont les champs propres pour les nouveaux usages.
   ──────────────────────────────────────────────────── */
-  function notify({
+  // Correctif (audit "workflows mobile/desktop", section 10) : bug
+  // confirmé — notify() n'a jamais été asynchrone et ne retournait
+  // aucun résultat : tout appelant (ex. HospitalMessagesModule.send())
+  // affichait "✅ Message envoyé" immédiatement après l'appel, sans
+  // jamais savoir si l'écriture avait réellement atteint Firestore.
+  // notify() est désormais async et retourne un contrat standard
+  // { ok, state: 'confirmed'|'queued', cloudConfirmed, mid } —
+  // DB.pushCloud() (alias de _push) écrit CE seul document et retourne
+  // true/false selon que l'écriture immédiate a abouti ou a dû être
+  // mise en file d'outbox (jamais un échec silencieux, jamais un
+  // second essai aveugle qui dupliquerait le message).
+  async function notify({
     to_role, to_id, type, subject, body, priority, recipientUid, hospitalId,
     // Pièce jointe (chantier "messagerie desktop hôpital") : référence
     // vers une fiche patient ou une ordonnance DÉJÀ existante dans
@@ -30,7 +41,7 @@ const Network = (() => {
   }) {
     const from = window.Auth?.getUser?.();
     const msgs = DB.getMessages();
-    msgs.push({
+    const message = {
       mid:        DB.makeId('N'),
       to_role, to_id, type, subject, body,
       toUid:      to_id || null,
@@ -57,8 +68,11 @@ const Network = (() => {
       hospitalId: hospitalId || null,
       sourceDevice: window.ExchangeBridge?.currentSourceDevice?.() || 'mobile',
       attachedRecordType, attachedRecordId, attachedRecordLabel,
-    });
+    };
+    msgs.push(message);
     DB.saveMessages(msgs);
+    const cloudConfirmed = await DB.pushCloud('mc_messages', message.mid, message);
+    return { ok: true, state: cloudConfirmed ? 'confirmed' : 'queued', cloudConfirmed, mid: message.mid };
   }
 
   function recipientKeys(user) {
@@ -102,21 +116,51 @@ const Network = (() => {
     ).length;
   }
 
-  function markRead(mid) {
+  // Correctif (audit "workflows mobile/desktop", section 10) : bug
+  // confirmé — markRead()/markUnread() ne modifiaient QUE le cache
+  // local (DB.saveMessages, qui ne fait que du fire-and-forget côté
+  // cloud) : le statut lu/non-lu ne se synchronisait jamais de façon
+  // fiable entre appareils. Un push ciblé et attendu (DB.pushCloud, un
+  // seul document) donne un vrai signal confirmed/queued, sans
+  // réécrire toute la liste des messages comme le fait saveMessages().
+  async function markRead(mid) {
     const msgs = DB.getMessages();
     const m    = msgs.find(x => x.mid === mid);
-    if (m) {
-      m.read = true;
-      m.readStatus = 'read';
-      m.readAt = new Date().toISOString();
-      DB.saveMessages(msgs);
-    }
+    if (!m) return { ok: false, state: 'not_found' };
+    m.read = true;
+    m.readStatus = 'read';
+    m.readAt = new Date().toISOString();
+    DB.saveMessages(msgs);
+    const cloudConfirmed = await DB.pushCloud('mc_messages', mid, m);
+    refreshUnreadIndicators();
+    return { ok: true, state: cloudConfirmed ? 'confirmed' : 'queued', cloudConfirmed };
   }
 
-  function markUnread(mid) {
+  async function markUnread(mid) {
     const msgs = DB.getMessages();
     const m    = msgs.find(x => x.mid === mid);
-    if (m) { m.read = false; m.readStatus = 'unread'; m.readAt = null; DB.saveMessages(msgs); }
+    if (!m) return { ok: false, state: 'not_found' };
+    m.read = false; m.readStatus = 'unread'; m.readAt = null;
+    DB.saveMessages(msgs);
+    const cloudConfirmed = await DB.pushCloud('mc_messages', mid, m);
+    refreshUnreadIndicators();
+    return { ok: true, state: cloudConfirmed ? 'confirmed' : 'queued', cloudConfirmed };
+  }
+
+  // Correctif (audit "workflows mobile/desktop", section 10, point 7) :
+  // helper UNIQUE de rafraîchissement des indicateurs de non-lus —
+  // reconstruit le badge mobile (App.buildNav) ET le badge desktop
+  // (HospitalDesktopUI), pour que les deux versions restent cohérentes
+  // après chaque changement (envoi, lecture, suppression), sans que
+  // chaque appelant ait à connaître les deux mécanismes séparément.
+  function refreshUnreadIndicators() {
+    try {
+      const user = window.Auth?.getUser?.();
+      if (user && window.App?.buildNav) App.buildNav(user);
+    } catch (e) { console.warn('[Network] refreshUnreadIndicators (mobile) :', e); }
+    try {
+      window.HospitalDesktopUI?.refreshMessagesBadge?.();
+    } catch (e) { console.warn('[Network] refreshUnreadIndicators (desktop) :', e); }
   }
 
   /* ── INBOX UI — non lus en premier, urgents en tête ─── */
@@ -202,17 +246,38 @@ const Network = (() => {
       </form>`);
   }
 
-  function sendMessage(e) {
+  // Correctif (audit "workflows mobile/desktop", section 10) : bug
+  // confirmé — "✅ Message envoyé" s'affichait immédiatement après
+  // l'appel à notify(), avant même de savoir si l'écriture Firestore
+  // avait abouti. sendMessage() attend désormais le résultat réel et
+  // distingue confirmé/en attente, jamais un faux succès uniforme.
+  let _sendingMobileMessage = false;
+  async function sendMessage(e) {
     e.preventDefault();
-    notify({
-      to_role:  document.getElementById('msg-role').value,
-      type:     'info',
-      priority: document.getElementById('msg-priority').value,
-      subject:  document.getElementById('msg-subject').value,
-      body:     document.getElementById('msg-body').value,
-    });
-    App.closeModal();
-    App.toast('✅ Message envoyé');
+    if (_sendingMobileMessage) return;
+    _sendingMobileMessage = true;
+    const btn = e.target.querySelector('button[type="submit"]');
+    const label = btn?.textContent;
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Envoi en cours…'; }
+    try {
+      const result = await notify({
+        to_role:  document.getElementById('msg-role').value,
+        type:     'info',
+        priority: document.getElementById('msg-priority').value,
+        subject:  document.getElementById('msg-subject').value,
+        body:     document.getElementById('msg-body').value,
+      });
+      App.closeModal();
+      App.toast(result.cloudConfirmed
+        ? '✅ Message envoyé.'
+        : '📶 Message enregistré localement — synchronisation en attente.');
+    } catch (err) {
+      console.error('[Network] sendMessage :', err);
+      App.toast(err?.message || "L'envoi a échoué. Réessayez.", 'error');
+    } finally {
+      _sendingMobileMessage = false;
+      if (btn) { btn.disabled = false; btn.textContent = label; }
+    }
   }
 
   /* ── DOCTOR → PHARMACY (ciblée, plus de diffusion globale) ──
@@ -439,7 +504,7 @@ const Network = (() => {
   }
 
   return {
-    notify, getUnread, markRead, markUnread,
+    notify, getUnread, markRead, markUnread, refreshUnreadIndicators,
     renderInbox, openMsg, openCompose, sendMessage,
     sendPrescriptionToPharmacy, getAvailablePharmacies, setPrescriptionStatus, RX_STATUSES, RX_TRANSITIONS,
     canSendPrescription,

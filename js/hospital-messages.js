@@ -140,7 +140,15 @@ const HospitalMessagesModule = (() => {
     window.DB?.saveMessages?.(messages);
   }
 
-  function deleteMessage(mid) {
+  // Correctif (audit "workflows mobile/desktop", section 10) : bug
+  // confirmé — la suppression écrivait uniquement via
+  // DB.saveMessages() (fire-and-forget, toute la liste) sans jamais
+  // confirmer l'écriture cloud de CE document ni rafraîchir le badge de
+  // non-lus (un message non lu supprimé restait compté jusqu'au
+  // prochain navigate('messages')/reouverture). Push ciblé + confirmé
+  // (même contrat que notify()/markRead()/markUnread()) et
+  // rafraîchissement immédiat des indicateurs.
+  async function deleteMessage(mid) {
     const user = _currentUser();
     if (!user) return false;
     if (!window.confirm('Supprimer ce message de votre boîte de réception ?')) return false;
@@ -156,8 +164,10 @@ const HospitalMessagesModule = (() => {
     msg.deletedByUid = user.uid || user.username || '';
 
     window.DB?.saveMessages?.(messages);
+    const cloudConfirmed = await window.DB?.pushCloud?.('mc_messages', mid, msg);
+    window.Network?.refreshUnreadIndicators?.();
     App.closeModal?.();
-    App.toast?.('🗑️ Message supprimé');
+    App.toast?.(cloudConfirmed ? '🗑️ Message supprimé' : '🗑️ Message supprimé localement — synchronisation en attente.');
     HospitalDesktopUI.navigate('messages');
     return true;
   }
@@ -318,13 +328,21 @@ const HospitalMessagesModule = (() => {
         return false;
       }
 
-      window.Network?.notify?.({
+      // Correctif (audit "workflows mobile/desktop", section 10) : bug
+      // confirmé — "✅ Message envoyé" s'affichait immédiatement après
+      // l'appel, sans jamais attendre la confirmation Firestore réelle
+      // (Network.notify() n'était même pas async jusqu'ici). Le message
+      // affiché distingue désormais confirmé/en attente, jamais un
+      // faux succès uniforme.
+      const result = await window.Network?.notify?.({
         to_role: toRole, to_id: toUid, type: 'info', priority, subject, body, hospitalId,
         attachedRecordType: attachType || null, attachedRecordId, attachedRecordLabel,
       });
 
       App.closeModal?.();
-      App.toast?.(`✅ Message envoyé à ${toName || 'la personne choisie'}`);
+      App.toast?.(result?.cloudConfirmed
+        ? `✅ Message envoyé à ${toName || 'la personne choisie'}`
+        : `📶 Message enregistré localement — synchronisation en attente.`);
       HospitalDesktopUI.navigate('messages');
       return true;
     } catch (e) {
