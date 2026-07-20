@@ -205,12 +205,23 @@ const Auth = (() => {
      ouverte (voir _setRegistrationContext / HospitalAuth.toggleAgentRegister). */
   const AGENT_STRICT_ROLES = ['lab', 'reception'];
 
+  // Correctif (audit "workflows mobile/desktop", section 8) : pharmacist
+  // rejoint lab/reception pour le cas "pharmacie INTERNE à un
+  // établissement" (même flux strict — aucun mode dégradé, affiliation
+  // créée dès l'inscription si ctx.establishmentId est connu). Le cas
+  // "pharmacie indépendante" continue d'utiliser le parcours registre
+  // existant (_registerRole('pharmacist')/_regPharmacist), inchangé —
+  // voir HospitalAuth.choosePharmacistRegisterType (js/hospital-auth.js).
+  const AGENT_STRICT_LABELS = { lab: 'Matricule du laboratoire', reception: "Matricule de l'agent d'accueil", pharmacist: 'Matricule / RCCM de la pharmacie' };
+  const AGENT_STRICT_ACTIONS = { lab: 'Auth._regLab()', reception: 'Auth._regReception()', pharmacist: 'Auth._regPharmacistInternal()' };
+  const AGENT_STRICT_ICONS = { lab: '🧪', reception: '🛎️', pharmacist: '💊' };
+
   function _htmlAgentStrictRegister(role) {
-    const matLabel = role === 'lab' ? 'Matricule du laboratoire' : "Matricule de l'agent d'accueil";
-    const action = role === 'lab' ? 'Auth._regLab()' : 'Auth._regReception()';
+    const matLabel = AGENT_STRICT_LABELS[role] || 'Matricule';
+    const action = AGENT_STRICT_ACTIONS[role] || '';
     return `
       <div class="auth-register-info">
-        ${role === 'lab' ? '🧪' : '🛎️'} <strong>${esc(LABELS[role])}</strong> — inscription réservée à la version desktop hôpital.
+        ${AGENT_STRICT_ICONS[role] || ''} <strong>${esc(LABELS[role])}</strong> — inscription réservée à la version desktop hôpital.
       </div>
       <div class="form-group">
         <label class="inp-lbl">Nom complet *</label>
@@ -246,6 +257,19 @@ const Auth = (() => {
         Votre demande devra être validée par l'administration MedConnect,
         puis votre affiliation à cet établissement devra être confirmée.
       </div>`;
+  }
+
+  // Correctif (audit "workflows mobile/desktop", section 8) : rendu
+  // direct du formulaire strict (lab/reception/pharmacist interne),
+  // utilisé par HospitalAuth.choosePharmacistRegisterType() sans passer
+  // par _registerRole() — ce dernier reste partagé avec l'écran mobile
+  // générique et ne doit jamais changer de comportement pour le
+  // parcours "pharmacie indépendante" existant (_registerRole('pharmacist')).
+  function _showAgentStrictRegisterForm(role) {
+    const err = document.getElementById('reg-err');
+    if (err) err.style.display = 'none';
+    const rf = document.getElementById('register-form');
+    if (rf) rf.innerHTML = _htmlAgentStrictRegister(role);
   }
 
   function _registerRole(role) {
@@ -1217,6 +1241,10 @@ const Auth = (() => {
 
   function _regLab()       { return _regAgentStrict('lab'); }
   function _regReception() { return _regAgentStrict('reception'); }
+  // Correctif (audit "workflows mobile/desktop", section 8) : pharmacie
+  // INTERNE à un établissement — même flux strict que lab/reception
+  // (voir _regAgentStrict), affiliation créée dès l'inscription.
+  function _regPharmacistInternal() { return _regAgentStrict('pharmacist'); }
 
   function _showPending() {
     document.getElementById('register-form').innerHTML = `
@@ -1673,7 +1701,8 @@ const Auth = (() => {
     _setRegistrationContext,
     _tab, _loginRole, _registerRole,
     _doPatient, _createPatientPin, _doDoctor, _doPharmacist, _doNurse,
-    _regDoctor, _regPharmacist, _regNurse, _regLab, _regReception,
+    _regDoctor, _regPharmacist, _regNurse, _regLab, _regReception, _regPharmacistInternal,
+    _showAgentStrictRegisterForm,
     _setupAdmin, _doAdmin,
     _deleteMyAccount, _confirmDeleteMyAccount,
     getRoleIcon, getRoleLabel,

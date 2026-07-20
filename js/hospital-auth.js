@@ -334,7 +334,21 @@ const HospitalAuth = (() => {
   // (Auth._registerRole/_regLab/_regReception : registre optionnel,
   // statut 'pending', validation par l'administrateur identique à celle
   // des autres rôles) — seul l'endroit où le formulaire s'affiche change.
-  const AGENT_SELF_REGISTER_ROLES = ['lab', 'reception'];
+  // Correctif (audit "workflows mobile/desktop", section 8) : bug
+  // confirmé — le sélecteur ci-dessous proposait déjà "Pharmacie", mais
+  // AUCUN lien d'inscription ne s'affichait pour ce rôle (contrairement
+  // à lab/reception) : une pharmacie sans compte existant se retrouvait
+  // dans une impasse (message générique "Matricule ou mot de passe
+  // incorrect"). pharmacist rejoint donc cette liste — utilisée à la
+  // fois pour le lien d'inscription ET pour le pré-contrôle de
+  // connexion (verifyAgent), qui doit chercher un compte pharmacist
+  // "interne" via mc_accounts/users (comme lab/reception), jamais via
+  // le registre professionnel (réservé à la pharmacie indépendante).
+  // Pharmacist a deux parcours distincts à l'inscription (voir
+  // choosePharmacistRegisterType ci-dessous) : interne à CET
+  // établissement (flux strict, comme lab/reception) ou indépendante
+  // (parcours registre existant, inchangé — Auth._registerRole).
+  const AGENT_SELF_REGISTER_ROLES = ['lab', 'reception', 'pharmacist'];
 
   // Établissement complet conservé en mémoire dès le sélecteur de rôle
   // affiché — évite de dépendre uniquement de
@@ -403,7 +417,8 @@ const HospitalAuth = (() => {
     if (AGENT_SELF_REGISTER_ROLES.includes(role)) {
       toggle.style.display = 'block';
       const hint = document.getElementById('ha-agent-register-hint');
-      if (hint) hint.textContent = `Pas encore de compte ${role === 'lab' ? 'laboratoire' : 'réception'} ?`;
+      const hints = { lab: 'laboratoire', reception: 'réception', pharmacist: 'pharmacie' };
+      if (hint) hint.textContent = `Pas encore de compte ${hints[role] || role} ?`;
     } else {
       toggle.style.display = 'none';
     }
@@ -426,6 +441,14 @@ const HospitalAuth = (() => {
     const opening = wrap.style.display === 'none';
     wrap.style.display = opening ? 'block' : 'none';
     if (opening) {
+      // Correctif (section 8) : pour pharmacist, propose d'abord le
+      // choix interne/indépendante — la demande d'affiliation
+      // automatique n'a de sens QUE pour une pharmacie interne (voir
+      // choosePharmacistRegisterType ci-dessous).
+      if (role === 'pharmacist') {
+        _renderPharmacistRegisterChoice(establishmentId);
+        return;
+      }
       // Correctif : utilise l'établissement COMPLET déjà en mémoire
       // (posé par renderRolePicker) au lieu de dépendre uniquement de
       // HospitalsRegistry.getHospitalById(establishmentId), qui peut
@@ -441,6 +464,48 @@ const HospitalAuth = (() => {
       window.Auth?._registerRole?.(role);
     } else {
       window.Auth?._setRegistrationContext?.(null);
+    }
+  }
+
+  // Correctif (audit "workflows mobile/desktop", section 8) : choix
+  // explicite avant l'inscription pharmacie — jamais de création
+  // automatique de hospitalMembers/affiliation pour une pharmacie
+  // indépendante (spec point 5).
+  function _renderPharmacistRegisterChoice(establishmentId) {
+    const rf = document.getElementById('register-form');
+    if (!rf) return;
+    rf.innerHTML = `
+      <p style="font-size:.85rem;margin-bottom:.6rem">Quel type de pharmacie souhaitez-vous inscrire ?</p>
+      <button type="button" class="btn btn-primary btn-full" style="margin-bottom:.5rem"
+        onclick="HospitalAuth.choosePharmacistRegisterType('internal', '${esc(establishmentId || '')}')">
+        🏥 Service pharmacie de cet établissement
+      </button>
+      <button type="button" class="btn btn-ghost btn-full"
+        onclick="HospitalAuth.choosePharmacistRegisterType('independent', '${esc(establishmentId || '')}')">
+        🏪 Pharmacie indépendante
+      </button>`;
+  }
+
+  function choosePharmacistRegisterType(type, establishmentId) {
+    if (type === 'internal') {
+      // Pharmacie interne : même flux strict que lab/reception —
+      // establishmentId obligatoire, affiliation créée dès l'inscription.
+      const est = _activeEstablishment ||
+        (establishmentId ? window.HospitalsRegistry?.getHospitalById?.(establishmentId) : null);
+      window.Auth?._setRegistrationContext?.(establishmentId ? {
+        establishmentId,
+        establishmentName: est?.name || '',
+        officialId: est?.officialId || '',
+        establishment: est || null,
+      } : null);
+      window.Auth?._showAgentStrictRegisterForm?.('pharmacist');
+    } else {
+      // Pharmacie indépendante : parcours registre existant, inchangé —
+      // jamais de contexte d'établissement (pas de hospitalMembers créé
+      // automatiquement, conformément au parcours pharmacie indépendant
+      // déjà en place).
+      window.Auth?._setRegistrationContext?.(null);
+      window.Auth?._registerRole?.('pharmacist');
     }
   }
 
@@ -568,7 +633,7 @@ const HospitalAuth = (() => {
       return;
     }
     if (!precheck && precheckAttempted) {
-      const roleLabel = role === 'lab' ? 'Laboratoire' : 'Réception';
+      const roleLabel = { lab: 'Laboratoire', reception: 'Réception', pharmacist: 'Pharmacie' }[role] || role;
       msg.innerHTML = `<div class="auth-register-info" style="border-color:var(--danger)">Aucun compte ${esc(roleLabel)} ne correspond à ce matricule.</div>`;
       return;
     }
@@ -917,7 +982,7 @@ const HospitalAuth = (() => {
 
   return {
     renderScreen, showTab, login, register, enter, verifyAgent, logout, getSession, hashPassword,
-    onAgentRoleChange, toggleAgentRegister, isAgentLoginActive, cancelVerificationAndGoBack,
+    onAgentRoleChange, toggleAgentRegister, choosePharmacistRegisterType, isAgentLoginActive, cancelVerificationAndGoBack,
     isSessionExpired, isSessionConsistent, invalidateSession,
     SESSION_MAX_AGE_MS, INACTIVITY_TIMEOUT_MS,
   };
