@@ -37,6 +37,7 @@ const ASSETS = [
   './js/hospital-emergency.js', './js/hospital-maternity.js',
   './js/medical-record-desktop.js',
   './js/button-feedback.js',
+  './js/action-feedback.js',
   './js/i18n.js', './js/db.js', './js/currency.js',
   './js/access_control.js', './js/haptic_feedback.js',
   './js/transfer_service.js', './js/network.js', './js/inbox_message_controls.js', './js/transfer_ui_patch.js',

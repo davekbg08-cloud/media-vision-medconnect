@@ -282,9 +282,13 @@ const HospitalMessagesModule = (() => {
     }
   }
 
-  let _sending = false;
+  // Correctif (audit "workflows mobile/desktop", section 14) : le verrou
+  // de réentrance + l'état du bouton + le toast confirmé/en attente/
+  // échec étaient codés à la main ici (comme dans js/network.js
+  // sendMessage()) — remplacés par le helper commun ActionFeedback
+  // (js/action-feedback.js), sans changer le comportement observable
+  // (mêmes messages, même distinction confirmé/en attente).
   async function send() {
-    if (_sending) return false;
     const btn = document.getElementById('hm-send-btn');
     const toSelect = document.getElementById('hm-to');
     const selected = toSelect?.selectedOptions?.[0];
@@ -315,44 +319,26 @@ const HospitalMessagesModule = (() => {
       attachedRecordLabel = `Ordonnance du ${String(rx?.date || '').slice(0,10)}`;
     }
 
-    _sending = true;
-    if (btn) { btn.disabled = true; if (btn.dataset) btn.dataset.processing = 'true'; btn.textContent = '⏳ Envoi en cours…'; }
-    try {
+    const result = await window.ActionFeedback.withAction(btn, {
+      startLabel: '⏳ Envoi en cours…',
+      confirmedMsg: `✅ Message envoyé à ${toName || 'la personne choisie'}`,
+      queuedMsg: '📶 Message enregistré localement — synchronisation en attente.',
+      failedMsg: "Impossible d'envoyer le message.",
+    }, async () => {
       const hospitalId = await window.CloudDB?.getActiveHospitalId?.();
-      try {
-        await window.CloudDB?.requireWritableSubscription?.(
-          priority === 'urgent' ? 'send_message_urgent' : 'send_message_professional'
-        );
-      } catch (err) {
-        App.toast?.(err.message || 'Abonnement expiré — action bloquée.', 'error');
-        return false;
-      }
-
-      // Correctif (audit "workflows mobile/desktop", section 10) : bug
-      // confirmé — "✅ Message envoyé" s'affichait immédiatement après
-      // l'appel, sans jamais attendre la confirmation Firestore réelle
-      // (Network.notify() n'était même pas async jusqu'ici). Le message
-      // affiché distingue désormais confirmé/en attente, jamais un
-      // faux succès uniforme.
-      const result = await window.Network?.notify?.({
+      await window.CloudDB?.requireWritableSubscription?.(
+        priority === 'urgent' ? 'send_message_urgent' : 'send_message_professional'
+      );
+      return window.Network?.notify?.({
         to_role: toRole, to_id: toUid, type: 'info', priority, subject, body, hospitalId,
         attachedRecordType: attachType || null, attachedRecordId, attachedRecordLabel,
       });
+    }).catch(() => null); // déjà annoncé par ActionFeedback.failed() ; on ne quitte juste pas la modale.
 
-      App.closeModal?.();
-      App.toast?.(result?.cloudConfirmed
-        ? `✅ Message envoyé à ${toName || 'la personne choisie'}`
-        : `📶 Message enregistré localement — synchronisation en attente.`);
-      HospitalDesktopUI.navigate('messages');
-      return true;
-    } catch (e) {
-      console.error('[HospitalMessages] send :', e);
-      App.toast?.(e.message || "Impossible d'envoyer le message.", 'error');
-      return false;
-    } finally {
-      _sending = false;
-      if (btn) { btn.disabled = false; if (btn.dataset) delete btn.dataset.processing; btn.textContent = '📤 Envoyer'; }
-    }
+    if (!result?.ok) return false;
+    App.closeModal?.();
+    HospitalDesktopUI.navigate('messages');
+    return true;
   }
 
   return {

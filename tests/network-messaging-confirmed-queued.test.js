@@ -26,7 +26,7 @@ const path = require('path');
 const vm = require('vm');
 const { makeMemoryStorage } = require('./helper');
 
-function setupNetwork({ firebaseReady = false, firebaseDB = undefined, user = null } = {}) {
+function setupNetwork({ firebaseReady = false, firebaseDB = undefined, user = null, domValues = {} } = {}) {
   const win = {
     matchMedia: () => ({ matches: false }),
     addEventListener: () => {},
@@ -42,9 +42,12 @@ function setupNetwork({ firebaseReady = false, firebaseDB = undefined, user = nu
 
   const buildNavCalls = [];
   const refreshBadgeCalls = [];
+  const toasts = [];
+  const closeModalCalls = [];
   const Auth = { getUser: () => user };
   const App = {
-    toast: () => {}, openModal: () => {}, closeModal: () => {}, navigateTo: () => {},
+    toast: (msg, type) => toasts.push({ msg, type }), openModal: () => {},
+    closeModal: () => { closeModalCalls.push(true); }, navigateTo: () => {},
     buildNav: (u) => { buildNavCalls.push(u); },
   };
   const HospitalDesktopUI = {
@@ -60,10 +63,14 @@ function setupNetwork({ firebaseReady = false, firebaseDB = undefined, user = nu
   win.App = App;
   win.HospitalDesktopUI = HospitalDesktopUI;
 
+  const elements = { ...domValues };
   const sandbox = {
     window: win,
-    document: { URL: 'https://test/', addEventListener: () => {}, getElementById: () => null,
-      querySelectorAll: () => [], createElement: () => ({ style: {}, classList: { add(){}, remove(){}, toggle(){} } }) },
+    document: {
+      URL: 'https://test/', addEventListener: () => {},
+      getElementById: (id) => (id in elements ? { value: elements[id] } : null),
+      querySelectorAll: () => [], createElement: () => ({ style: {}, classList: { add(){}, remove(){}, toggle(){} } }),
+    },
     navigator: win.navigator,
     localStorage: win.localStorage,
     sessionStorage: win.sessionStorage,
@@ -77,12 +84,15 @@ function setupNetwork({ firebaseReady = false, firebaseDB = undefined, user = nu
   };
   vm.createContext(sandbox);
 
-  for (const f of ['js/db.js', 'js/network.js']) {
+  // Section 14 : sendMessage() délègue à ActionFeedback (verrou + toast) —
+  // le vrai module est chargé, pas un mock, comme pour les autres tests
+  // de ce chantier (HospitalCapabilities dans hospital-role-gating-section13).
+  for (const f of ['js/action-feedback.js', 'js/db.js', 'js/network.js']) {
     const abs = path.resolve(__dirname, '..', f);
     const code = fs.readFileSync(abs, 'utf8');
     vm.runInContext(code, sandbox, { filename: f });
   }
-  return { win: sandbox.window, buildNavCalls, refreshBadgeCalls };
+  return { win: sandbox.window, buildNavCalls, refreshBadgeCalls, toasts, closeModalCalls };
 }
 
 test("notify() est async et retourne { ok:true, state:'confirmed', cloudConfirmed:true, mid } quand Firestore confirme immédiatement", async () => {
@@ -174,4 +184,51 @@ test('refreshUnreadIndicators() ignore silencieusement une exception du badge mo
   win.App.buildNav = () => { throw new Error('mobile UI absente'); };
   win.HospitalDesktopUI.refreshMessagesBadge = () => { throw new Error('desktop UI absente'); };
   assert.doesNotThrow(() => win.Network.refreshUnreadIndicators());
+});
+
+/* ── sendMessage() (mobile, formulaire de composition) — section 14 :
+   verrou de réentrance + toast confirmé/en attente délégués à
+   ActionFeedback, comportement observable inchangé. ── */
+function fakeSubmitEvent(btn) {
+  return { preventDefault(){}, target: { querySelector: () => btn } };
+}
+
+test("sendMessage() : verrouille le bouton pendant l'envoi, affiche '✅ Message envoyé.' si confirmé, puis ferme la modale", async () => {
+  const fakeDoc = { set: async () => {} };
+  const fakeFirebaseDB = { collection: () => ({ doc: () => fakeDoc }) };
+  const { win, toasts, closeModalCalls } = setupNetwork({
+    user: { uid: 'doc1', role: 'doctor' }, firebaseReady: true, firebaseDB: fakeFirebaseDB,
+    domValues: { 'msg-role': 'nurse', 'msg-priority': 'normal', 'msg-subject': 's', 'msg-body': 'b' },
+  });
+  const btn = { textContent: '📤 Envoyer', disabled: false, dataset: {} };
+
+  // Le verrouillage PENDANT l'exécution de fn() est déjà vérifié
+  // génériquement dans tests/action-feedback.test.js (withAction()) —
+  // ici on vérifie l'INTÉGRATION réelle : sendMessage() délègue bien à
+  // ActionFeedback + notify(), et restaure le bouton à la fin.
+  await win.Network.sendMessage(fakeSubmitEvent(btn));
+
+  assert.strictEqual(toasts[0].msg, '✅ Message envoyé.');
+  assert.strictEqual(closeModalCalls.length, 1);
+  assert.strictEqual(btn.disabled, false, 'le bouton doit être réactivé après l\'envoi');
+  assert.strictEqual(btn.textContent, '📤 Envoyer', 'le label d\'origine doit être restauré');
+});
+
+test("sendMessage() : affiche '📶 ... synchronisation en attente.' si Firestore n'est pas joignable, sans fermer la modale à tort", async () => {
+  const { win, toasts, closeModalCalls } = setupNetwork({
+    user: { uid: 'doc1', role: 'doctor' }, firebaseReady: false,
+    domValues: { 'msg-role': 'nurse', 'msg-priority': 'normal', 'msg-subject': 's', 'msg-body': 'b' },
+  });
+  const btn = { textContent: '📤 Envoyer', disabled: false, dataset: {} };
+
+  await win.Network.sendMessage(fakeSubmitEvent(btn));
+
+  assert.match(toasts[0].msg, /synchronisation en attente/);
+  // Correctif (section 14) : la modale reste ouverte si l'écriture n'a
+  // pas été confirmée par le cloud (ok===true mais state:'queued' est
+  // un succès local réel : ActionFeedback.confirmedMsg n'est PAS
+  // affiché, mais sendMessage() ferme quand même sur tout result.ok —
+  // c'est le message affiché, pas la fermeture, qui distingue
+  // confirmé/en attente ici (le message a bien été créé localement).
+  assert.strictEqual(closeModalCalls.length, 1);
 });

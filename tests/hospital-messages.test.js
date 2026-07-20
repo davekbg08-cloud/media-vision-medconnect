@@ -63,9 +63,14 @@ function setup({
     getPrescriptions: () => prescriptions,
   };
   sandbox.Network = {
-    notify: (payload) => {
+    // Section 10 : Network.notify() réel est async et retourne
+    // { ok, state:'confirmed'|'queued', cloudConfirmed, mid } — le mock
+    // reproduit ce contrat (send() en dépend désormais pour son propre
+    // retour, voir section 14/ActionFeedback).
+    notify: async (payload) => {
+      const mid = `MSG-${localMessages.length + 1}`;
       localMessages.push({
-        mid: `MSG-${localMessages.length + 1}`,
+        mid,
         to_role: payload.to_role, to_id: payload.to_id, type: payload.type,
         subject: payload.subject, body: payload.body, priority: payload.priority,
         from: 'Test Sender', fromUid: currentUid,
@@ -75,6 +80,7 @@ function setup({
         attachedRecordId: payload.attachedRecordId || null,
         attachedRecordLabel: payload.attachedRecordLabel || null,
       });
+      return { ok: true, state: 'confirmed', cloudConfirmed: true, mid };
     },
     markRead: (mid) => {
       const m = localMessages.find(x => x.mid === mid);
@@ -84,6 +90,10 @@ function setup({
   sandbox.document = { getElementById: getEl, confirm: () => true };
 
   vm.createContext(sandbox);
+  // Section 14 : send() délègue désormais à ActionFeedback (verrou +
+  // toast confirmé/en attente/échec) — on charge le VRAI module, comme
+  // HospitalCapabilities ailleurs, plutôt que de le mocker.
+  vm.runInContext(fs.readFileSync(path.resolve(__dirname, '..', 'js/action-feedback.js'), 'utf8'), sandbox, { filename: 'js/action-feedback.js' });
   const code = fs.readFileSync(path.resolve(__dirname, '..', 'js/hospital-messages.js'), 'utf8');
   vm.runInContext(code, sandbox, { filename: 'js/hospital-messages.js' });
   return { sandbox, toasts, opened, getEl, messagesRef: () => localMessages };

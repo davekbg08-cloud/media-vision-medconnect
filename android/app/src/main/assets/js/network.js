@@ -251,33 +251,26 @@ const Network = (() => {
   // l'appel à notify(), avant même de savoir si l'écriture Firestore
   // avait abouti. sendMessage() attend désormais le résultat réel et
   // distingue confirmé/en attente, jamais un faux succès uniforme.
-  let _sendingMobileMessage = false;
+  // Correctif (section 14) : verrou de réentrance + état du bouton +
+  // toast délégués à ActionFeedback (js/action-feedback.js, même
+  // helper que HospitalMessagesModule.send() côté desktop) — plus de
+  // logique dupliquée, comportement observable inchangé.
   async function sendMessage(e) {
     e.preventDefault();
-    if (_sendingMobileMessage) return;
-    _sendingMobileMessage = true;
     const btn = e.target.querySelector('button[type="submit"]');
-    const label = btn?.textContent;
-    if (btn) { btn.disabled = true; btn.textContent = '⏳ Envoi en cours…'; }
-    try {
-      const result = await notify({
-        to_role:  document.getElementById('msg-role').value,
-        type:     'info',
-        priority: document.getElementById('msg-priority').value,
-        subject:  document.getElementById('msg-subject').value,
-        body:     document.getElementById('msg-body').value,
-      });
-      App.closeModal();
-      App.toast(result.cloudConfirmed
-        ? '✅ Message envoyé.'
-        : '📶 Message enregistré localement — synchronisation en attente.');
-    } catch (err) {
-      console.error('[Network] sendMessage :', err);
-      App.toast(err?.message || "L'envoi a échoué. Réessayez.", 'error');
-    } finally {
-      _sendingMobileMessage = false;
-      if (btn) { btn.disabled = false; btn.textContent = label; }
-    }
+    const result = await window.ActionFeedback.withAction(btn, {
+      startLabel: '⏳ Envoi en cours…',
+      confirmedMsg: '✅ Message envoyé.',
+      queuedMsg: '📶 Message enregistré localement — synchronisation en attente.',
+      failedMsg: "L'envoi a échoué. Réessayez.",
+    }, () => notify({
+      to_role:  document.getElementById('msg-role').value,
+      type:     'info',
+      priority: document.getElementById('msg-priority').value,
+      subject:  document.getElementById('msg-subject').value,
+      body:     document.getElementById('msg-body').value,
+    })).catch(() => null); // déjà annoncé par ActionFeedback.failed().
+    if (result?.ok) App.closeModal();
   }
 
   /* ── DOCTOR → PHARMACY (ciblée, plus de diffusion globale) ──
