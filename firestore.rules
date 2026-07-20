@@ -1855,8 +1855,20 @@ service cloud.firestore {
       // js/emergency-transfer.js createEmergencyTransfer, champ
       // existant — aucun nouveau champ requis côté client) doit
       // correspondre à l'auteur réel de l'écriture.
+      // Correctif (audit "workflows mobile/desktop", section 13) : bug
+      // confirmé — le helper canDecideTransfer() (ligne 99) existait
+      // déjà mais n'était jamais utilisé ici. Un simple membre de
+      // l'hôpital source (infirmier, réception, laborantin, pharmacien —
+      // AUCUN n'a la capacité 'decide_transfer' côté client,
+      // js/hospital-capabilities.js) pouvait donc, en posant
+      // requestingDoctorId à son propre uid, créer un vrai transfert
+      // d'urgence via une écriture Firestore directe, même si le bouton
+      // JS restait cohérent avec sa capacité. Seul le rôle qui décide
+      // réellement d'un transfert (médecin, ou admin hôpital) peut
+      // désormais créer ce document.
       allow create: if isAdmin() ||
         (signedIn() &&
+         canDecideTransfer() &&
          isHospitalMember(request.resource.data.get('fromHospitalId', null)) &&
          request.resource.data.get('requestingDoctorId', null) == request.auth.uid &&
          hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));

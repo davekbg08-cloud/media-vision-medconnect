@@ -362,9 +362,25 @@ const HospitalDesktopUI = (() => {
         <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.5rem">
           ${HospitalCapabilities.can(HospitalPermissions.getCurrentRole(), 'create_patient') ? `
           <button class="btn btn-primary btn-sm" onclick="HospitalPortal.openNewPatient?.()">+ Nouveau patient</button>` : ''}
-          <button class="btn btn-primary btn-sm" onclick="HospitalDesktopUI.navigate('beds')">🛏️ Admissions</button>
-          <button class="btn btn-primary btn-sm" onclick="HospitalDesktopUI.navigate('lab')">🧪 Laboratoire</button>
-          <button class="btn btn-ghost btn-sm" onclick="HospitalDesktopUI.navigate('patients')">👥 Patients (application)</button>
+          ${(() => {
+            // Correctif (audit "workflows mobile/desktop", section 13) :
+            // ces raccourcis restaient affichés à TOUS les rôles atteignant
+            // le tableau de bord (ROUTES.dashboard inclut lab/reception/
+            // pharmacist), même quand la route ciblée leur est fermée
+            // (ROUTES.beds/lab/patients) — navigate() refusait proprement
+            // (jamais un faux succès) mais le clic n'aboutissait jamais à
+            // rien d'utile pour ces rôles. Masqués désormais selon
+            // l'accès réel à la route, pas seulement au tableau de bord.
+            const role = HospitalPermissions.getCurrentRole();
+            const items = [];
+            if (HospitalPermissions.canAccess(role, 'beds'))
+              items.push(`<button class="btn btn-primary btn-sm" onclick="HospitalDesktopUI.navigate('beds')">🛏️ Admissions</button>`);
+            if (HospitalPermissions.canAccess(role, 'lab'))
+              items.push(`<button class="btn btn-primary btn-sm" onclick="HospitalDesktopUI.navigate('lab')">🧪 Laboratoire</button>`);
+            if (HospitalPermissions.canAccess(role, 'patients'))
+              items.push(`<button class="btn btn-ghost btn-sm" onclick="HospitalDesktopUI.navigate('patients')">👥 Patients (application)</button>`);
+            return items.join('');
+          })()}
         </div>
       </div>
     `;
@@ -403,7 +419,7 @@ const HospitalDesktopUI = (() => {
      la capacité 'decide_transfer'. Contrôle au MOMENT de l'action
      (pas juste à l'affichage) : masquer un bouton ne suffit pas. */
   function requestTransfer(patientId) {
-    if (!HospitalCapabilities.require(_sessionRole, 'decide_transfer')) return;
+    if (!HospitalCapabilities.require(HospitalPermissions.getCurrentRole(), 'decide_transfer')) return;
     window.HospitalPortal?.openEmergencyTransfer?.(patientId);
   }
 
@@ -456,7 +472,7 @@ const HospitalDesktopUI = (() => {
                   <p class="muted">${esc(p.gender||'')}${p.birthdate ? ' · né(e) le '+esc(p.birthdate) : ''}</p>
                   <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.4rem">
                     <button class="btn btn-ghost btn-sm" onclick="HospitalPortal.openDetail?.('${esc(p.id)}')">📋 Dossier</button>
-                    ${HospitalCapabilities.can(_sessionRole, 'decide_transfer') ? `
+                    ${HospitalCapabilities.can(HospitalPermissions.getCurrentRole(), 'decide_transfer') ? `
                     <button class="btn btn-ghost btn-sm" style="color:var(--danger)"
                       onclick="HospitalDesktopUI.requestTransfer('${esc(p.id)}')">🚑 Transférer avec le dossier</button>` : ''}
                   </div>

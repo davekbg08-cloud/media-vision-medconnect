@@ -181,14 +181,25 @@ const HospitalReceptionModule = (() => {
       freeBeds = beds.filter(b => b.status === 'free');
     } catch (_) {}
 
+    // Correctif (audit "workflows mobile/desktop", section 13) : bug
+    // confirmé — l'infirmier(ère) a accès à ce module (ROUTES.reception)
+    // mais n'a PAS 'create_patient' (MATRIX, js/hospital-capabilities.js) ;
+    // seul saveIntake() le vérifiait, APRÈS saisie complète (identité,
+    // motif, médecin, lit). Le mode "🆕 Nouveau patient" — inutile pour
+    // un rôle qui ne pourrait de toute façon jamais l'utiliser — est
+    // désormais masqué, forçant le mode "Patient existant".
+    const canCreatePatient = window.HospitalCapabilities?.can?.(
+      window.HospitalAuth?.getSession?.()?.role, 'create_patient');
     _rcMode = 'existing';
     App.openModal('🛎️ Enregistrer une arrivée', `
       <div class="form-group">
         <label>Identification du patient *</label>
+        ${canCreatePatient ? `
         <div style="display:flex;gap:.4rem">
           <button type="button" class="btn btn-sm btn-primary" id="rc-mode-existing" onclick="HospitalReceptionModule.setMode('existing')">🔎 Patient existant</button>
           <button type="button" class="btn btn-sm btn-ghost" id="rc-mode-new" onclick="HospitalReceptionModule.setMode('new')">🆕 Nouveau patient</button>
-        </div>
+        </div>` : `
+        <p class="muted">Votre rôle ne permet pas d'enregistrer un nouveau patient ici : recherchez un patient déjà connu par son numéro MC.</p>`}
       </div>
 
       <div id="rc-panel-existing">
@@ -200,6 +211,7 @@ const HospitalReceptionModule = (() => {
         </div>
       </div>
 
+      ${canCreatePatient ? `
       <div id="rc-panel-new" style="display:none">
         <div class="form-group"><label>Prénom *</label><input id="rc-fn"></div>
         <div class="form-group"><label>Nom *</label><input id="rc-ln"></div>
@@ -208,7 +220,7 @@ const HospitalReceptionModule = (() => {
           <select id="rc-gender"><option value="">—</option><option value="M">Masculin</option><option value="F">Féminin</option></select>
         </div>
         <div class="form-group"><label>Téléphone</label><input id="rc-phone"></div>
-      </div>
+      </div>` : ''}
 
       <div class="form-group">
         <label>Motif de visite</label>

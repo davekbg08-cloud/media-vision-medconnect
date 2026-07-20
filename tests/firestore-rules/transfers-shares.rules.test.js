@@ -13,6 +13,18 @@ async function seedMember(env, hospitalId, uid) {
   });
 }
 
+// Correctif (audit "workflows mobile/desktop", section 13) :
+// canDecideTransfer() (firestore.rules) exige désormais un rôle réel
+// (doctor/admin_hospital), pas seulement l'appartenance à
+// hospitalMembers — seedRole() reflète l'état d'un compte réellement
+// approuvé (même convention que establishment-isolation.rules.test.js).
+async function seedRole(env, uid, role) {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, 'users', uid), { uid, role, status: 'approved' });
+  });
+}
+
 async function seedTransfer(env, id, data) {
   await env.withSecurityRulesDisabled(async (ctx) => {
     const db = ctx.firestore();
@@ -126,10 +138,11 @@ test("emergencyTransfers : un tiers non membre de fromHospitalId ne peut pas cr�
   }));
 });
 
-test("emergencyTransfers : un membre réel de fromHospitalId peut créer un transfert avec son propre uid comme requestingDoctorId", async () => {
+test("emergencyTransfers : un membre réel de fromHospitalId, MÉDECIN, peut créer un transfert avec son propre uid comme requestingDoctorId", async () => {
   const env = await getTestEnv();
   await clearAll(env);
   await seedMember(env, 'HOSP-SRC-CREATE2', 'doctor-create-1');
+  await seedRole(env, 'doctor-create-1', 'doctor');
   const doctor = env.authenticatedContext('doctor-create-1').firestore();
   await assertSucceeds(setDoc(doc(doctor, 'emergencyTransfers', 'T-OK-1'), {
     fromHospitalId: 'HOSP-SRC-CREATE2', toHospitalId: 'HOSP-DST-CREATE2', patientId: 'MC-OK-1',
@@ -137,10 +150,44 @@ test("emergencyTransfers : un membre réel de fromHospitalId peut créer un tran
   }));
 });
 
+// Correctif (audit "workflows mobile/desktop", section 13, P0/P1) : bug
+// confirmé — canDecideTransfer() (firestore.rules) existait déjà mais
+// n'était jamais utilisé dans la règle create d'emergencyTransfers.
+// N'importe quel membre de l'hôpital source (infirmier, réception,
+// laborantin, pharmacien — AUCUN n'a la capacité 'decide_transfer' côté
+// client, js/hospital-capabilities.js) pouvait donc créer un vrai
+// transfert d'urgence en posant requestingDoctorId à son propre uid,
+// même via une écriture Firestore directe (bouton JS non représentatif
+// de la sécurité réelle).
+test("emergencyTransfers : un membre de fromHospitalId SANS la capacité 'decide_transfer' (infirmier) est refusé, même en son propre nom", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await seedMember(env, 'HOSP-SRC-NURSE1', 'nurse-transfer-1');
+  await seedRole(env, 'nurse-transfer-1', 'nurse');
+  const nurse = env.authenticatedContext('nurse-transfer-1').firestore();
+  await assertFails(setDoc(doc(nurse, 'emergencyTransfers', 'T-NURSE-1'), {
+    fromHospitalId: 'HOSP-SRC-NURSE1', toHospitalId: 'HOSP-DST-NURSE1', patientId: 'MC-NURSE-1',
+    requestingDoctorId: 'nurse-transfer-1', status: 'requested', emergencyPacket: {},
+  }));
+});
+
+test("emergencyTransfers : un membre de fromHospitalId, admin_hospital, peut aussi créer un transfert (canDecideTransfer)", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await seedMember(env, 'HOSP-SRC-ADMINH1', 'adminh-transfer-1');
+  await seedRole(env, 'adminh-transfer-1', 'admin_hospital');
+  const adminH = env.authenticatedContext('adminh-transfer-1').firestore();
+  await assertSucceeds(setDoc(doc(adminH, 'emergencyTransfers', 'T-ADMINH-1'), {
+    fromHospitalId: 'HOSP-SRC-ADMINH1', toHospitalId: 'HOSP-DST-ADMINH1', patientId: 'MC-ADMINH-1',
+    requestingDoctorId: 'adminh-transfer-1', status: 'requested', emergencyPacket: {},
+  }));
+});
+
 test("emergencyTransfers : un membre de fromHospitalId ne peut pas créer un transfert au nom d'un AUTRE utilisateur (requestingDoctorId usurpé)", async () => {
   const env = await getTestEnv();
   await clearAll(env);
   await seedMember(env, 'HOSP-SRC-CREATE3', 'doctor-create-2');
+  await seedRole(env, 'doctor-create-2', 'doctor');
   const doctor = env.authenticatedContext('doctor-create-2').firestore();
   await assertFails(setDoc(doc(doctor, 'emergencyTransfers', 'T-SPOOF-1'), {
     fromHospitalId: 'HOSP-SRC-CREATE3', toHospitalId: 'HOSP-DST-CREATE3', patientId: 'MC-SPOOF-1',

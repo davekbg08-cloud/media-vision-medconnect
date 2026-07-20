@@ -53,7 +53,12 @@ function setup({ mcPatients = {} } = {}) {
   sandbox.console = console;
 
   sandbox.HospitalPermissions = { requireRoute: () => true };
-  sandbox.HospitalCapabilities = { guardHospitalAction: () => true };
+  // can() doit renvoyer true pour create_patient : ce fichier teste le
+  // formulaire pour un rôle qui PEUT créer un nouveau patient (ex.
+  // réception) — voir tests/hospital-reception-role-gating.test.js pour
+  // le cas d'un rôle qui ne le peut pas (section 13).
+  sandbox.HospitalCapabilities = { guardHospitalAction: () => true, can: () => true };
+  sandbox.HospitalAuth = { getSession: () => ({ role: 'reception' }) };
   sandbox.App = {
     toast: (msg, type) => toasts.push({ msg, type }),
     openModal: (title, html) => { opened.title = title; opened.html = html; opened.count++; },

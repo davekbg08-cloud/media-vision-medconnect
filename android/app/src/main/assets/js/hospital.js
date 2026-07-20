@@ -325,7 +325,8 @@ const HospitalPortal = (() => {
         <button class="btn btn-ghost btn-sm" onclick="App.closeModal();LabModule.openNew('${id}')">🧪 Analyse</button>
         <button class="btn btn-ghost btn-sm" onclick="App.closeModal();AppointmentsModule.openNew('${id}')">📅 RDV</button>
         <button class="btn btn-ghost btn-sm" onclick="PatientPortal.printRecord('${id}')">🖨️ ${t('btn_print')}</button>
-        <button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="App.closeModal();HospitalPortal.openEmergencyTransfer('${id}')">🚑 Transférer le patient</button>
+        ${window.HospitalCapabilities?.can?.(Auth.getUser()?.role, 'decide_transfer')
+          ? `<button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="App.closeModal();HospitalPortal.openEmergencyTransfer('${id}')">🚑 Transférer le patient</button>` : ''}
       </div>`);
   }
 
@@ -459,6 +460,17 @@ const HospitalPortal = (() => {
   /* ── CONSULTATION + ORDONNANCE INTELLIGENTE ───── */
   function openConsult(patientId) {
     if (!canUsePatient(patientId)) { App.toast('Accès patient non autorisé.', 'error'); return; }
+    // Correctif (audit "workflows mobile/desktop", section 13, défense
+    // en profondeur) : le bouton déclencheur (openDetail(), ligne 323)
+    // est bien masqué pour un rôle sans 'create_consultation', mais
+    // openConsult() elle-même ne le vérifiait qu'implicitement au tout
+    // dernier moment (saveConsult()) — contrairement à
+    // openDelivery()/openAddBed() (référence). Vérifié ici aussi, avant
+    // de faire perdre du temps à remplir diagnostic/traitement/ordonnance.
+    if (!window.HospitalCapabilities?.can?.(Auth.getUser()?.role, 'create_consultation')) {
+      App.toast('Créer une consultation est réservé au médecin.', 'error');
+      return;
+    }
     const p = DB.getPatientById(patientId); if (!p) return;
     App.openModal(`🩺 ${t('new_consultation')} — ${p.firstname} ${p.lastname}`, `
       <div class="id-badge-large">${p.id}</div>
@@ -779,7 +791,23 @@ const HospitalPortal = (() => {
      établissements MedConnect enregistrés (HospitalsRegistry),
      au lieu d'un champ ID libre — évite les fautes de frappe et les
      transferts vers un hôpital inexistant. */
+  // Correctif P0/P1 (audit "workflows mobile/desktop", section 13) : bug
+  // confirmé — ce chemin (accessible depuis openDetail(), lui-même
+  // atteignable depuis renderPatientsByYear() côté desktop) n'avait
+  // AUCUNE vérification de capacité, ni au rendu ni à l'action,
+  // contrairement au chemin jumeau HospitalDesktopUI.requestTransfer()
+  // qui vérifie bien 'decide_transfer'. Un rôle sans cette capacité
+  // (infirmier, réception, laborantin, pharmacien) pouvait donc ouvrir
+  // ET remplir entièrement ce formulaire, avant d'être refusé
+  // seulement par firestore.rules (voir canDecideTransfer(), désormais
+  // câblé sur emergencyTransfers/create). Vérification ajoutée ICI en
+  // plus du bouton masqué (openDetail()) — l'affichage seul ne suffit
+  // jamais.
   function openEmergencyTransfer(patientId) {
+    if (!window.HospitalCapabilities?.can?.(Auth.getUser()?.role, 'decide_transfer')) {
+      App.toast('Décider un transfert médical est réservé au médecin.', 'error');
+      return;
+    }
     const p = DB.getPatientById(patientId);
     if (!p) { App.toast('Patient introuvable.', 'error'); return; }
 
@@ -853,6 +881,10 @@ const HospitalPortal = (() => {
   }
 
   async function confirmEmergencyTransfer(patientId, emergencyOverride = false) {
+    if (!window.HospitalCapabilities?.can?.(Auth.getUser()?.role, 'decide_transfer')) {
+      App.toast('Décider un transfert médical est réservé au médecin.', 'error');
+      return null;
+    }
     const select = document.getElementById('et-to-hospital');
     const toHospitalId   = select?.value || '';
     const toHospitalName = select?.selectedOptions?.[0]?.dataset?.name || '';

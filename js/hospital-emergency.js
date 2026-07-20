@@ -98,7 +98,7 @@ const HospitalEmergencyModule = (() => {
         <div class="record-actions">
           ${c.status === 'waiting' && canCare ? `
             <button class="btn btn-primary btn-sm" onclick="HospitalEmergencyModule.takeCharge('${esc(c.id)}')">🩺 Prendre en charge</button>` : ''}
-          ${c.status === 'in_care' ? `
+          ${c.status === 'in_care' && canCare ? `
             <button class="btn btn-ghost btn-sm" onclick="HospitalEmergencyModule.closeCase('${esc(c.id)}','discharged')">✅ Sortie</button>
             <button class="btn btn-ghost btn-sm" onclick="HospitalEmergencyModule.closeCase('${esc(c.id)}','hospitalized')">🛏️ Hospitaliser</button>` : ''}
         </div>
@@ -115,6 +115,14 @@ const HospitalEmergencyModule = (() => {
     const triageOptions = Object.entries(TRIAGE)
       .map(([lvl, t]) => `<option value="${lvl}">${lvl} — ${t.label} (${t.hint})</option>`).join('');
 
+    // Correctif (audit "workflows mobile/desktop", section 13) : bug
+    // confirmé — l'infirmier(ère) a accès à ce module (ROUTES.emergency)
+    // mais n'a PAS 'create_patient' (MATRIX, js/hospital-capabilities.js) ;
+    // seul saveIntake() le vérifiait, APRÈS saisie complète du motif, du
+    // triage ET de l'identité d'un nouveau patient. Champs masqués pour
+    // un rôle qui ne pourrait de toute façon jamais aboutir.
+    const canCreatePatient = window.HospitalCapabilities?.can?.(
+      window.HospitalAuth?.getSession?.()?.role, 'create_patient');
     App.openModal('🚑 Nouvelle arrivée urgente', `
       <div class="form-group">
         <label>Numéro patient (si connu)</label>
@@ -122,10 +130,12 @@ const HospitalEmergencyModule = (() => {
           oninput="this.value=this.value.toUpperCase()" onblur="HospitalEmergencyModule.lookupPatient()">
       </div>
       <div id="er-patient-info"></div>
+      ${canCreatePatient ? `
       <div class="form-row">
         <div class="form-group"><label>Prénom</label><input id="er-fn" placeholder="Si nouveau patient"></div>
         <div class="form-group"><label>Nom</label><input id="er-ln" placeholder="Si nouveau patient"></div>
-      </div>
+      </div>` : `
+      <p class="muted">Votre rôle ne permet pas d'enregistrer un nouveau patient ici : recherchez un patient déjà connu par son numéro MC.</p>`}
       <div class="form-group">
         <label>Motif / plainte principale *</label>
         <input id="er-complaint" placeholder="Ex : douleur thoracique, traumatisme…">
@@ -175,8 +185,11 @@ const HospitalEmergencyModule = (() => {
       let patient = mc ? (window.DB?.getPatients?.() || []).find(x => String(x.id||'').toUpperCase() === mc) : null;
 
       if (!patient) {
-        const fn = document.getElementById('er-fn').value.trim();
-        const ln = document.getElementById('er-ln').value.trim();
+        // Champs er-fn/er-ln absents (openIntake()) pour un rôle sans
+        // 'create_patient' — guardHospitalAction() referme la porte
+        // quand même (défense en profondeur, jamais un simple masquage).
+        const fn = document.getElementById('er-fn')?.value.trim() || '';
+        const ln = document.getElementById('er-ln')?.value.trim() || '';
         if (!fn || !ln) { App.toast('Patient introuvable : renseignez prénom et nom.', 'error'); return; }
         if (!window.HospitalCapabilities?.guardHospitalAction?.('create_patient')) return;
         // Intake d'URGENCE : JAMAIS soumis au contrôle d'abonnement — le

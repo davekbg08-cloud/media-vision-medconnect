@@ -108,6 +108,17 @@ const HospitalMaternityModule = (() => {
 
   async function openNew() {
     if (!window.HospitalCapabilities?.guardHospitalAction?.('view_patient')) return;
+    // Correctif (audit "workflows mobile/desktop", section 13) : bug
+    // confirmé — "nurse remplit tout un formulaire de maternité pour
+    // être refusée à la fin". L'infirmier(ère) a accès à ce module
+    // (ROUTES.maternity) mais n'a PAS 'create_patient' (voir MATRIX,
+    // js/hospital-capabilities.js) : seul saveNew() le vérifiait, APRÈS
+    // que la DDR et l'identité complète d'une nouvelle patiente aient
+    // été saisies. Les champs prénom/nom (utiles UNIQUEMENT pour créer
+    // une nouvelle patiente) sont désormais masqués pour un rôle qui ne
+    // pourrait de toute façon jamais aboutir sur ce chemin.
+    const canCreatePatient = window.HospitalCapabilities?.can?.(
+      window.HospitalAuth?.getSession?.()?.role, 'create_patient');
     App.openModal('🤰 Nouveau dossier de grossesse', `
       <div class="form-group">
         <label>Numéro patiente (si connue)</label>
@@ -115,10 +126,12 @@ const HospitalMaternityModule = (() => {
           oninput="this.value=this.value.toUpperCase()" onblur="HospitalMaternityModule.lookupPatient()">
       </div>
       <div id="mat-patient-info"></div>
+      ${canCreatePatient ? `
       <div class="form-row">
         <div class="form-group"><label>Prénom</label><input id="mat-fn" placeholder="Si nouvelle patiente"></div>
         <div class="form-group"><label>Nom</label><input id="mat-ln" placeholder="Si nouvelle patiente"></div>
-      </div>
+      </div>` : `
+      <p class="muted">Votre rôle ne permet pas d'enregistrer une nouvelle patiente ici : recherchez une patiente déjà connue par son numéro MC.</p>`}
       <div class="form-group">
         <label>Date des dernières règles (DDR) *</label>
         <input id="mat-lmp" type="date">
@@ -163,8 +176,12 @@ const HospitalMaternityModule = (() => {
       let patient = mc ? (window.DB?.getPatients?.() || []).find(x => String(x.id||'').toUpperCase() === mc) : null;
 
       if (!patient) {
-        const fn = document.getElementById('mat-fn').value.trim();
-        const ln = document.getElementById('mat-ln').value.trim();
+        // Les champs mat-fn/mat-ln ne sont rendus (openNew()) que si le
+        // rôle a 'create_patient' — absents ici pour un rôle qui ne les
+        // a jamais vus, guardHospitalAction() referme la porte quand
+        // même (défense en profondeur, jamais un simple masquage).
+        const fn = document.getElementById('mat-fn')?.value.trim() || '';
+        const ln = document.getElementById('mat-ln')?.value.trim() || '';
         if (!fn || !ln) { App.toast('Patiente introuvable : renseignez prénom et nom.', 'error'); return; }
         if (!window.HospitalCapabilities?.guardHospitalAction?.('create_patient')) return;
         // Enregistrement normal (maternité) = action desktop soumise à

@@ -58,11 +58,19 @@ const HospitalBedsModule = (() => {
     const occupied = _beds.filter(b => b.status === 'occupied').length;
     const free = _beds.filter(b => b.status === 'free').length;
 
+    // Correctif (audit "workflows mobile/desktop", section 13) : bug
+    // confirmé — "+ Lit" et "Maintenance"/"Remettre en service"
+    // (bedCard) n'étaient masqués pour AUCUN rôle, alors que
+    // saveBed()/toggleMaintenance() exigent 'manage_beds' (que le
+    // médecin, par ex., n'a PAS — voir js/hospital-capabilities.js).
+    // Un médecin pouvait donc ouvrir le formulaire, le remplir
+    // entièrement, et n'être refusé qu'à l'enregistrement.
+    const canManageBeds = window.HospitalCapabilities?.can?.(HospitalPermissions.getCurrentRole(), 'manage_beds');
     container.innerHTML = `
       <div class="hospital-page-header">
         <div><h1>Hospitalisation / Lits</h1><p>Occupation et admissions en cours</p></div>
         <div>
-          <button class="btn btn-ghost btn-sm" onclick="HospitalBedsModule.openAddBed()">+ Lit</button>
+          ${canManageBeds ? `<button class="btn btn-ghost btn-sm" onclick="HospitalBedsModule.openAddBed()">+ Lit</button>` : ''}
           <button class="btn btn-primary btn-sm" onclick="HospitalBedsModule.openAdmit()">+ Admission</button>
         </div>
       </div>
@@ -88,7 +96,7 @@ const HospitalBedsModule = (() => {
         ${!total ? `<p class="muted">Aucun lit enregistré. Ajoutez les lits de l'établissement pour commencer.</p>` : `
         <div class="beds-grid">
           ${_beds.sort((a,b) => String(a.ward||'').localeCompare(String(b.ward||'')) || String(a.number||'').localeCompare(String(b.number||''), undefined, {numeric:true}))
-            .map(b => bedCard(b)).join('')}
+            .map(b => bedCard(b, canManageBeds)).join('')}
         </div>`}
       </div>
 
@@ -112,7 +120,7 @@ const HospitalBedsModule = (() => {
       </div>`;
   }
 
-  function bedCard(b) {
+  function bedCard(b, canManageBeds) {
     const st = BED_STATUS[b.status] || BED_STATUS.free;
     const adm = b.status === 'occupied'
       ? _admissions.find(a => a.bedId === b.id && a.status === 'admitted') : null;
@@ -121,7 +129,7 @@ const HospitalBedsModule = (() => {
         <div class="bed-card-head">${st.icon} <strong>Lit ${esc(b.number || '—')}</strong></div>
         <p>${esc(b.ward || 'Service non précisé')}</p>
         <p class="muted">${st.label}${adm ? ' · ' + esc(adm.patientName || adm.patientMc || '') : ''}</p>
-        ${b.status !== 'occupied' ? `
+        ${b.status !== 'occupied' && canManageBeds ? `
           <button class="btn btn-ghost btn-sm"
             onclick="HospitalBedsModule.toggleMaintenance('${esc(b.id)}')">
             ${b.status === 'maintenance' ? 'Remettre en service' : 'Maintenance'}
@@ -144,6 +152,10 @@ const HospitalBedsModule = (() => {
   /* ── Lits ───────────────────────────────────────── */
 
   function openAddBed() {
+    // Correctif (audit "workflows mobile/desktop", section 13) : vérifié
+    // ICI, à l'ouverture, en plus du bouton masqué (render()) et du
+    // contrôle final dans saveBed() — l'affichage seul ne suffit jamais.
+    if (!window.HospitalCapabilities?.guardHospitalAction?.('manage_beds')) return;
     App.openModal('➕ Ajouter un lit', `
       <div class="form-group"><label>Numéro du lit *</label>
         <input id="bed-number" placeholder="Ex : A-12"></div>
