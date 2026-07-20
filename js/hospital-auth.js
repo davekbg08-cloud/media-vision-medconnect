@@ -711,30 +711,44 @@ const HospitalAuth = (() => {
     }
 
     _setVerifyStep('Vérification de l\'affiliation…');
-    // 3) Vérifier l'affiliation. Priorité : cache local staff (rapide,
-    // suffisant si déjà à jour) — sinon hospitalMembers/
-    // affiliation_requests directement en Firestore (sources de vérité
-    // réelles, jamais le seul cache local qui peut être en retard —
-    // voir resolveAgentAffiliation).
-    let member = findStaffRole(est, account.uid, num, role);
-    if (!member) {
-      let affiliationResolution = null;
-      try {
-        affiliationResolution = await window.HospitalsRegistry?.resolveAgentAffiliation?.(
-          est.establishmentId || establishmentId, account.uid, role);
-      } catch (e) { console.warn('[HospitalAuth] resolveAgentAffiliation :', e); }
+    // 3) Vérifier l'affiliation.
+    // Correctif (audit "workflows mobile/desktop", section 9) : bug
+    // confirmé — hospitalMembers/affiliation_requests n'étaient
+    // consultés QUE si le cache local staff n'avait AUCUNE entrée ;
+    // dès que staff indiquait "active" (un champ librement modifiable
+    // par le compte propriétaire de l'établissement, voir
+    // establishmentSelfClaimOk dans firestore.rules — aucune restriction
+    // de champ), la connexion était accordée SANS jamais vérifier la
+    // source de vérité réelle. hospitalMembers/affiliation_requests
+    // sont désormais consultés EN PREMIER (staff n'est plus qu'un
+    // miroir d'affichage) : un statut 'pending'/'rejected' provenant
+    // du serveur prime toujours sur un cache local prétendant "active".
+    // resolveAgentAffiliation() ne peut renvoyer 'pending'/'rejected'
+    // que lorsque la lecture Firestore a réellement abouti (jamais hors
+    // ligne) — le repli sur le cache local ne s'applique donc QUE dans
+    // le cas ambigu 'none' (hors ligne OU réellement jamais affilié),
+    // préservant tel quel le mode hors ligne existant.
+    let affiliationResolution = null;
+    try {
+      affiliationResolution = await window.HospitalsRegistry?.resolveAgentAffiliation?.(
+        est.establishmentId || establishmentId, account.uid, role);
+    } catch (e) { console.warn('[HospitalAuth] resolveAgentAffiliation :', e); }
 
-      if (affiliationResolution?.status === 'active') {
-        member = { role, name: account.name, professionalNumber: num, status: 'active' };
-      } else if (affiliationResolution?.status === 'pending') {
-        msg.innerHTML = `<div class="auth-register-info" style="border-color:var(--accent)">Votre compte est validé, mais votre affiliation à cet établissement attend encore une approbation.</div>`;
-        await _abortAgentSession();
-        return;
-      } else if (affiliationResolution?.status === 'rejected') {
-        msg.innerHTML = `<div class="auth-register-info" style="border-color:var(--danger)">Votre affiliation à cet établissement a été refusée.</div>`;
-        await _abortAgentSession();
-        return;
-      }
+    let member = null;
+    if (affiliationResolution?.status === 'active') {
+      member = { role, name: account.name, professionalNumber: num, status: 'active' };
+    } else if (affiliationResolution?.status === 'pending') {
+      msg.innerHTML = `<div class="auth-register-info" style="border-color:var(--accent)">Votre compte est validé, mais votre affiliation à cet établissement attend encore une approbation.</div>`;
+      await _abortAgentSession();
+      return;
+    } else if (affiliationResolution?.status === 'rejected') {
+      msg.innerHTML = `<div class="auth-register-info" style="border-color:var(--danger)">Votre affiliation à cet établissement a été refusée.</div>`;
+      await _abortAgentSession();
+      return;
+    } else {
+      // 'none' (ambigu : hors ligne, ou réellement jamais affilié) —
+      // repli sur le cache local staff, comportement hors ligne inchangé.
+      member = findStaffRole(est, account.uid, num, role);
     }
     if (!member) {
       // L'agent est authentifié mais pas affilié (aucune trace, ni

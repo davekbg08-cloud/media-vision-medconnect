@@ -760,6 +760,108 @@ for (const role of ROLES) {
     const h = win.HospitalsRegistry.getHospitalById('EST-AFF9');
     assert.ok(h.staff.find(s => s.uid === `${role}-aff-uid`), 'le staff local doit être réconcilié après réparation');
   });
+
+  /* ── Correctif (audit "workflows mobile/desktop", section 9) ──────
+     Bug confirmé : hospitalMembers/affiliation_requests n'étaient
+     consultés QUE si establishments.staff local n'avait AUCUNE entrée
+     — dès que staff indiquait "active" (champ librement modifiable par
+     le compte propriétaire de l'établissement, aucune restriction de
+     champ côté firestore.rules), la connexion était accordée SANS
+     jamais vérifier la source de vérité réelle. Ces tests vérifient
+     qu'un signal RÉEL (pending/rejected) provenant du serveur prime
+     désormais toujours sur un cache local staff prétendant "active". */
+  test(`[${role}] section 9 (P1) : staff local prétend "active" MAIS l'affiliation Firestore réelle est "pending" — connexion refusée`, async () => {
+    const firebaseAuthImpl = {
+      signInWithEmailAndPassword: async () => ({ user: { uid: `${role}-stale-pending-uid` } }),
+      get currentUser() { return { uid: `${role}-stale-pending-uid` }; },
+      signOut: async () => {},
+    };
+    const { win, sandbox, getEl } = setup({
+      firebaseAuthImpl,
+      firestoreSeed: {
+        users: { U: { uid: 'local-id', role, matricule: 'LAB-STALE1', email: 'a@b.com', status: 'approved', authUid: `${role}-stale-pending-uid` } },
+        affiliation_requests: {
+          [`AFF_${role}-stale-pending-uid_EST-STALE1`]: {
+            requestId: `AFF_${role}-stale-pending-uid_EST-STALE1`, requesterUid: `${role}-stale-pending-uid`, requesterName: 'Agent',
+            requesterRole: role, establishmentId: 'EST-STALE1', status: 'pending',
+          },
+        },
+        // hospitalMembers volontairement ABSENT (jamais approuvé réellement).
+      },
+    });
+    // Cache local staff FORGÉ/PÉRIMÉ : prétend "active" alors que rien ne le confirme côté serveur.
+    win.HospitalsRegistry.addHospital({
+      establishmentId: 'EST-STALE1', name: 'Hôpital Stale1',
+      staff: [{ uid: `${role}-stale-pending-uid`, role, status: 'active', professionalNumber: 'LAB-STALE1', name: 'Agent' }],
+    });
+    getEl('ha-agent-role').value = role;
+    getEl('ha-agent-num').value = 'LAB-STALE1';
+    getEl('ha-agent-pw').value = 'whatever';
+    let opened = false;
+    sandbox.HospitalDesktopUI = win.HospitalDesktopUI = { openForSession: () => { opened = true; } };
+    await win.HospitalAuth.verifyAgent('EST-STALE1');
+    assert.strictEqual(opened, false, 'un cache local "active" ne doit jamais outrepasser un statut "pending" réel côté serveur');
+  });
+
+  test(`[${role}] section 9 (P1) : staff local prétend "active" MAIS l'affiliation Firestore réelle est "rejected" — connexion refusée`, async () => {
+    const firebaseAuthImpl = {
+      signInWithEmailAndPassword: async () => ({ user: { uid: `${role}-stale-rejected-uid` } }),
+      get currentUser() { return { uid: `${role}-stale-rejected-uid` }; },
+      signOut: async () => {},
+    };
+    const { win, sandbox, getEl } = setup({
+      firebaseAuthImpl,
+      firestoreSeed: {
+        users: { U: { uid: 'local-id', role, matricule: 'LAB-STALE2', email: 'a@b.com', status: 'approved', authUid: `${role}-stale-rejected-uid` } },
+        affiliation_requests: {
+          [`AFF_${role}-stale-rejected-uid_EST-STALE2`]: {
+            requestId: `AFF_${role}-stale-rejected-uid_EST-STALE2`, requesterUid: `${role}-stale-rejected-uid`, requesterName: 'Agent',
+            requesterRole: role, establishmentId: 'EST-STALE2', status: 'rejected',
+          },
+        },
+      },
+    });
+    win.HospitalsRegistry.addHospital({
+      establishmentId: 'EST-STALE2', name: 'Hôpital Stale2',
+      staff: [{ uid: `${role}-stale-rejected-uid`, role, status: 'active', professionalNumber: 'LAB-STALE2', name: 'Agent' }],
+    });
+    getEl('ha-agent-role').value = role;
+    getEl('ha-agent-num').value = 'LAB-STALE2';
+    getEl('ha-agent-pw').value = 'whatever';
+    let opened = false;
+    sandbox.HospitalDesktopUI = win.HospitalDesktopUI = { openForSession: () => { opened = true; } };
+    await win.HospitalAuth.verifyAgent('EST-STALE2');
+    assert.strictEqual(opened, false, 'un cache local "active" ne doit jamais outrepasser un statut "rejected" réel côté serveur');
+  });
+
+  test(`[${role}] section 9 : hors ligne (aucune lecture Firestore possible), le cache local staff "active" reste utilisable (non-régression du mode hors ligne)`, async () => {
+    const firebaseAuthImpl = {
+      signInWithEmailAndPassword: async () => ({ user: { uid: `${role}-offline-uid` } }),
+      get currentUser() { return { uid: `${role}-offline-uid` }; },
+      signOut: async () => {},
+    };
+    const { win, sandbox, getEl } = setup({
+      firebaseAuthImpl,
+      firestoreSeed: {
+        users: { U: { uid: 'local-id', role, matricule: 'LAB-OFFLINE1', email: 'a@b.com', status: 'approved', authUid: `${role}-offline-uid` } },
+        // Aucun hospitalMembers/affiliation_requests — simule l'absence
+        // de résultat Firestore (statut 'none' ambigu, voir
+        // resolveAgentAffiliation), cas où le repli sur le cache local
+        // doit continuer de fonctionner exactement comme avant.
+      },
+    });
+    win.HospitalsRegistry.addHospital({
+      establishmentId: 'EST-OFFLINE1', name: 'Hôpital Offline1',
+      staff: [{ uid: `${role}-offline-uid`, role, status: 'active', professionalNumber: 'LAB-OFFLINE1', name: 'Agent' }],
+    });
+    getEl('ha-agent-role').value = role;
+    getEl('ha-agent-num').value = 'LAB-OFFLINE1';
+    getEl('ha-agent-pw').value = 'whatever';
+    let opened = false;
+    sandbox.HospitalDesktopUI = win.HospitalDesktopUI = { openForSession: () => { opened = true; } };
+    await win.HospitalAuth.verifyAgent('EST-OFFLINE1');
+    assert.strictEqual(opened, true, 'le cache local doit rester utilisable quand la source de vérité est simplement injoignable (pas de régression du mode hors ligne)');
+  });
 }
 
 /* =====================================================
