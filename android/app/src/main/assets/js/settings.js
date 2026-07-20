@@ -74,6 +74,8 @@ const Settings = (() => {
         </div>
       </div>
 
+      ${renderSyncInspectorSection()}
+
       ${user?.role === 'patient' ? renderPrivacySection(user) : ''}
       ${user?.role === 'pharmacist' ? renderPharmacyLocationSection(user) : ''}
       ${user?.role === 'admin'   ? renderAdminSection()       : ''}
@@ -94,6 +96,72 @@ const Settings = (() => {
       </div>
 
       ${renderAboutSection()}`;
+  }
+
+  /* ── INSPECTEUR DE SYNCHRONISATION (chantier "workflows
+     mobile/desktop", sections 1-2) ──────────────────────
+     Bug confirmé : le seul état visible pour l'utilisateur était un
+     compte global "N en attente" (via SyncBadge/renderAboutSection),
+     sans jamais distinguer une écriture transitoire (réseau, se
+     corrigera seule) d'une écriture structurellement bloquée
+     (permission Firestore refusée, argument invalide — ne se
+     corrigera JAMAIS toute seule) : un problème de configuration
+     pouvait rester invisible indéfiniment derrière un badge "en
+     attente" normal. Cette section (mobile ET desktop, même
+     Settings.render() container-agnostic que le reste du module)
+     rend l'état réel visible et permet un rejeu manuel immédiat. */
+  function renderSyncInspectorSection() {
+    const summary = window.DB?.getOutboxSummary?.() || { total: 0, retryable: 0, blocked: 0, oldestQueuedAt: null };
+    const entries = window.DB?.getOutboxEntries?.() || [];
+    const blockedEntries = entries.filter(e => e.classification === 'blocked');
+
+    let stateIcon, stateLabel, stateColor;
+    if (summary.total === 0) {
+      stateIcon = '☁️'; stateLabel = 'Tout est synchronisé'; stateColor = 'var(--secondary)';
+    } else if (summary.blocked > 0) {
+      stateIcon = '⚠️'; stateLabel = `${summary.blocked} écriture(s) bloquée(s), ${summary.retryable} en attente`; stateColor = 'var(--danger)';
+    } else {
+      stateIcon = '⏳'; stateLabel = `${summary.retryable} écriture(s) en attente de synchronisation`; stateColor = 'var(--accent)';
+    }
+
+    return `
+      <div class="settings-section" id="settings-sync-inspector">
+        <h3>🔄 Synchronisation</h3>
+        <p class="settings-desc">Chaque écriture qui n'atteint pas immédiatement le cloud est conservée en file et rejouée automatiquement — jamais perdue.</p>
+        <div class="settings-row">
+          <span style="color:${stateColor}">${stateIcon} ${esc(stateLabel)}</span>
+        </div>
+        ${summary.oldestQueuedAt ? `<p class="settings-desc" style="margin-top:.3rem">En attente depuis : ${esc(new Date(summary.oldestQueuedAt).toLocaleString('fr-FR'))}</p>` : ''}
+        ${blockedEntries.length ? `
+        <div class="alert-box" style="margin-top:.6rem;text-align:left">
+          <strong>⚠️ Ces écritures ne se résoudront pas automatiquement :</strong>
+          <ul style="margin:.4rem 0 0 1.1rem;font-size:.82rem">
+            ${blockedEntries.slice(0, 10).map(e => `<li>${esc(e.collection)}/${esc(e.docId)} — ${esc(e.lastErrorCode || 'erreur inconnue')}</li>`).join('')}
+            ${blockedEntries.length > 10 ? `<li>… et ${blockedEntries.length - 10} autre(s).</li>` : ''}
+          </ul>
+        </div>` : ''}
+        <button type="button" class="btn btn-ghost btn-sm" id="settings-check-sync-btn"
+          style="margin-top:.6rem" onclick="Settings.checkSync()">🔄 Vérifier la synchronisation</button>
+      </div>`;
+  }
+
+  async function checkSync() {
+    const btn = document.getElementById('settings-check-sync-btn');
+    if (!window.ActionFeedback?.start?.(btn, '⏳ Vérification…')) return;
+    try {
+      await window.DB?.flushOutbox?.({ force: true });
+      const summary = window.DB?.getOutboxSummary?.() || { total: 0, retryable: 0, blocked: 0 };
+      if (summary.total === 0) {
+        window.ActionFeedback?.confirmed?.('☁️ Tout est synchronisé.');
+      } else if (summary.blocked > 0) {
+        window.ActionFeedback?.failed?.(`⚠️ ${summary.blocked} écriture(s) bloquée(s) nécessitent une vérification, ${summary.retryable} encore en attente normale.`);
+      } else {
+        window.ActionFeedback?.queued?.(`⏳ ${summary.retryable} écriture(s) encore en attente — nouvelle tentative automatique.`);
+      }
+    } finally {
+      window.ActionFeedback?.reset?.(btn);
+      refresh();
+    }
   }
 
   /* ── À PROPOS (version, build, état Firebase/sync) ──────────── */
@@ -404,7 +472,7 @@ const Settings = (() => {
     Settings.refresh();
   }
 
-  return { render, refresh, updatePharmacyLocation, openAddDoctor, saveDoctor, openAddPharmacist, savePharmacist, renderAboutSection };
+  return { render, refresh, updatePharmacyLocation, openAddDoctor, saveDoctor, openAddPharmacist, savePharmacist, renderAboutSection, checkSync };
 })();
 
 window.Settings = Settings;

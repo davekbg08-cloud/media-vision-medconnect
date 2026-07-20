@@ -27,31 +27,106 @@ const DB = (() => {
      n'est réputée « à l'abri » que lorsqu'elle a atteint le cloud. */
   const OUTBOX_KEY = 'mc_cloud_outbox';
 
-  function _outboxAdd(collection, docId, data) {
+  /* ── CLASSIFICATION DES ERREURS (chantier "workflows mobile/desktop",
+     sections 1-2) ──────────────────────────────────────
+     Bug confirmé : TOUTE écriture échouée était rejouée indéfiniment, à
+     la même fréquence, qu'elle soit réellement transitoire (hors ligne,
+     latence, service temporairement indisponible — se corrigera
+     seule) ou structurellement condamnée à échouer pour toujours
+     (permission refusée par une règle Firestore, argument invalide,
+     document déjà supprimé) — masquant un vrai problème de
+     configuration derrière un badge "en attente" qui ne redescendait
+     JAMAIS, sans jamais le distinguer d'une simple coupure réseau.
+     classifyOutboxError() ne DISCRÉDITE ni ne SUPPRIME jamais une
+     écriture 'blocked' (aucune perte de données) — elle sert
+     uniquement à afficher un état honnête (voir
+     js/settings.js/js/sync-badge.js) et à éviter de la rejouer à
+     pleine fréquence pendant qu'un humain doit intervenir. */
+  const BLOCKED_ERROR_CODES = new Set([
+    'permission-denied', 'invalid-argument', 'failed-precondition',
+    'not-found', 'already-exists', 'unauthenticated', 'out-of-range',
+  ]);
+  function classifyOutboxError(err) {
+    const code = err?.code || null;
+    if (!code) return 'retryable'; // pas d'erreur (hors ligne) : purement transitoire
+    if (BLOCKED_ERROR_CODES.has(code)) return 'blocked';
+    return 'retryable';
+  }
+
+  const OUTBOX_BASE_DELAY_MS = 30 * 1000;      // 30 s
+  const OUTBOX_MAX_DELAY_MS  = 30 * 60 * 1000; // 30 min (plafond)
+  function _computeNextRetryAt(attempts) {
+    const delay = Math.min(OUTBOX_BASE_DELAY_MS * Math.pow(2, attempts), OUTBOX_MAX_DELAY_MS);
+    return new Date(Date.now() + delay).toISOString();
+  }
+
+  function _outboxAdd(collection, docId, data, err = null) {
     const q = load(OUTBOX_KEY);
     // Dédoublonnage : une réécriture plus récente du même document
-    // remplace l'ancienne en file (dernière valeur = la bonne).
+    // remplace l'ancienne en file (dernière valeur = la bonne) — repart
+    // avec un compteur de tentatives à zéro (nouvelle donnée à écrire,
+    // pas un rejeu de l'ancienne).
     const filtered = q.filter(e => !(e.collection === collection && e.docId === String(docId)));
-    filtered.push({ collection, docId: String(docId), data, queuedAt: new Date().toISOString() });
+    filtered.push({
+      collection, docId: String(docId), data, queuedAt: new Date().toISOString(),
+      attempts: 0, nextRetryAt: null,
+      classification: classifyOutboxError(err),
+      lastErrorCode: err?.code || null,
+      lastErrorMessage: err?.message || null,
+    });
     store(OUTBOX_KEY, filtered);
   }
 
   function _outboxCount() { return load(OUTBOX_KEY).length; }
   const outboxCount = _outboxCount;
 
+  /** Instantané en lecture seule de la file — pour l'inspecteur UI
+      (js/settings.js) : jamais utilisé pour décider quoi que ce soit,
+      seulement pour AFFICHER l'état réel à l'utilisateur/l'admin. */
+  function getOutboxEntries() { return load(OUTBOX_KEY); }
+
+  /** Résumé agrégé — évite à chaque appelant (badge, inspecteur) de
+      recompter lui-même les classifications. */
+  function getOutboxSummary() {
+    const q = load(OUTBOX_KEY);
+    const blocked = q.filter(e => e.classification === 'blocked').length;
+    const retryable = q.length - blocked;
+    const oldestQueuedAt = q.length
+      ? q.map(e => e.queuedAt).sort()[0]
+      : null;
+    return { total: q.length, retryable, blocked, oldestQueuedAt };
+  }
+
   let _flushing = false;
-  async function flushOutbox() {
+  /** force:true (bouton "Vérifier la synchronisation") : rejoue même les
+      entrées dont le délai d'attente exponentiel (nextRetryAt) n'est pas
+      encore écoulé — jamais les entrées 'blocked' avant une nouvelle
+      tentative volontaire de l'utilisateur, qui a justement pour but de
+      vérifier si la situation a changé (ex. règle redéployée). */
+  async function flushOutbox({ force = false } = {}) {
     if (_flushing || !firebaseReady || !firebaseDB) return;
     const q = load(OUTBOX_KEY);
     if (!q.length) return;
     _flushing = true;
+    const now = Date.now();
     const remaining = [];
     for (const e of q) {
+      if (!force && e.nextRetryAt && new Date(e.nextRetryAt).getTime() > now) {
+        remaining.push(e); // pas encore l'heure du prochain essai (backoff)
+        continue;
+      }
       try {
         await firebaseDB.collection(e.collection).doc(e.docId).set(e.data, { merge: true });
       } catch (err) {
         console.warn(`[MedConnect] Outbox : réécriture ${e.collection}/${e.docId} encore en échec :`, err?.message || err);
-        remaining.push(e); // on garde pour le prochain essai
+        const attempts = (e.attempts || 0) + 1;
+        remaining.push({
+          ...e, attempts,
+          nextRetryAt: _computeNextRetryAt(attempts),
+          classification: classifyOutboxError(err),
+          lastErrorCode: err?.code || null,
+          lastErrorMessage: err?.message || null,
+        });
       }
     }
     store(OUTBOX_KEY, remaining);
@@ -124,7 +199,7 @@ const DB = (() => {
       return true;
     } catch (e) {
       console.warn(`[MedConnect] Échec écriture Firestore ${collection}/${docId} — mise en file :`, e?.message || e);
-      _outboxAdd(collection, docId, data);
+      _outboxAdd(collection, docId, data, e);
       return false;
     }
   }
@@ -1253,6 +1328,11 @@ const DB = (() => {
 
   return {
     init, syncFromFirebase, syncFromFirebaseInBackground, setupUserScopedListeners, generatePatientId, makeId, pushAndReport, pushAndReportDetailed, pushBatchAndReport, pushBatchAndReportDetailed, withTimeout, flushOutbox, outboxCount, getLastSyncAt,
+    // Inspecteur de synchronisation (chantier "workflows mobile/desktop",
+    // sections 1-2) : getOutboxEntries/getOutboxSummary sont des
+    // instantanés en LECTURE SEULE (js/settings.js, js/sync-badge.js) —
+    // jamais utilisés pour décider quoi que ce soit côté métier.
+    getOutboxEntries, getOutboxSummary, classifyOutboxError,
     // pushCloud/deleteCloud : wrappers publics sur _push/_delete, à
     // utiliser par tout module (access_control.js, hospitals_registry.js,
     // affiliation-cleanup.js...) au lieu de réimplémenter un mini-push
