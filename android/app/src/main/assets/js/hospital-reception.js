@@ -92,6 +92,30 @@ const HospitalReceptionModule = (() => {
 
   /* ── ENREGISTREMENT D'UNE ARRIVÉE ──────────────────── */
 
+  // Correctif (audit "workflows mobile/desktop", section 4) : bug confirmé
+  // par test réel — le champ "Numéro MC du patient" acceptait n'importe
+  // quel texte (ex. "DK"), et la section "Nouveau patient" était repliée
+  // sous un <details>/<summary> peu visible : un agent tapant un
+  // identifiant invalide se heurtait à un message d'erreur final
+  // ("renseignez prénom et nom") sans jamais voir où saisir ces champs.
+  // Remplacé par un choix explicite et toujours visible — Patient
+  // existant / Nouveau patient — avec bascule automatique vers "Nouveau
+  // patient" quand la recherche ne trouve rien.
+  const MC_FORMAT_RE = /^MC-/;
+  let _rcMode = 'existing';
+
+  function setMode(mode) {
+    _rcMode = mode === 'new' ? 'new' : 'existing';
+    const existingPanel = document.getElementById('rc-panel-existing');
+    const newPanel = document.getElementById('rc-panel-new');
+    const btnExisting = document.getElementById('rc-mode-existing');
+    const btnNew = document.getElementById('rc-mode-new');
+    if (existingPanel) existingPanel.style.display = _rcMode === 'existing' ? '' : 'none';
+    if (newPanel) newPanel.style.display = _rcMode === 'new' ? '' : 'none';
+    if (btnExisting) btnExisting.className = `btn btn-sm ${_rcMode === 'existing' ? 'btn-primary' : 'btn-ghost'}`;
+    if (btnNew) btnNew.className = `btn btn-sm ${_rcMode === 'new' ? 'btn-primary' : 'btn-ghost'}`;
+  }
+
   async function openIntake() {
     if (!window.HospitalCapabilities?.guardHospitalAction?.('view_patient')) return;
     const hospitalId = await CloudDB.getActiveHospitalId();
@@ -108,21 +132,34 @@ const HospitalReceptionModule = (() => {
       freeBeds = beds.filter(b => b.status === 'free');
     } catch (_) {}
 
+    _rcMode = 'existing';
     App.openModal('🛎️ Enregistrer une arrivée', `
       <div class="form-group">
-        <label>Numéro MC du patient</label>
-        <input id="rc-mc" placeholder="MC-2026-CD-XXXXXXXX (laisser vide si nouveau patient)">
-        <button class="btn btn-ghost btn-xs" style="margin-top:.3rem" onclick="HospitalReceptionModule.lookupPatient()">🔍 Rechercher</button>
-        <div id="rc-found" style="margin-top:.3rem"></div>
+        <label>Identification du patient *</label>
+        <div style="display:flex;gap:.4rem">
+          <button type="button" class="btn btn-sm btn-primary" id="rc-mode-existing" onclick="HospitalReceptionModule.setMode('existing')">🔎 Patient existant</button>
+          <button type="button" class="btn btn-sm btn-ghost" id="rc-mode-new" onclick="HospitalReceptionModule.setMode('new')">🆕 Nouveau patient</button>
+        </div>
       </div>
 
-      <details id="rc-new-details" style="margin-bottom:.6rem">
-        <summary style="cursor:pointer;opacity:.8">Nouveau patient (si non trouvé)</summary>
-        <div class="form-group" style="margin-top:.5rem"><label>Prénom</label><input id="rc-fn"></div>
-        <div class="form-group"><label>Nom</label><input id="rc-ln"></div>
+      <div id="rc-panel-existing">
+        <div class="form-group">
+          <label>Numéro MC du patient</label>
+          <input id="rc-mc" placeholder="MC-2026-CD-XXXXXXXX">
+          <button class="btn btn-ghost btn-xs" style="margin-top:.3rem" onclick="HospitalReceptionModule.lookupPatient()">🔍 Rechercher</button>
+          <div id="rc-found" style="margin-top:.3rem"></div>
+        </div>
+      </div>
+
+      <div id="rc-panel-new" style="display:none">
+        <div class="form-group"><label>Prénom *</label><input id="rc-fn"></div>
+        <div class="form-group"><label>Nom *</label><input id="rc-ln"></div>
         <div class="form-group"><label>Date de naissance</label><input id="rc-dob" type="date"></div>
+        <div class="form-group"><label>Sexe</label>
+          <select id="rc-gender"><option value="">—</option><option value="M">Masculin</option><option value="F">Féminin</option></select>
+        </div>
         <div class="form-group"><label>Téléphone</label><input id="rc-phone"></div>
-      </details>
+      </div>
 
       <div class="form-group">
         <label>Motif de visite</label>
@@ -145,7 +182,7 @@ const HospitalReceptionModule = (() => {
         </select>
       </div>
 
-      <button class="btn btn-primary btn-full" onclick="HospitalReceptionModule.saveIntake()">Enregistrer l'arrivée</button>
+      <button class="btn btn-primary btn-full" id="rc-save-btn" onclick="HospitalReceptionModule.saveIntake()">Enregistrer l'arrivée</button>
     `);
   }
 
@@ -189,9 +226,18 @@ const HospitalReceptionModule = (() => {
   }
 
   async function lookupPatient() {
-    const mc = document.getElementById('rc-mc').value.trim().toUpperCase();
+    const raw = document.getElementById('rc-mc').value.trim();
+    const mc = raw.toUpperCase();
     const box = document.getElementById('rc-found');
     if (!mc) { box.innerHTML = ''; return; }
+    // Correctif (section 4, point 9-10) : un texte qui n'a jamais la
+    // forme d'un numéro MC (ex. "DK") ne doit jamais être envoyé en
+    // recherche silencieuse — message immédiat et explicite, jamais un
+    // échec générique découvert seulement à l'enregistrement.
+    if (!MC_FORMAT_RE.test(mc)) {
+      box.innerHTML = `<small style="color:var(--accent)">⚠️ Ce champ attend un numéro patient MedConnect (ex. MC-2026-CD-XXXXXXXX). Pour enregistrer un nouveau patient, choisissez « 🆕 Nouveau patient » ci-dessus.</small>`;
+      return;
+    }
     const token = ++_rcSearchToken;
     box.innerHTML = `<small class="muted">⏳ Recherche en cours…</small>`;
     try {
@@ -199,12 +245,14 @@ const HospitalReceptionModule = (() => {
       if (token !== _rcSearchToken) return; // saisie modifiée entre-temps : réponse obsolète
       if (p) {
         box.innerHTML = `<small style="color:var(--secondary)">✅ Patient trouvé — ${esc(p.firstname||'')} ${esc(p.lastname||'')}</small>`;
-        const fn = document.getElementById('rc-fn'); if (fn) fn.value = p.firstname || '';
-        const ln = document.getElementById('rc-ln'); if (ln) ln.value = p.lastname || '';
       } else if (denied) {
         box.innerHTML = `<small style="color:var(--danger)">🚫 Non autorisé — ce numéro appartient à un autre établissement.</small>`;
       } else {
-        box.innerHTML = `<small style="color:var(--accent)">⚠️ Patient introuvable. Renseignez la section « Nouveau patient ».</small>`;
+        // Correctif (section 4, point 3) : proposer explicitement de
+        // créer une nouvelle fiche au lieu d'une simple erreur sur des
+        // champs cachés — bascule directement vers le panneau visible.
+        box.innerHTML = `<small style="color:var(--accent)">⚠️ Patient introuvable.</small>
+          <button type="button" class="btn btn-ghost btn-xs" style="margin-top:.3rem" onclick="HospitalReceptionModule.setMode('new')">➕ Créer un nouveau patient</button>`;
       }
     } catch (e) {
       if (token !== _rcSearchToken) return;
@@ -220,24 +268,44 @@ const HospitalReceptionModule = (() => {
   async function saveIntake() {
     if (_savingIntake) return;
     _savingIntake = true;
+    const saveBtn = document.getElementById('rc-save-btn');
+    const saveLabel = saveBtn?.textContent || "Enregistrer l'arrivée";
+    const setBtn = (label, disabled) => { if (saveBtn) { saveBtn.textContent = label; saveBtn.disabled = !!disabled; } };
     try {
       if (!window.HospitalCapabilities?.guardHospitalAction?.('view_patient')) return;
 
       const hospitalId = await CloudDB.getActiveHospitalId();
       const est = window.HospitalPortal?.currentEstablishmentFields?.() || {};
-      let mc = document.getElementById('rc-mc').value.trim().toUpperCase();
-      // Correctif (section 5) : même recherche cloud-first que
-      // lookupPatient() — l'agent peut saisir directement le numéro MC
-      // et enregistrer sans avoir cliqué "Rechercher" au préalable ; un
-      // lookup purement local aurait alors raté un patient déjà créé
-      // ailleurs et jamais synchronisé sur ce poste.
-      let patient = mc ? (await _lookupPatientCloud(mc)).patient : null;
+      let mc = '';
+      let patient = null;
 
-      // Nouveau patient si non trouvé.
-      if (!patient) {
+      // Correctif (audit "workflows mobile/desktop", section 4) : le mode
+      // (existant/nouveau) est désormais un choix EXPLICITE de l'agent
+      // (_rcMode), plus une déduction implicite de "le champ MC est-il
+      // vide" — un texte qui n'a pas la forme d'un numéro MC ne doit
+      // jamais silencieusement finir traité comme "nouveau patient".
+      if (_rcMode === 'existing') {
+        mc = document.getElementById('rc-mc').value.trim().toUpperCase();
+        if (!mc || !MC_FORMAT_RE.test(mc)) {
+          App.toast('Ce champ attend un numéro patient MedConnect valide (ex. MC-2026-CD-XXXXXXXX), ou choisissez « Nouveau patient ».', 'error');
+          return;
+        }
+        setBtn('⏳ Recherche…', true);
+        // Correctif (section 5) : même recherche cloud-first que
+        // lookupPatient() — l'agent peut saisir directement le numéro MC
+        // et enregistrer sans avoir cliqué "Rechercher" au préalable ; un
+        // lookup purement local aurait alors raté un patient déjà créé
+        // ailleurs et jamais synchronisé sur ce poste.
+        patient = (await _lookupPatientCloud(mc)).patient;
+        if (!patient) {
+          App.toast('Patient introuvable pour ce numéro. Choisissez « 🆕 Nouveau patient » pour créer sa fiche.', 'error');
+          setBtn(saveLabel, false);
+          return;
+        }
+      } else {
         const fn = document.getElementById('rc-fn').value.trim();
         const ln = document.getElementById('rc-ln').value.trim();
-        if (!fn || !ln) { App.toast('Patient introuvable : renseignez au moins prénom et nom.', 'error'); return; }
+        if (!fn || !ln) { App.toast('Prénom et nom sont obligatoires pour créer un nouveau patient.', 'error'); return; }
         if (!window.HospitalCapabilities?.guardHospitalAction?.('create_patient')) return;
         // Enregistrement normal (réception) = action desktop soumise à
         // l'abonnement. Seul l'intake d'urgence (js/hospital-emergency.js)
@@ -248,6 +316,7 @@ const HospitalReceptionModule = (() => {
           App.toast(subErr.message || "Enregistrement bloqué : abonnement de l'établissement expiré.", 'error');
           return;
         }
+        setBtn('⏳ Création de la fiche…', true);
         // Correctif (chantier sécurité, section 4) : bug confirmé — la
         // réception n'avait aucune clause Firestore create sur
         // mc_patients/patients/medical_records ; la fiche restait
@@ -259,6 +328,7 @@ const HospitalReceptionModule = (() => {
         const { patient: createdPatient, confirmed } = await window.DB.addPatientAndConfirmAtomic({
           firstname: fn, lastname: ln,
           dob: document.getElementById('rc-dob').value,
+          gender: document.getElementById('rc-gender').value,
           phone: document.getElementById('rc-phone').value.trim(),
           ...est,
         });
@@ -269,11 +339,13 @@ const HospitalReceptionModule = (() => {
           // pour que l'agent puisse réessayer sans ressaisir le
           // formulaire.
           App.toast("La fiche patient n'a pas été confirmée par Firestore. Vérifiez la connexion puis réessayez.", 'error');
+          setBtn(saveLabel, false);
           return;
         }
         patient = createdPatient;
         mc = patient.id;
       }
+      setBtn("⏳ Enregistrement de l'arrivée…", true);
 
       const reason = document.getElementById('rc-reason').value;
       const docSel = document.getElementById('rc-doctor');
@@ -340,6 +412,7 @@ const HospitalReceptionModule = (() => {
     } catch (e) {
       console.error('[Reception] saveIntake :', e);
       App.toast(e.message || 'Erreur lors de l\'enregistrement.', 'error');
+      setBtn(saveLabel, false);
     } finally { _savingIntake = false; }
   }
 
@@ -353,7 +426,7 @@ const HospitalReceptionModule = (() => {
     }
   }
 
-  return { render, openIntake, lookupPatient, saveIntake, closeVisit };
+  return { render, openIntake, setMode, lookupPatient, saveIntake, closeVisit };
 })();
 
 window.HospitalReceptionModule = HospitalReceptionModule;

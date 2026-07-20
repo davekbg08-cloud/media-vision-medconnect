@@ -631,8 +631,26 @@ const DB = (() => {
      appelants directs, maternité/urgences) ; ce second passage est
      redondant mais idempotent (set() par id identique), et c'est le
      seul dont le résultat est réellement attendu ici. */
+  // Correctif (audit "workflows mobile/desktop", section 5) : bug
+  // confirmé — addPatientAndConfirmAtomic() appelait addPatient(), qui
+  // écrit IMMÉDIATEMENT dans le cache local ET lance trois écritures
+  // _push() INDÉPENDANTES (mc_patients/patients/medical_records),
+  // chacune capable d'échouer et de se mettre en file d'outbox
+  // SÉPARÉMENT — avant même que le batch supposé atomique ci-dessous ne
+  // s'exécute. Hors ligne, ça pouvait mettre en file trois écritures
+  // non groupées pour une fiche que le batch atomique rejetait ensuite
+  // (et retirait du cache), rejouées plus tard indépendamment : la
+  // pire des deux moitiés d'une même fiche pouvait survivre. Cette
+  // fonction n'écrit donc plus JAMAIS dans le cache ni dans l'outbox
+  // avant la confirmation réelle du batch — buildPatientRecord() est un
+  // helper pur (aucune écriture), et le cache n'est renseigné qu'après
+  // un batch.commit() réellement confirmé.
+  function buildPatientRecord(data) {
+    return { ...data, id: generatePatientId(data.country_code), firstAccessCode: generateFirstAccessCode(), created_at: new Date().toISOString() };
+  }
+
   async function addPatientAndConfirmAtomic(data) {
-    const p = addPatient(data);
+    const p = buildPatientRecord(data);
     const medicalRecord = {
       recordId: p.id,
       patientId: p.id,
@@ -649,14 +667,20 @@ const DB = (() => {
       ['patients', p.id, p],
       ['medical_records', p.id, medicalRecord],
     ], { label: 'Création patient (réception)' });
-    if (!result.ok) {
-      // Retire la fiche provisoire du cache local — la réception ne
-      // doit jamais garder ni afficher une fiche que Firestore n'a pas
-      // réellement acceptée (contrairement au cas médecin/infirmier
-      // ci-dessus, où une fiche non confirmée reste visible avec un
-      // avertissement en attendant l'outbox).
-      store('mc_patients', getPatients().filter(x => x.id !== p.id));
+    if (result.ok) {
+      // Le cache local n'est renseigné qu'APRÈS confirmation réelle du
+      // batch — jamais avant (voir correctif ci-dessus).
+      const list = getPatients();
+      list.push(p);
+      store('mc_patients', list);
     }
+    // Limite connue (chantier outbox, sections 1-2 à venir) : un échec
+    // hors ligne ne met encore rien en file pour rejeu automatique ici
+    // — l'agent doit réessayer manuellement une fois reconnecté (voir
+    // le message affiché par l'appelant). C'est volontairement plus
+    // sûr que l'ancien comportement (trois écritures non groupées mises
+    // en file séparément), pas une régression : aucune écriture
+    // partielle n'est plus jamais tentée.
     return { patient: p, confirmed: result.ok };
   }
 
@@ -1217,7 +1241,7 @@ const DB = (() => {
     pushCloud: _push, deleteCloud: _delete, roleCollection,
     getAccounts, saveAccounts, getUsers, saveUsers, upsertUserProfile,
     getRegistrationRequests, saveRegistrationRequests, createRegistrationRequest,
-    getPatients, savePatients, addPatient, addPatientAndConfirm, addPatientAndConfirmAtomic, updatePatient, deletePatient, getPatientById, searchPatients,
+    getPatients, savePatients, addPatient, addPatientAndConfirm, buildPatientRecord, addPatientAndConfirmAtomic, updatePatient, deletePatient, getPatientById, searchPatients,
     accountExistsForPatient, getPatientAccessCode,
     getConsultations, addConsultation, getPatientConsultations, deleteConsultation,
     getPrescriptions, addPrescription, updatePrescription, updatePrescriptionAndConfirm, getPatientPrescriptions,
