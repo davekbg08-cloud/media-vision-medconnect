@@ -79,7 +79,7 @@ test("mc_messages : notification système SANS hospitalId reste toujours autoris
   const doctor = env.authenticatedContext('doctor-msg-4', { role: 'doctor' }).firestore();
   await assertSucceeds(setDoc(doc(doctor, 'mc_messages', 'MSG-4'), {
     to_role: 'patient', to_id: 'MC-MSG-4', type: 'appointment', subject: 'RDV', body: 'RDV demain',
-    sourceDevice: 'desktop',
+    sourceDevice: 'desktop', fromUid: 'doctor-msg-4',
   }));
 });
 
@@ -90,6 +90,6 @@ test("mc_messages : notification système avec hospitalId vide ('') reste toujou
   const doctor = env.authenticatedContext('doctor-msg-5', { role: 'doctor' }).firestore();
   await assertSucceeds(setDoc(doc(doctor, 'mc_messages', 'MSG-5'), {
     to_role: 'patient', to_id: 'MC-MSG-5', type: 'prescription', subject: 'Ordonnance', body: 'Prête',
-    hospitalId: '', sourceDevice: 'desktop',
+    hospitalId: '', sourceDevice: 'desktop', fromUid: 'doctor-msg-5',
   }));
 });

@@ -283,18 +283,27 @@ async function main() {
         for (const userRecord of page.users) {
           adminUsersScanned++;
           const claims = userRecord.customClaims || {};
-          if (claims.admin === true && !allowlist.has(userRecord.uid)) {
-            if (!args.apply) {
-              console.log(`🔍 [dry-run] claim admin retiré (hors allowlist) pour ${userRecord.uid}`);
-              continue;
-            }
-            try {
-              await auth.setCustomUserClaims(userRecord.uid, { ...claims, admin: false });
-              adminClaimsRevoked++;
-            } catch (err) {
-              adminReconcileErrors++;
-              console.warn(`⚠️  Retrait du claim admin échoué pour ${userRecord.uid} :`, err?.message || err);
-            }
+          if (claims.admin !== true) continue;
+          // Correctif (audit "workflows mobile/desktop", section 20) :
+          // seuls les retraits étaient journalisés — un opérateur ne
+          // pouvait pas voir, en dry-run, la liste COMPLÈTE des UID
+          // portant admin:true (ceux conservés ET ceux retirés) pour
+          // vérifier l'allowlist avant d'appliquer. Purement additif :
+          // aucun changement de comportement, seulement de visibilité.
+          if (allowlist.has(userRecord.uid)) {
+            console.log(`✅ [audit] claim admin conservé (présent dans l'allowlist) pour ${userRecord.uid} (${userRecord.email || 'sans email'})`);
+            continue;
+          }
+          if (!args.apply) {
+            console.log(`🔍 [dry-run] claim admin retiré (hors allowlist) pour ${userRecord.uid} (${userRecord.email || 'sans email'})`);
+            continue;
+          }
+          try {
+            await auth.setCustomUserClaims(userRecord.uid, { ...claims, admin: false });
+            adminClaimsRevoked++;
+          } catch (err) {
+            adminReconcileErrors++;
+            console.warn(`⚠️  Retrait du claim admin échoué pour ${userRecord.uid} :`, err?.message || err);
           }
         }
         pageToken = page.pageToken;

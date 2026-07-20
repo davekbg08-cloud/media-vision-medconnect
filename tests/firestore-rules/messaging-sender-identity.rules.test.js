@@ -43,11 +43,20 @@ test("mc_messages : un document avec DEUX identités d'expéditeur contradictoir
   }));
 });
 
-test('mc_messages : un document sans AUCUN champ expéditeur reste accepté (notifications système historiques)', async () => {
+/* ── Correctif P0 (audit "workflows mobile/desktop", section 17) ────
+   Ce test verrouillait auparavant le comportement inverse
+   (assertSucceeds) : un message SANS AUCUNE identité d'expéditeur
+   était accepté dès lors que l'auteur était signé. js/network.js
+   notify() (seul point d'écriture réel) pose TOUJOURS fromUid en
+   usage normal — exiger au moins un identifiant réel ferme la
+   possibilité, pour un compte connecté, d'écrire un message
+   totalement non attribuable dans la boîte de n'importe quel
+   destinataire. */
+test("mc_messages : un document SANS AUCUN champ expéditeur est refusé (P0, plus de message non attribuable)", async () => {
   const env = await getTestEnv();
   await clearAll(env);
   const sender = env.authenticatedContext('sender-3').firestore();
-  await assertSucceeds(setDoc(doc(sender, 'mc_messages', 'MSG-4'), {
+  await assertFails(setDoc(doc(sender, 'mc_messages', 'MSG-4'), {
     mid: 'MSG-4', to_role: 'patient', to_id: 'PAT-4', type: 'appointment',
   }));
 });

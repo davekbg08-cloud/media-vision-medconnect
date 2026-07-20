@@ -105,7 +105,18 @@ test('sync-account-security.mjs réconcilie le claim admin indépendamment de mc
   const fs = require('fs');
   const source = fs.readFileSync(SCRIPT, 'utf8');
   assert.match(source, /auth\.listUsers\(/);
-  assert.match(source, /claims\.admin === true && !allowlist\.has\(userRecord\.uid\)/);
+  assert.match(source, /if \(claims\.admin !== true\) continue;/);
+  assert.match(source, /if \(allowlist\.has\(userRecord\.uid\)\)/);
+});
+
+// Correctif (audit "workflows mobile/desktop", section 20) : visibilité
+// complète en dry-run — un UID admin:true CONSERVÉ (présent dans
+// l'allowlist) doit aussi être journalisé, pas seulement ceux retirés,
+// pour que l'opérateur puisse vérifier l'allowlist avant --apply.
+test('sync-account-security.mjs journalise aussi les UID admin CONSERVÉS (présents dans l\'allowlist), pas seulement les retraits', () => {
+  const fs = require('fs');
+  const source = fs.readFileSync(SCRIPT, 'utf8');
+  assert.match(source, /claim admin conservé \(présent dans l'allowlist\)/);
 });
 
 test("sync-account-security.mjs : le mode dry-run n'appelle jamais setCustomUserClaims ni revokeRefreshTokens avant le garde args.apply", () => {

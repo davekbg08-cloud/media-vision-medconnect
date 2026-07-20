@@ -254,8 +254,24 @@ service cloud.firestore {
        document). Un document n'en posant AUCUN passe (comme
        aujourd'hui : notifications système historiques sans expéditeur
        humain identifié — ne durcit pas ce cas, hors scope). */
+    // Correctif P0 (audit "workflows mobile/desktop", section 17) :
+    // cette fonction vérifiait déjà que TOUT champ d'identité PRÉSENT
+    // correspondait à l'auteur réel (anti-usurpation), mais n'exigeait
+    // AUCUN de ces champs — un message sans fromUid/from_id/senderUid/
+    // createdByUid passait cette vérification par défaut. js/network.js
+    // notify() (seul point d'écriture réel de mc_messages/messages) pose
+    // TOUJOURS fromUid (au pire null si Auth.getUser() n'est pas encore
+    // peuplé, ce qui n'arrive pas en usage normal signedIn()) : exiger
+    // au moins un identifiant réel ferme la possibilité d'un message
+    // sans aucune identité d'expéditeur, sans affecter l'usage réel.
     function messageSenderIdentityOk(data) {
-      return (data.get('fromUid', null) == null || data.get('fromUid', null) == request.auth.uid) &&
+      return (
+        data.get('fromUid', null) != null ||
+        data.get('from_id', null) != null ||
+        data.get('senderUid', null) != null ||
+        data.get('createdByUid', null) != null
+      ) &&
+        (data.get('fromUid', null) == null || data.get('fromUid', null) == request.auth.uid) &&
         (data.get('from_id', null) == null || data.get('from_id', null) == request.auth.uid) &&
         (data.get('senderUid', null) == null || data.get('senderUid', null) == request.auth.uid) &&
         (data.get('createdByUid', null) == null || data.get('createdByUid', null) == request.auth.uid);
