@@ -1,8 +1,31 @@
 {
-  "version": "2.9.32",
-  "build": "2026.07.18.6",
-  "buildDate": "2026-07-18",
+  "version": "2.9.33",
+  "build": "2026.07.20.1",
+  "buildDate": "2026-07-20",
   "changelog": [
+    {
+      "version": "2.9.33",
+      "date": "2026-07-20",
+      "notes": [
+        "Correctif sécurité majeur : un membre du personnel sans le droit de décider un transfert médical (infirmier(ère), réception, laborantin, pharmacien) pouvait, via une écriture directe, créer un vrai transfert d'urgence inter-hôpitaux — désormais réservé au médecin (ou à l'administration de l'établissement), vérifié à la fois côté serveur et à l'affichage du bouton",
+        "Correctif : plusieurs formulaires desktop (nouveau dossier de grossesse, arrivée urgente, enregistrement à la réception) laissaient un(e) infirmier(ère) saisir entièrement l'identité d'un nouveau patient avant de découvrir, seulement à l'enregistrement, que son rôle ne le permet pas — les champs concernés ne sont désormais proposés qu'aux rôles qui peuvent réellement créer un patient",
+        "Correctif : la gestion des lits (ajout, mise en maintenance) restait visible pour un rôle qui n'y a pas droit (médecin) ; le bouton de transfert patient depuis la liste \"Patients\" pouvait rester invisible à tort après une reconnexion — les deux corrigés",
+        "Amélioration Réception : statistiques des lits (libres/occupés/en maintenance, taux d'occupation) affichées directement sur la page d'accueil",
+        "Correctif : l'attribution d'un lit à un patient pouvait, dans de rares cas (deux confirmations simultanées), réserver le même lit à deux patients différents — l'attribution passe désormais par une vérification atomique qui rend cela impossible",
+        "Correctif : la création d'une fiche patient par la réception n'était pas entièrement groupée (une coupure réseau en cours de création pouvait laisser une fiche incomplète) — désormais une seule opération, tout ou rien",
+        "Nouveau : annuaire non clinique des patients (identité administrative uniquement) pour réduire ce que la réception et le laboratoire ont besoin de consulter pour identifier un patient",
+        "Nouveau : une pharmacie sans compte existant peut désormais s'inscrire directement depuis le desktop hôpital (rattachée à l'établissement ou indépendante)",
+        "Correctif sécurité : l'affiliation d'un agent à son établissement était revérifiée en priorité depuis un cache local modifiable par le propriétaire de l'établissement plutôt que depuis la source réelle (hospitalMembers/demandes d'affiliation) — désormais vérifiée en priorité côté serveur, sans perdre la résilience hors ligne",
+        "Correctif : l'envoi d'un message affichait \"envoyé\" avant même de savoir si le message avait atteint le serveur ; le statut lu/non lu ne se synchronisait pas de façon fiable entre appareils ; aucun indicateur de messages non lus n'existait côté desktop hôpital (seulement sur mobile) — les trois corrigés, avec un badge desktop désormais présent",
+        "Correctif sécurité (premier accès patient) : une fenêtre de quelques instants restait exploitable pour créer un compte patient sans code d'accès valide sur une fiche héritée — fermée",
+        "Correctif sécurité : les demandes de transfert médical et de partage de dossier n'étaient pas assez strictement limitées à leurs auteurs et hôpitaux légitimes — renforcé avec un contrôle strict des changements de statut autorisés",
+        "Correctif sécurité : un message professionnel pouvait, dans certains cas, être créé sans aucune identité d'expéditeur vérifiable — désormais toujours refusé",
+        "Correctif sécurité : la réception et le laboratoire pouvaient lire des informations médicales hors de leur rôle réel sur certains écrans (admissions, urgences, lits, journaux d'audit) — accès restreint aux rôles réellement concernés",
+        "Amélioration : l'adresse courriel affichée dans l'application a été corrigée (faute de frappe), et la mention non vérifiée \"195 pays\" retirée de la page d'accueil",
+        "Fiabilité : chaque écriture qui n'atteint pas immédiatement le serveur (coupure réseau, latence) est désormais classée automatiquement — transitoire (nouvelle tentative automatique et espacée) ou bloquante (ex. permission refusée, ne se corrigera pas toute seule) — avec un nouvel écran \"Synchronisation\" dans les Paramètres (mobile et desktop) listant le détail et permettant une vérification manuelle immédiate",
+        "Sécurité (infrastructure) : premiers en-têtes de sécurité navigateur ajoutés (Firebase Hosting) en mode observation avant tout blocage, sans effet sur le fonctionnement actuel de l'application"
+      ]
+    },
     {
       "version": "2.9.32",
       "date": "2026-07-18",

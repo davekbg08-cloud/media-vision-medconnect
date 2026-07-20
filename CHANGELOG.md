@@ -7,6 +7,36 @@ jour) et l'écran **Paramètres → À propos**.
 La source unique de la version en cours est `config/app-version.json` —
 ce fichier doit rester cohérent avec elle.
 
+## 2.9.33 — 2026-07-20
+
+### Sécurité
+- Transfert médical d'urgence (emergencyTransfers) : un membre du personnel sans le droit de décider un transfert (infirmier(ère), réception, laborantin, pharmacien) pouvait, par une écriture Firestore directe, créer un vrai transfert en son nom — le helper serveur `canDecideTransfer()` existait déjà mais n'était jamais câblé sur la règle ; corrigé, et le bouton/l'action côté client (js/hospital.js) le vérifient désormais aussi.
+- Premier accès patient : dernière fenêtre de contournement du code d'accès sur une fiche héritée fermée.
+- Transferts médicaux et partages de dossier : contrôle des transitions de statut et de l'appartenance des parties renforcé.
+- Messagerie : un message professionnel pouvait être créé sans identité d'expéditeur vérifiable — désormais toujours refusé.
+- Lecture par rôle : réception et laboratoire pouvaient lire des informations hors de leur rôle réel sur plusieurs écrans (admissions, urgences, lits, journaux d'audit) — restreint.
+- Affiliation d'un agent à son établissement : revérifiée en priorité côté serveur (hospitalMembers/demandes d'affiliation) plutôt que depuis un cache local modifiable par le propriétaire de l'établissement, sans perdre la résilience hors ligne.
+- Premiers en-têtes de sécurité navigateur (Firebase Hosting) : X-Frame-Options, Strict-Transport-Security, Permissions-Policy, et une CSP en mode observation (Report-Only, jamais bloquante à ce stade).
+
+### Corrections
+- Formulaires desktop (nouveau dossier de grossesse, arrivée urgente, réception) : un(e) infirmier(ère) pouvait saisir entièrement l'identité d'un nouveau patient avant d'être refusé(e) seulement à l'enregistrement — les champs concernés ne sont désormais proposés qu'aux rôles qui peuvent réellement créer un patient.
+- Gestion des lits : boutons "+ Lit"/mise en maintenance restaient visibles pour un rôle sans ce droit (médecin) — corrigé.
+- Bouton de transfert patient (liste "Patients") : pouvait rester invisible à tort après une reconnexion (mauvaise source du rôle courant) — corrigé.
+- Attribution d'un lit : deux confirmations simultanées pouvaient réserver le même lit à deux patients — passe désormais par une transaction Firestore atomique.
+- Création de fiche patient par la réception : rendue réellement atomique (plus d'écritures indépendantes avant le batch).
+- Messagerie : "envoyé" s'affichait avant confirmation cloud réelle ; statut lu/non lu peu fiable entre appareils ; aucun badge de non-lus côté desktop — corrigés, avec un contrat commun confirmé/en attente et un nouveau badge desktop.
+
+### Nouveautés
+- Annuaire non clinique des patients (`patient_directory`), pour réduire ce que réception/laboratoire consultent pour identifier un patient.
+- Inscription et affiliation pharmacie directement depuis le desktop hôpital (rattachée à un établissement ou indépendante).
+- Statistiques des lits (libres/occupés/maintenance, taux d'occupation) sur la page Réception.
+- Écran "🔄 Synchronisation" (Paramètres, mobile et desktop) : classification automatique de chaque écriture en attente (transitoire vs bloquante), avec vérification manuelle immédiate.
+- Helper `ActionFeedback` commun (verrou anti-double-clic + retour confirmé/en attente/échec), appliqué à la messagerie mobile et desktop.
+
+### Autres
+- Adresse courriel affichée corrigée (faute de frappe) ; mention non vérifiée "195 pays" retirée de la page d'accueil.
+- Script d'audit des enregistrements pharmacie historiques sans propriétaire identifié (`scripts/audit-legacy-pharmacy-records.mjs`).
+
 ## 2.9.31 — 2026-07-18
 
 ### Sécurité
