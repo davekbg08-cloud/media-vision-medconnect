@@ -69,6 +69,7 @@ function setup({ role = 'doctor', hospitalStaff = [] } = {}) {
       renderConsultations: (c) => { renderCalls.push({ name: 'consultations', container: c }); c.innerHTML = 'consultations_OK'; },
       renderPrescriptions: (c) => { renderCalls.push({ name: 'prescriptions', container: c }); c.innerHTML = 'prescriptions_OK'; },
       openDetail: () => {},
+      openNewPatient: () => { renderCalls.push({ name: 'openNewPatient' }); },
     },
     Settings: { render: (c) => { renderCalls.push({ name: 'settings', container: c }); c.innerHTML = 'settings_OK'; } },
     PharmacyPortal: makeLeafInto('pharmacy'),
@@ -225,6 +226,42 @@ test('la route "doctors" ne propose les actions de retrait/validation qu\'à adm
   const { win: winAdmin, contentEl: contentAdmin } = setup({ role: 'admin_hospital', hospitalStaff: staff });
   await winAdmin.HospitalDesktopUI.navigate('doctors');
   assert.match(contentAdmin.innerHTML, /Retirer l'affiliation/, 'admin_hospital doit voir les actions administratives');
+});
+
+/* ── Correctif (audit "workflows mobile/desktop", section 3) ───────
+   Bug confirmé : la route "patients" (Patients — dossiers par année)
+   n'affichait AUCUN bouton "Nouveau patient", alors que
+   HospitalPortal.openNewPatient()/saveNewPatient() existent déjà et
+   que le rôle doctor/admin_hospital possède bien la capacité
+   create_patient. Corrigé en ajoutant le bouton, gardé par
+   HospitalCapabilities.can(role,'create_patient') — jamais affiché à
+   un rôle qui ne peut pas créer de patient (ex. nurse, lab, sur cette
+   route). */
+test('la route "patients" affiche "+ Nouveau patient" pour un rôle avec la capacité create_patient (doctor, admin_hospital)', async () => {
+  for (const role of ['doctor', 'admin_hospital']) {
+    const { win, contentEl } = setup({ role });
+    await win.HospitalDesktopUI.navigate('patients');
+    assert.match(contentEl.innerHTML, /\+ Nouveau patient/, `le rôle ${role} doit voir le bouton Nouveau patient`);
+    assert.match(contentEl.innerHTML, /HospitalPortal\.openNewPatient/, `le bouton doit appeler HospitalPortal.openNewPatient (rôle ${role})`);
+  }
+});
+
+test('la route "patients" n\'affiche PAS "+ Nouveau patient" pour un rôle sans la capacité create_patient (nurse)', async () => {
+  const { win, contentEl } = setup({ role: 'nurse' });
+  await win.HospitalDesktopUI.navigate('patients');
+  assert.doesNotMatch(contentEl.innerHTML, /\+ Nouveau patient/, "l'infirmier ne doit pas voir le bouton Nouveau patient sur cette route");
+});
+
+test('le tableau de bord (dashboard) propose aussi "+ Nouveau patient" en accès rapide pour un rôle avec create_patient', async () => {
+  const { win, contentEl } = setup({ role: 'doctor' });
+  await win.HospitalDesktopUI.navigate('dashboard');
+  assert.match(contentEl.innerHTML, /\+ Nouveau patient/, 'le tableau de bord médecin doit proposer Nouveau patient en accès rapide');
+});
+
+test('le tableau de bord (dashboard) ne propose PAS "+ Nouveau patient" pour un rôle sans create_patient (lab)', async () => {
+  const { win, contentEl } = setup({ role: 'lab' });
+  await win.HospitalDesktopUI.navigate('dashboard');
+  assert.doesNotMatch(contentEl.innerHTML, /\+ Nouveau patient/, 'le laborantin ne doit jamais voir Nouveau patient au tableau de bord');
 });
 
 /* ── 17-19. Settings/PharmacyPortal : compatibilité container ────── */

@@ -293,7 +293,7 @@ const Auth = (() => {
         <p>🌍 <strong>Votre numéro n'est pas encore dans notre registre ?</strong></p>
         <p>Envoyez votre numéro officiel + une photo de votre carte professionnelle à :</p>
         <p>📞 WhatsApp : <strong>+243 856 373 707</strong></p>
-        <p>✉️ Email : <strong>hallo.mediavision.tech@gmail.com</strong></p>
+        <p>✉️ Email : <strong>hello.mediavision.tech@gmail.com</strong></p>
         <p style="color:var(--text-dim);font-size:.72rem;margin-top:.4rem">Délai de traitement : 24 à 48h ouvrables</p>
       </div>`;
   }
@@ -836,7 +836,7 @@ const Auth = (() => {
       info = null;
     }
     if (!verified) {
-      _err('reg-err', `❌ Numéro non reconnu dans le registre.\nContactez l'administrateur : +243 856 373 707\nou hallo.mediavision.tech@gmail.com`);
+      _err('reg-err', `❌ Numéro non reconnu dans le registre.\nContactez l'administrateur : +243 856 373 707\nou hello.mediavision.tech@gmail.com`);
       return false;
     }
     const acc = { uid:`${role.slice(0,3).toUpperCase()}_${num}_${Date.now()}`, username:num, role, name:info?.name || `${LABELS[role]} (${num})`, email, status:'pending', created_at:new Date().toISOString(), ...extraField };

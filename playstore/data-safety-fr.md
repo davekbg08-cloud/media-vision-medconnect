@@ -26,4 +26,4 @@ Les donnees ne sont pas vendues. Elles peuvent etre visibles par les utilisateur
 
 ## Suppression des donnees
 
-Les utilisateurs peuvent demander la suppression ou la correction de leurs donnees par email : hallo.mediavision.tech@gmail.com.
+Les utilisateurs peuvent demander la suppression ou la correction de leurs donnees par email : hello.mediavision.tech@gmail.com.

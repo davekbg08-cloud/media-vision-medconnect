@@ -53,7 +53,7 @@ SECURITE
 - Localisation pharmacie visible uniquement si le pharmacien l'active
 
 Support : +243 856 373 707
-Email : hallo.mediavision.tech@gmail.com
+Email : hello.mediavision.tech@gmail.com
 
 MedConnect - La sante pour tous, partout.
 
@@ -67,6 +67,6 @@ https://medconnect-e81ba.web.app/privacy
 
 ## Contact developpeur
 
-Email : hallo.mediavision.tech@gmail.com
+Email : hello.mediavision.tech@gmail.com
 Telephone : +243 856 373 707
 Site web : https://medconnect-e81ba.web.app

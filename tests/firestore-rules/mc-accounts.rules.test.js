@@ -40,12 +40,22 @@ test('mc_accounts : création SANS secret ET sans authUid (inscription professio
   }));
 });
 
+// Correctif P0 (audit "workflows mobile/desktop") : ce fixture ne
+// portait auparavant aucun patient_id — depuis la fermeture de la
+// préemption sans patient_id (voir tests dédiés plus bas), un compte
+// patient doit toujours fournir patient_id + le code de premier accès
+// correspondant à la fiche mc_patients référencée.
 test('mc_accounts : création avec authUid == uid réellement connecté est acceptée', async () => {
   const env = await getTestEnv();
   await clearAll(env);
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, 'mc_patients', 'MC-TEST-4'), { id: 'MC-TEST-4', firstAccessCode: 'CODE4' });
+  });
   const patient = env.authenticatedContext('firebase-uid-xyz').firestore();
   await assertSucceeds(setDoc(doc(patient, 'mc_accounts', 'PAT_MC-TEST-4'), {
     uid: 'PAT_MC-TEST-4', role: 'patient', authUid: 'firebase-uid-xyz', status: 'approved',
+    patient_id: 'MC-TEST-4', firstAccessCode: 'CODE4',
   }));
 });
 
@@ -196,7 +206,17 @@ test("mc_accounts : création d'un compte patient SANS code alors qu'un code est
   }));
 });
 
-test("mc_accounts : création d'un compte patient pour une fiche héritée SANS firstAccessCode reste acceptée (rétro-compatibilité)", async () => {
+/* ── Correctif P0 (audit "workflows mobile/desktop") ──────────────
+   Ce test verrouillait auparavant le comportement inverse
+   (assertSucceeds) : une fiche héritée sans firstAccessCode
+   acceptait la création du compte patient SANS AUCUN code, ce qui
+   permettait à un tiers connaissant seulement le numéro MC-xxx de
+   préempter le compte. C'est exactement la faille identifiée par
+   l'audit — le test est corrigé pour verrouiller le comportement
+   sûr, pas supprimé. Les fiches historiques sans code nécessitent
+   une migration administrative dédiée pour recevoir un
+   firstAccessCode, jamais un contournement de cette règle. */
+test("mc_accounts : création d'un compte patient pour une fiche héritée SANS firstAccessCode est refusée (P0, plus de contournement)", async () => {
   const env = await getTestEnv();
   await clearAll(env);
   await env.withSecurityRulesDisabled(async (ctx) => {
@@ -204,9 +224,54 @@ test("mc_accounts : création d'un compte patient pour une fiche héritée SANS 
     await setDoc(doc(db, 'mc_patients', 'MC-TEST-CODE-4'), { id: 'MC-TEST-CODE-4' });
   });
   const patient = env.authenticatedContext('patient-legacy').firestore();
-  await assertSucceeds(setDoc(doc(patient, 'mc_accounts', 'PAT_MC-TEST-CODE-4'), {
+  await assertFails(setDoc(doc(patient, 'mc_accounts', 'PAT_MC-TEST-CODE-4'), {
     uid: 'PAT_MC-TEST-CODE-4', role: 'patient', authUid: 'patient-legacy', status: 'approved',
     patient_id: 'MC-TEST-CODE-4',
+  }));
+});
+
+/* ── Correctif P0 (audit "workflows mobile/desktop") ──────────────
+   Bug confirmé : patientFirstAccessOk(null, ...) renvoie vrai par
+   construction (branche dédiée aux comptes PROFESSIONNELS, sans
+   patient_id) — un compte role:'patient' pouvait donc être créé SANS
+   patient_id du tout, ce qui contournait entièrement le code de
+   premier accès (aucune fiche mc_patients à vérifier). Fermé en
+   exigeant patient_id non vide et docId == 'PAT_'+patient_id dans
+   validPatientAccountSelfCreate(). */
+test("mc_accounts : création d'un compte patient SANS patient_id est refusée (P0, contournement du code de premier accès)", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  const attacker = env.authenticatedContext('attacker-no-patient-id').firestore();
+  await assertFails(setDoc(doc(attacker, 'mc_accounts', 'PAT_ANYTHING'), {
+    uid: 'PAT_ANYTHING', role: 'patient', authUid: 'attacker-no-patient-id', status: 'approved',
+  }));
+});
+
+test("mc_accounts : création d'un compte patient refusée si docId ne correspond pas à PAT_{patient_id}", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, 'mc_patients', 'MC-TEST-CODE-MISMATCH'), { id: 'MC-TEST-CODE-MISMATCH', firstAccessCode: 'ABCD23' });
+  });
+  const attacker = env.authenticatedContext('attacker-docid-mismatch').firestore();
+  await assertFails(setDoc(doc(attacker, 'mc_accounts', 'PAT_UN-AUTRE-ID'), {
+    uid: 'PAT_UN-AUTRE-ID', role: 'patient', authUid: 'attacker-docid-mismatch', status: 'approved',
+    patient_id: 'MC-TEST-CODE-MISMATCH', firstAccessCode: 'ABCD23',
+  }));
+});
+
+test("mc_accounts : création d'un compte patient refusée sans authUid (plus de mode dégradé patient)", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, 'mc_patients', 'MC-TEST-CODE-NOAUTH'), { id: 'MC-TEST-CODE-NOAUTH', firstAccessCode: 'ABCD23' });
+  });
+  const unauthed = env.unauthenticatedContext().firestore();
+  await assertFails(setDoc(doc(unauthed, 'mc_accounts', 'PAT_MC-TEST-CODE-NOAUTH'), {
+    uid: 'PAT_MC-TEST-CODE-NOAUTH', role: 'patient', status: 'approved',
+    patient_id: 'MC-TEST-CODE-NOAUTH', firstAccessCode: 'ABCD23',
   }));
 });
 

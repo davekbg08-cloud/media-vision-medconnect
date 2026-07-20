@@ -558,11 +558,22 @@ service cloud.firestore {
        code (y compris vide) pendant cette fenêtre, vidant la
        protection anti-préemption. Un identifiant ne correspondant à
        AUCUNE fiche doit être refusé, pas laissé passer. */
+    // Correctif P0 (audit "workflows mobile/desktop") : la fiche
+    // pouvait auparavant être considérée "à jour" (code accepté)
+    // même quand mc_patients/{id}.firstAccessCode n'existait pas —
+    // ancien comportement voulu pour les fiches historiques créées
+    // avant ce champ, mais qui rouvrait la préemption pour TOUTE
+    // fiche sans code (un tiers connaissant juste le numéro MC-xxx
+    // pouvait créer le compte sans code). Un code absent sur la
+    // fiche refuse désormais la création — les fiches historiques
+    // sans code nécessitent une migration administrative dédiée
+    // (backfill manuel du champ, hors de cette règle), jamais un
+    // contournement silencieux ici.
     function patientFirstAccessOk(patientMcId, submittedCode) {
       return patientMcId == null ||
         (exists(/databases/$(database)/documents/mc_patients/$(patientMcId)) &&
-         (get(/databases/$(database)/documents/mc_patients/$(patientMcId)).data.get('firstAccessCode', null) == null ||
-          get(/databases/$(database)/documents/mc_patients/$(patientMcId)).data.get('firstAccessCode', null) == submittedCode));
+         get(/databases/$(database)/documents/mc_patients/$(patientMcId)).data.get('firstAccessCode', null) != null &&
+         get(/databases/$(database)/documents/mc_patients/$(patientMcId)).data.get('firstAccessCode', null) == submittedCode);
     }
 
     function canReadMedicalData(data) {
@@ -974,14 +985,27 @@ service cloud.firestore {
           data.get('status', null) == 'pending' &&
           hasNoSecretFields(data);
       }
-      // Cas patient : inchangé par rapport à la logique existante
-      // (docId PAT_{patientId}, authUid optionnel mais s'il est posé il
-      // doit correspondre à l'utilisateur connecté — anti-préemption déjà
-      // en place), avec en plus le rôle explicitement borné à 'patient'.
-      function validPatientAccountSelfCreate(data) {
+      // Cas patient — Correctif P0 (audit "workflows mobile/desktop") :
+      // patient_id était seulement optionnel ici (data.get(...,null)),
+      // et patientFirstAccessOk(null, ...) renvoie vrai par construction
+      // (branche dédiée aux comptes PROFESSIONNELS, qui n'ont pas de
+      // patient_id) — un compte role:'patient' pouvait donc être créé
+      // SANS patient_id du tout, contournant entièrement le code de
+      // premier accès. On exige désormais, pour ce cas précis, un
+      // patient_id non vide, un docId de la forme PAT_{patient_id} (le
+      // format déjà utilisé par js/auth.js _createPatientPin), un uid
+      // cohérent, et un authUid réel et obligatoire (déjà le
+      // comportement de l'app cliente, cf. js/auth.js : la création est
+      // refusée côté client si Firebase Auth n'a pas pu créer le
+      // compte — aucun mode dégradé patient à préserver ici).
+      function validPatientAccountSelfCreate(id, data) {
         return data.get('role', '') == 'patient' &&
-          (data.get('authUid', null) == null ||
-           (signedIn() && data.get('authUid', null) == request.auth.uid)) &&
+          data.get('patient_id', null) is string &&
+          data.get('patient_id', null).size() > 0 &&
+          id == 'PAT_' + data.get('patient_id', null) &&
+          data.get('uid', null) == id &&
+          signedIn() &&
+          data.get('authUid', null) == request.auth.uid &&
           hasNoSecretFields(data);
       }
       allow create: if !exists(/databases/$(database)/documents/mc_accounts/$(docId)) &&
@@ -990,7 +1014,7 @@ service cloud.firestore {
           isAdmin() ||
           validMcAccountSelfCreate(docId, request.resource.data) ||
           legacyDegradedProfessionalCreate(request.resource.data) ||
-          validPatientAccountSelfCreate(request.resource.data)
+          validPatientAccountSelfCreate(docId, request.resource.data)
         );
       // Correctif (chantier "durcissement sans Cloud Functions") :
       // contrairement à users/doctors/nurses/pharmacies
@@ -1665,6 +1689,23 @@ service cloud.firestore {
        marquer en transit/arrivé) sans toucher au contenu médical
        (emergencyPacket reste figé après création — non modifiable
        par update, seul le statut/timestamps changent). */
+    // Correctif P0/P1 (audit "workflows mobile/desktop", section 16) :
+    // matrice de transitions de statut d'un transfert d'urgence —
+    // alignée sur js/emergency-transfer.js STATUSES (requested/
+    // accepted/in_transit/arrived/completed/cancelled, PAS les
+    // libellés génériques rejected/closed d'un autre produit).
+    // L'annulation reste possible tant que le transfert n'est pas
+    // arrivé/terminé (cancelTransfer peut être appelé à tout moment
+    // avant l'arrivée, sans validation client existante — la règle
+    // serveur fixe donc ici la seule limite réelle).
+    function emergencyTransferStatusTransitionOk(oldStatus, newStatus) {
+      return oldStatus == newStatus ||
+        (oldStatus == 'requested' && (newStatus == 'accepted' || newStatus == 'cancelled')) ||
+        (oldStatus == 'accepted' && (newStatus == 'in_transit' || newStatus == 'cancelled')) ||
+        (oldStatus == 'in_transit' && (newStatus == 'arrived' || newStatus == 'cancelled')) ||
+        (oldStatus == 'arrived' && newStatus == 'completed');
+    }
+
     match /emergencyTransfers/{transferId} {
       // PARTIE I : remplace le "signedIn()" trop large (tout utilisateur
       // connecté, y compris hors du transfert) par une vérification
@@ -1674,17 +1715,37 @@ service cloud.firestore {
         isHospitalMember(resource.data.fromHospitalId) ||
         isHospitalMember(resource.data.toHospitalId) ||
         isConcernedPatient(resource.data.patientId);
+      // Correctif P0/P1 (section 16) : hospitalCanWriteFromDevice() ne
+      // vérifie QUE l'abonnement/le type d'appareil, jamais
+      // l'appartenance réelle — n'importe quel utilisateur connecté,
+      // même sans lien avec fromHospitalId, pouvait créer un transfert
+      // au nom de n'importe quel établissement. isHospitalMember()
+      // ferme cette faille ; requestingDoctorId (déjà posé par
+      // js/emergency-transfer.js createEmergencyTransfer, champ
+      // existant — aucun nouveau champ requis côté client) doit
+      // correspondre à l'auteur réel de l'écriture.
       allow create: if isAdmin() ||
-        (signedIn() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
-      // Mise à jour de statut : l'hôpital source ou le destinataire
-      // peuvent faire progresser le transfert, mais le paquet
-      // médical (emergencyPacket) et l'origine ne peuvent jamais
-      // être réécrits après création.
-      allow update: if isAdmin() ||
         (signedIn() &&
+         isHospitalMember(request.resource.data.get('fromHospitalId', null)) &&
+         request.resource.data.get('requestingDoctorId', null) == request.auth.uid &&
+         hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
+      // Correctif P0/P1 (section 16) : "signedIn()" seul laissait
+      // N'IMPORTE QUEL utilisateur connecté (aucun lien avec ce
+      // transfert) faire progresser son statut du moment que les
+      // champs figés ci-dessous restaient intacts. Restreint désormais
+      // aux membres réels de l'hôpital source OU destinataire (seuls
+      // acteurs légitimes, cf. js/emergency-transfer.js acceptTransfer/
+      // startTransfer/markArrived/completeTransfer/cancelTransfer),
+      // avec une matrice de transitions explicite et l'origine
+      // (source, destination, patient, auteur) entièrement figée.
+      allow update: if isAdmin() ||
+        ((isHospitalMember(resource.data.fromHospitalId) || isHospitalMember(resource.data.toHospitalId)) &&
          request.resource.data.emergencyPacket == resource.data.emergencyPacket &&
          request.resource.data.fromHospitalId == resource.data.fromHospitalId &&
-         request.resource.data.patientId == resource.data.patientId);
+         request.resource.data.toHospitalId == resource.data.toHospitalId &&
+         request.resource.data.patientId == resource.data.patientId &&
+         request.resource.data.get('requestingDoctorId', null) == resource.data.get('requestingDoctorId', null) &&
+         emergencyTransferStatusTransitionOk(resource.data.get('status', null), request.resource.data.get('status', null)));
       allow delete: if isAdmin();
     }
 
@@ -1697,8 +1758,16 @@ service cloud.firestore {
         isHospitalMember(resource.data.fromHospitalId) ||
         isHospitalMember(resource.data.toHospitalId) ||
         isConcernedPatient(resource.data.patientId);
+      // Correctif P0/P1 (audit "workflows mobile/desktop", section 16) :
+      // même faille que emergencyTransfers — hospitalCanWriteFromDevice()
+      // ne vérifie que l'abonnement, jamais l'appartenance réelle à
+      // fromHospitalId. isHospitalMember() ferme ce cas (un partage ne
+      // peut être créé qu'au nom d'un établissement dont on est
+      // réellement membre actif).
       allow create: if isAdmin() ||
-        (signedIn() && hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
+        (signedIn() &&
+         isHospitalMember(request.resource.data.get('fromHospitalId', null)) &&
+         hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice));
       // Seuls le statut/timestamps de révocation peuvent changer —
       // les sections partagées (allowedSections) et l'origine du
       // partage sont figées après création.

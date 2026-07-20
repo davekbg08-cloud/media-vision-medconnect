@@ -116,7 +116,7 @@ const Settings = (() => {
         </table>
         <button class="btn btn-ghost btn-sm" style="margin-top:.8rem" onclick="VersionManager.openChangelog()">📋 Journal des versions</button>
         <p style="font-size:.8rem;margin-top:1rem">MedConnect © 2026 — MediaVision Tech</p>
-        <p style="font-size:.75rem;margin-top:.2rem">📞 +243 856 373 707 · ✉️ hallo.mediavision.tech@gmail.com</p>
+        <p style="font-size:.75rem;margin-top:.2rem">📞 +243 856 373 707 · ✉️ hello.mediavision.tech@gmail.com</p>
         <p style="font-size:.72rem;margin-top:.35rem;color:var(--text-dim)">
           Les données peuvent être stockées localement pour le mode hors ligne.<br>
           La synchronisation sécurisée utilise Firebase selon vos droits d'accès.

@@ -110,3 +110,116 @@ test("medical_record_shares : l'hôpital DESTINATAIRE peut approuver (statut), u
     status: 'active', approvedByUid: 'staff-dst-4',
   }));
 });
+
+/* ── Correctif P0/P1 (audit "workflows mobile/desktop", section 16) ──
+   hospitalCanWriteFromDevice() ne vérifiait que l'abonnement/le type
+   d'appareil, jamais l'appartenance réelle à fromHospitalId — un
+   utilisateur connecté SANS AUCUN lien avec l'hôpital source pouvait
+   créer un transfert d'urgence (ou un partage) en son nom. */
+test("emergencyTransfers : un tiers non membre de fromHospitalId ne peut pas créer un transfert", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  const tiers = env.authenticatedContext('tiers-create-1').firestore();
+  await assertFails(setDoc(doc(tiers, 'emergencyTransfers', 'T-TIERS-1'), {
+    fromHospitalId: 'HOSP-SRC-CREATE', toHospitalId: 'HOSP-DST-CREATE', patientId: 'MC-TIERS-1',
+    requestingDoctorId: 'tiers-create-1', status: 'requested', emergencyPacket: {},
+  }));
+});
+
+test("emergencyTransfers : un membre réel de fromHospitalId peut créer un transfert avec son propre uid comme requestingDoctorId", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await seedMember(env, 'HOSP-SRC-CREATE2', 'doctor-create-1');
+  const doctor = env.authenticatedContext('doctor-create-1').firestore();
+  await assertSucceeds(setDoc(doc(doctor, 'emergencyTransfers', 'T-OK-1'), {
+    fromHospitalId: 'HOSP-SRC-CREATE2', toHospitalId: 'HOSP-DST-CREATE2', patientId: 'MC-OK-1',
+    requestingDoctorId: 'doctor-create-1', status: 'requested', emergencyPacket: {},
+  }));
+});
+
+test("emergencyTransfers : un membre de fromHospitalId ne peut pas créer un transfert au nom d'un AUTRE utilisateur (requestingDoctorId usurpé)", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await seedMember(env, 'HOSP-SRC-CREATE3', 'doctor-create-2');
+  const doctor = env.authenticatedContext('doctor-create-2').firestore();
+  await assertFails(setDoc(doc(doctor, 'emergencyTransfers', 'T-SPOOF-1'), {
+    fromHospitalId: 'HOSP-SRC-CREATE3', toHospitalId: 'HOSP-DST-CREATE3', patientId: 'MC-SPOOF-1',
+    requestingDoctorId: 'quelquun-dautre', status: 'requested', emergencyPacket: {},
+  }));
+});
+
+test("emergencyTransfers : un tiers sans lien avec le transfert ne peut pas modifier son statut", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await seedTransfer(env, 'T-NOLINK-1', {
+    fromHospitalId: 'HOSP-SRC-NL', toHospitalId: 'HOSP-DST-NL', patientId: 'MC-NL-1',
+    requestingDoctorId: 'doctor-nl-1', status: 'requested', emergencyPacket: {},
+  });
+  const tiers = env.authenticatedContext('tiers-nolink-1').firestore();
+  const { updateDoc } = require('firebase/firestore');
+  await assertFails(updateDoc(doc(tiers, 'emergencyTransfers', 'T-NOLINK-1'), { status: 'accepted' }));
+});
+
+test("emergencyTransfers : l'hôpital destinataire peut faire progresser le statut (requested -> accepted -> in_transit -> arrived -> completed)", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await seedMember(env, 'HOSP-DST-PROGRESS', 'staff-dst-progress-1');
+  await seedTransfer(env, 'T-PROGRESS-1', {
+    fromHospitalId: 'HOSP-SRC-PROGRESS', toHospitalId: 'HOSP-DST-PROGRESS', patientId: 'MC-PROGRESS-1',
+    requestingDoctorId: 'doctor-progress-1', status: 'requested', emergencyPacket: {},
+  });
+  const dst = env.authenticatedContext('staff-dst-progress-1').firestore();
+  const { updateDoc } = require('firebase/firestore');
+  await assertSucceeds(updateDoc(doc(dst, 'emergencyTransfers', 'T-PROGRESS-1'), { status: 'accepted' }));
+  await assertSucceeds(updateDoc(doc(dst, 'emergencyTransfers', 'T-PROGRESS-1'), { status: 'in_transit' }));
+  await assertSucceeds(updateDoc(doc(dst, 'emergencyTransfers', 'T-PROGRESS-1'), { status: 'arrived' }));
+  await assertSucceeds(updateDoc(doc(dst, 'emergencyTransfers', 'T-PROGRESS-1'), { status: 'completed' }));
+});
+
+test("emergencyTransfers : une transition de statut invalide (ex. requested -> completed directement) est refusée", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await seedMember(env, 'HOSP-DST-SKIP', 'staff-dst-skip-1');
+  await seedTransfer(env, 'T-SKIP-1', {
+    fromHospitalId: 'HOSP-SRC-SKIP', toHospitalId: 'HOSP-DST-SKIP', patientId: 'MC-SKIP-1',
+    requestingDoctorId: 'doctor-skip-1', status: 'requested', emergencyPacket: {},
+  });
+  const dst = env.authenticatedContext('staff-dst-skip-1').firestore();
+  const { updateDoc } = require('firebase/firestore');
+  await assertFails(updateDoc(doc(dst, 'emergencyTransfers', 'T-SKIP-1'), { status: 'completed' }));
+});
+
+test("emergencyTransfers : toHospitalId et requestingDoctorId restent figés même pour l'hôpital source", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await seedMember(env, 'HOSP-SRC-IMMUT', 'staff-src-immut-1');
+  await seedTransfer(env, 'T-IMMUT-1', {
+    fromHospitalId: 'HOSP-SRC-IMMUT', toHospitalId: 'HOSP-DST-IMMUT', patientId: 'MC-IMMUT-1',
+    requestingDoctorId: 'doctor-immut-1', status: 'requested', emergencyPacket: {},
+  });
+  const src = env.authenticatedContext('staff-src-immut-1').firestore();
+  const { updateDoc } = require('firebase/firestore');
+  await assertFails(updateDoc(doc(src, 'emergencyTransfers', 'T-IMMUT-1'), { toHospitalId: 'HOSP-AUTRE' }));
+  await assertFails(updateDoc(doc(src, 'emergencyTransfers', 'T-IMMUT-1'), { requestingDoctorId: 'un-autre-medecin' }));
+});
+
+test("medical_record_shares : un tiers non membre de fromHospitalId ne peut pas créer un partage", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  const tiers = env.authenticatedContext('tiers-share-create-1').firestore();
+  await assertFails(setDoc(doc(tiers, 'medical_record_shares', 'S-TIERS-1'), {
+    fromHospitalId: 'HOSP-SRC-SHARE-CREATE', toHospitalId: 'HOSP-DST-SHARE-CREATE', patientId: 'MC-SHARE-TIERS-1',
+    allowedSections: ['summary'],
+  }));
+});
+
+test("medical_record_shares : un membre réel de fromHospitalId peut créer un partage", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await seedMember(env, 'HOSP-SRC-SHARE-CREATE2', 'staff-share-create-1');
+  const staff = env.authenticatedContext('staff-share-create-1').firestore();
+  await assertSucceeds(setDoc(doc(staff, 'medical_record_shares', 'S-OK-1'), {
+    fromHospitalId: 'HOSP-SRC-SHARE-CREATE2', toHospitalId: 'HOSP-DST-SHARE-CREATE2', patientId: 'MC-SHARE-OK-1',
+    allowedSections: ['summary'],
+  }));
+});

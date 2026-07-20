@@ -334,6 +334,8 @@ const HospitalDesktopUI = (() => {
       <div class="card">
         <h3>Accès rapides</h3>
         <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.5rem">
+          ${HospitalCapabilities.can(HospitalPermissions.getCurrentRole(), 'create_patient') ? `
+          <button class="btn btn-primary btn-sm" onclick="HospitalPortal.openNewPatient?.()">+ Nouveau patient</button>` : ''}
           <button class="btn btn-primary btn-sm" onclick="HospitalDesktopUI.navigate('beds')">🛏️ Admissions</button>
           <button class="btn btn-primary btn-sm" onclick="HospitalDesktopUI.navigate('lab')">🧪 Laboratoire</button>
           <button class="btn btn-ghost btn-sm" onclick="HospitalDesktopUI.navigate('patients')">👥 Patients (application)</button>
@@ -412,6 +414,9 @@ const HospitalDesktopUI = (() => {
     container.innerHTML = `
       <div class="hospital-page-header">
         <div><h1>👥 Patients — dossiers par année</h1><p>${patients.length} dossier(s) · classés par année</p></div>
+        ${HospitalCapabilities.can(HospitalPermissions.getCurrentRole(), 'create_patient') ? `
+        <button type="button" class="btn btn-primary btn-sm" id="patients-new-btn"
+          onclick="HospitalPortal.openNewPatient?.()">+ Nouveau patient</button>` : ''}
       </div>
       ${!years.length ? `<div class="card empty-state"><p>Aucun patient enregistré.</p></div>` :
         years.map(y => `
