@@ -37,9 +37,25 @@ const HospitalReceptionModule = (() => {
       _visits = [];
     }
 
+    // Correctif (audit "workflows mobile/desktop", section 11) : bug
+    // confirmé — la page Réception affichait les arrivées/pré-admissions
+    // mais jamais les statistiques de lits, alors que
+    // js/hospital-reception.js lit déjà 'beds' pour l'écran d'arrivée
+    // (openIntake). En cas d'échec de chargement, on affiche
+    // explicitement une indisponibilité — jamais un faux zéro qui
+    // laisserait croire que l'hôpital n'a aucun lit.
+    let beds = null;
+    try {
+      beds = await CloudDB.listByHospital('beds', hospitalId);
+    } catch (e) {
+      console.error('[Reception] Chargement des lits :', e);
+      beds = null;
+    }
+
     const today = new Date().toISOString().slice(0, 10);
     const todayVisits = _visits.filter(v => String(v.arrivedAt || '').slice(0, 10) === today);
     const waiting = todayVisits.filter(v => v.status === 'waiting');
+    const preAdmissions = todayVisits.filter(v => v.status === 'pre_admission').length;
 
     container.innerHTML = `
       <div class="hospital-page-header">
@@ -51,8 +67,13 @@ const HospitalReceptionModule = (() => {
         <div class="hospital-stat-card"><h3>${todayVisits.length}</h3><p>Arrivées aujourd'hui</p></div>
         <div class="hospital-stat-card"><h3>${waiting.length}</h3><p>⏳ En attente</p></div>
         <div class="hospital-stat-card"><h3>${todayVisits.filter(v=>v.status==='oriented').length}</h3><p>➡️ Orientés</p></div>
-        <div class="hospital-stat-card"><h3>${todayVisits.filter(v=>v.status==='pre_admission').length}</h3><p>🕓 Pré-admissions</p></div>
+        <div class="hospital-stat-card"><h3>${preAdmissions}</h3><p>🕓 Pré-admissions</p></div>
         <div class="hospital-stat-card"><h3>${todayVisits.filter(v=>v.status==='hospitalized').length}</h3><p>🛏️ Hospitalisés</p></div>
+      </div>
+
+      <div class="card">
+        <h3>🛏️ Lits de l'établissement</h3>
+        ${bedsRow(beds)}
       </div>
 
       <div class="card">
@@ -62,6 +83,34 @@ const HospitalReceptionModule = (() => {
           ${todayVisits.sort((a,b)=>String(b.arrivedAt||'').localeCompare(String(a.arrivedAt||''))).map(v => visitCard(v)).join('')}
         </div>`}
       </div>
+    `;
+  }
+
+  // Correctif (audit "workflows mobile/desktop", section 11) : lits
+  // totaux/libres/occupés/hors service + taux d'occupation (occupés /
+  // lits UTILISABLES, hors service exclu du dénominateur). `beds ===
+  // null` signale un échec de chargement — affiché explicitement,
+  // jamais confondu avec "zéro lit".
+  function bedsRow(beds) {
+    if (beds === null) {
+      return `<p class="muted">⚠️ Données des lits indisponibles.</p>`;
+    }
+    const total = beds.length;
+    const free = beds.filter(b => b.status === 'free').length;
+    const occupied = beds.filter(b => b.status === 'occupied').length;
+    const outOfService = beds.filter(b => b.status === 'maintenance').length;
+    const usable = total - outOfService;
+    const occupancyRate = usable > 0 ? Math.round((occupied / usable) * 100) : 0;
+    const lastUpdated = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    return `
+      <div class="hospital-stats-grid">
+        <div class="hospital-stat-card"><h3>${total}</h3><p>Lits totaux</p></div>
+        <div class="hospital-stat-card"><h3>${free}</h3><p>🟢 Libres</p></div>
+        <div class="hospital-stat-card"><h3>${occupied}</h3><p>🔴 Occupés</p></div>
+        <div class="hospital-stat-card"><h3>${outOfService}</h3><p>🟡 Hors service</p></div>
+        <div class="hospital-stat-card"><h3>${occupancyRate}%</h3><p>Taux d'occupation</p></div>
+      </div>
+      <p class="muted" style="margin-top:.4rem;font-size:.75rem">Dernière mise à jour : ${esc(lastUpdated)}</p>
     `;
   }
 
