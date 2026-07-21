@@ -773,6 +773,60 @@ const HospitalPortal = (() => {
     DB.deleteConsultation(cid); App.toast(t('msg_deleted')); openDetail(patientId);
   }
 
+  /* ── POINT D'ENTRÉE « NOUVELLE CONSULTATION » ───────
+     Retour utilisateur (v2.9.37) : les pages Consultations et
+     Ordonnances sont des HISTORIQUES en lecture seule — une ordonnance
+     ne se crée que DANS une consultation (openConsult → saveConsult).
+     Le médecin ne trouvait donc aucun bouton pour démarrer. On ajoute
+     ici un point d'entrée visible : on choisit d'abord le patient, puis
+     openConsult() ouvre le formulaire habituel (consultation +
+     ordonnance). Gardé par 'create_consultation' — l'affichage seul ne
+     suffit jamais (défense en profondeur, cohérent avec openConsult). */
+  function openConsultPatientPicker() {
+    if (!window.HospitalCapabilities?.can?.(Auth.getUser()?.role, 'create_consultation')) {
+      App.toast('Créer une consultation est réservé au médecin.', 'error');
+      return;
+    }
+    const list = patientsForContext();
+    if (!list.length) {
+      App.openModal('🩺 Nouvelle consultation', `
+        <p class="muted">Aucun patient enregistré pour le moment. Créez d'abord
+        une fiche patient (menu « Patients »), puis démarrez la consultation
+        depuis sa fiche ou de nouveau ici.</p>
+        <div style="text-align:right;margin-top:1rem">
+          <button class="btn btn-ghost" onclick="App.closeModal()">Fermer</button>
+        </div>`);
+      return;
+    }
+    App.openModal('🩺 Nouvelle consultation — choisir le patient', `
+      <div class="form-group">
+        <input type="text" id="consult-pick-search" placeholder="Rechercher un patient (nom ou N° MC)…"
+          oninput="HospitalPortal.filterConsultPicker(this.value)" autocomplete="off">
+      </div>
+      <div class="records-list" id="consult-pick-list">
+        ${list.map(consultPickerRow).join('')}
+      </div>`);
+  }
+
+  function consultPickerRow(p) {
+    const key = `${p.firstname||''} ${p.lastname||''} ${p.id||''}`.toLowerCase();
+    return `<div class="record-card consult-pick-row" data-key="${esc(key)}"
+        style="cursor:pointer" role="button" tabindex="0"
+        onclick="App.closeModal();HospitalPortal.openConsult('${esc(p.id)}')">
+        <p><strong>${esc(p.firstname||'')} ${esc(p.lastname||'')}</strong>
+           <span class="id-tag">${esc(p.id||'')}</span></p>
+        <p class="muted">${esc(p.gender||'')}${p.birthdate ? ' · né(e) le '+esc(p.birthdate) : ''}</p>
+      </div>`;
+  }
+
+  function filterConsultPicker(q) {
+    const needle = String(q || '').trim().toLowerCase();
+    document.querySelectorAll('#consult-pick-list .consult-pick-row').forEach(row => {
+      const hit = !needle || (row.dataset.key || '').includes(needle);
+      row.style.display = hit ? '' : 'none';
+    });
+  }
+
   /* ── CONSULTATIONS LIST ─────────────────────────── */
   function renderConsultations(main) {
     // Correctif (audit) : appelée directement par
@@ -786,7 +840,12 @@ const HospitalPortal = (() => {
     HospitalPermissions.requireRoute('consultations');
     const list = consultationsForContext().slice().reverse();
     main.innerHTML = `
-      <div class="page-header"><h2>🩺 ${t('nav_consultations')}</h2></div>
+      <div class="page-header" style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;flex-wrap:wrap">
+        <h2>🩺 ${t('nav_consultations')}</h2>
+        ${window.HospitalCapabilities?.can?.(Auth.getUser()?.role, 'create_consultation')
+          ? `<button type="button" class="btn btn-primary btn-sm" id="consult-new-btn"
+              onclick="HospitalPortal.openConsultPatientPicker()">+ ${t('new_consultation')}</button>` : ''}
+      </div>
       ${!list.length ? `<div class="card empty-state"><p>${t('no_data')}</p></div>` : ''}
       <div class="records-list">
         ${list.map(c => {
@@ -814,7 +873,12 @@ const HospitalPortal = (() => {
     const list = prescriptionsForContext().slice().reverse();
     const curs = t('currency');
     main.innerHTML = `
-      <div class="page-header"><h2>💊 Ordonnances</h2></div>
+      <div class="page-header" style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;flex-wrap:wrap">
+        <h2>💊 Ordonnances</h2>
+        ${window.HospitalCapabilities?.can?.(Auth.getUser()?.role, 'create_consultation')
+          ? `<button type="button" class="btn btn-primary btn-sm" id="rx-new-consult-btn"
+              onclick="HospitalPortal.openConsultPatientPicker()">+ ${t('new_consultation')}</button>` : ''}
+      </div>
       ${!list.length ? `<div class="card empty-state"><p>${t('no_data')}</p></div>` : ''}
       <div class="records-list">
         ${list.map(rx => {
@@ -1055,6 +1119,7 @@ const HospitalPortal = (() => {
     viewAccessCode,
     openExternalSearch, searchExternalPatient, requestPatientAccess,
     openConsult, addRxItem, removeRxItem, runSmartCheck, saveConsult, delConsult,
+    openConsultPatientPicker, filterConsultPicker,
     openPrescriptionTarget, confirmPrescriptionTarget,
     renderConsultations, renderPrescriptions,
     openEmergencyTransfer, confirmEmergencyTransfer,

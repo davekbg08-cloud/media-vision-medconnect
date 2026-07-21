@@ -7,6 +7,15 @@ jour) et l'écran **Paramètres → À propos**.
 La source unique de la version en cours est `config/app-version.json` —
 ce fichier doit rester cohérent avec elle.
 
+## 2.9.37 — 2026-07-22
+
+Retours utilisateur sur le poste hôpital (desktop). Correctifs additifs, aucune nouvelle collection, aucune modification de la logique Pharmacie/Réception ni des règles Firestore.
+
+- **Médecin — créer une ordonnance.** Les pages « Consultations » et « Ordonnances » (des historiques en lecture seule) affichent désormais un bouton **« + Nouvelle Consultation »**. On choisit le patient, la consultation s'ouvre, et l'ordonnance s'y rédige comme d'habitude. Le médecin ne restait plus sans point d'entrée. Gardé par la capacité `create_consultation` (médecin/admin).
+- **Infirmier(ère) — créer une fiche.** Le bouton **« + Nouveau patient »** est de nouveau visible : la capacité `create_patient`, absente par erreur de la matrice desktop, est rendue à l'infirmière. Elle crée la fiche d'accueil (statut « À compléter par le médecin » jusqu'à la 1ʳᵉ consultation, cf. 2.9.36). Aucun droit médical supplémentaire (ni prescription, ni transfert, ni consultation).
+- **Infirmier(ère) — plus de « Réception / Accueil ».** Cette section n'apparaît plus dans le menu de l'infirmière : l'accueil et l'enregistrement des arrivées restent au rôle Réception et à l'administration. L'infirmière conserve Tableau de bord, Patients, Dossiers, Lits, Laboratoire, Ordonnances (lecture), Urgences, Maternité et Messagerie.
+- **Pharmacie — message d'affiliation au réseau lent.** Un dépassement de délai à la confirmation de l'affiliation n'est plus présenté comme une erreur rouge. Le compte est bien créé et la demande, enregistrée localement, est transmise automatiquement au retour de la connexion puis approuvée par l'administration. Les vrais échecs (établissement introuvable, permission refusée) restent signalés en rouge.
+
 ## 2.9.36 — 2026-07-21
 
 Correctif ciblé : complétion médicale d'une fiche patient créée par une infirmière. Aucune nouvelle fonctionnalité, aucune nouvelle collection ; Pharmacie et Réception inchangées.

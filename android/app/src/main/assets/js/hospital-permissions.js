@@ -32,7 +32,15 @@ const HospitalPermissions = (() => {
     doctors:       ['admin', 'admin_hospital', 'doctor'],
     lab:           ['admin', 'admin_hospital', 'doctor', 'nurse', 'lab'],
     pharmacy:      ['admin', 'admin_hospital', 'pharmacist'],
-    reception:     ['admin', 'admin_hospital', 'reception', 'nurse'],
+    // Retour utilisateur (v2.9.37) : l'infirmière n'a plus accès à
+    // « Réception / Accueil ». Ce n'est pas une fonction de soins :
+    // l'écran s'affichait pour elle, mais le bouton « + Enregistrer une
+    // arrivée » restait de toute façon bloqué (gardé par create_patient
+    // côté hospital-reception.js). La réception (enregistrement/
+    // orientation à l'accueil) reste au rôle 'reception' et à l'admin.
+    // L'infirmière garde dashboard, patients, dossiers, lits, labo,
+    // ordonnances (lecture), urgences, maternité, messagerie.
+    reception:     ['admin', 'admin_hospital', 'reception'],
     ai:            ['admin', 'admin_hospital', 'doctor'],
     subscription:  ['admin', 'admin_hospital'],
     // Messagerie interne à l'établissement (retour utilisateur : absente

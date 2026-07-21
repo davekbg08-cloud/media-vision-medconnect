@@ -1,8 +1,18 @@
 {
-  "version": "2.9.36",
-  "build": "2026.07.21.3",
-  "buildDate": "2026-07-21",
+  "version": "2.9.37",
+  "build": "2026.07.22.1",
+  "buildDate": "2026-07-22",
   "changelog": [
+    {
+      "version": "2.9.37",
+      "date": "2026-07-22",
+      "notes": [
+        "Poste hôpital (desktop) — Médecin : les pages « Consultations » et « Ordonnances » proposent désormais un bouton « + Nouvelle Consultation ». Il suffit de choisir le patient : la consultation s'ouvre, et c'est là que l'ordonnance se rédige. Le médecin ne restait plus bloqué devant une liste sans point de départ",
+        "Poste hôpital (desktop) — Infirmier(ère) : le bouton « + Nouveau patient » est de nouveau visible. L'infirmière peut créer la fiche d'accueil du patient (qui reste « À compléter par le médecin » jusqu'à la première consultation) ; elle ne gagne aucun droit de prescription ni de décision médicale",
+        "Poste hôpital (desktop) — Infirmier(ère) : la section « Réception / Accueil » ne s'affiche plus pour l'infirmière. L'accueil et l'enregistrement des arrivées restent au rôle Réception (et à l'administration) ; l'infirmière conserve Patients, Dossiers, Lits, Laboratoire, Ordonnances et Messagerie",
+        "Inscription d'une pharmacie (et autres rôles) : quand la confirmation de l'affiliation dépasse le délai à cause d'un réseau lent, le message n'est plus une erreur rouge alarmante. Le compte est bien créé et la demande d'affiliation, enregistrée, est transmise automatiquement dès le retour de la connexion — puis approuvée par l'administration"
+      ]
+    },
     {
       "version": "2.9.36",
       "date": "2026-07-21",

@@ -1,6 +1,6 @@
 {
   "name": "medconnect-desktop",
-  "version": "2.9.36",
+  "version": "2.9.37",
   "description": "MedConnect — application de bureau (Windows + Linux)",
   "main": "main.js",
   "homepage": "https://medconnect-e81ba.web.app/",

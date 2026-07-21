@@ -237,8 +237,10 @@ test('la route "doctors" ne propose les actions de retrait/validation qu\'à adm
    HospitalCapabilities.can(role,'create_patient') — jamais affiché à
    un rôle qui ne peut pas créer de patient (ex. nurse, lab, sur cette
    route). */
-test('la route "patients" affiche "+ Nouveau patient" pour un rôle avec la capacité create_patient (doctor, admin_hospital)', async () => {
-  for (const role of ['doctor', 'admin_hospital']) {
+test('la route "patients" affiche "+ Nouveau patient" pour un rôle avec la capacité create_patient (doctor, admin_hospital, nurse)', async () => {
+  // v2.9.37 : l'infirmière fait partie des rôles qui créent une fiche
+  // (parcours infirmière → médecin, v2.9.36) — elle DOIT voir le bouton.
+  for (const role of ['doctor', 'admin_hospital', 'nurse']) {
     const { win, contentEl } = setup({ role });
     await win.HospitalDesktopUI.navigate('patients');
     assert.match(contentEl.innerHTML, /\+ Nouveau patient/, `le rôle ${role} doit voir le bouton Nouveau patient`);
@@ -246,10 +248,12 @@ test('la route "patients" affiche "+ Nouveau patient" pour un rôle avec la capa
   }
 });
 
-test('la route "patients" n\'affiche PAS "+ Nouveau patient" pour un rôle sans la capacité create_patient (nurse)', async () => {
-  const { win, contentEl } = setup({ role: 'nurse' });
+test('la route "patients" n\'affiche PAS "+ Nouveau patient" pour un rôle sans la capacité create_patient (lab)', async () => {
+  // lab n'a pas create_patient (matrice HospitalCapabilities) — sert de
+  // rôle témoin négatif désormais que l'infirmière possède la capacité.
+  const { win, contentEl } = setup({ role: 'lab' });
   await win.HospitalDesktopUI.navigate('patients');
-  assert.doesNotMatch(contentEl.innerHTML, /\+ Nouveau patient/, "l'infirmier ne doit pas voir le bouton Nouveau patient sur cette route");
+  assert.doesNotMatch(contentEl.innerHTML, /\+ Nouveau patient/, "le laborantin ne doit pas voir le bouton Nouveau patient sur cette route");
 });
 
 test('le tableau de bord (dashboard) propose aussi "+ Nouveau patient" en accès rapide pour un rôle avec create_patient', async () => {
