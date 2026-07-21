@@ -28,8 +28,13 @@ import java.util.Arrays;
 
 public class MainActivity extends AppCompatActivity {
 
-    private static final String MEDCONNECT_PWA_URL = "https://davekbg08-cloud.github.io/media-vision-medconnect/?apk=v2.9.34";
+    private static final String MEDCONNECT_PWA_URL = "https://davekbg08-cloud.github.io/media-vision-medconnect/?apk=v2.9.35";
     private static final String TRUSTED_APK_URL_PREFIX = "https://davekbg08-cloud.github.io/media-vision-medconnect/downloads/";
+    // v2.9.35 (audit sécurité Android) : seules les pages de CET origine
+    // restent chargées dans le WebView de l'application (celui qui expose
+    // le pont natif AndroidUpdater). Toute autre destination est ouverte
+    // dans le navigateur système.
+    private static final String OFFICIAL_ORIGIN = "https://davekbg08-cloud.github.io/media-vision-medconnect";
 
     private WebView myWebView;
     private static final int LOCATION_PERMISSION_REQUEST_CODE = 100;
@@ -64,10 +69,19 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, String url) {
                 if (url == null) return false;
-                if (url.startsWith("https://davekbg08-cloud.github.io/media-vision-medconnect")) {
+                // Les pages du domaine officiel restent dans le WebView (l'app).
+                if (url.startsWith(OFFICIAL_ORIGIN)) {
                     return false;
                 }
-                view.loadUrl(url);
+                // v2.9.35 (audit sécurité Android) : bug confirmé — toute
+                // URL hors domaine officiel était auparavant chargée DANS
+                // ce WebView (view.loadUrl(url)), qui expose le pont natif
+                // AndroidUpdater et le contexte de session de l'application.
+                // Un lien externe (reçu dans un message, page d'aide,
+                // tentative de hameçonnage) s'ouvrait ainsi « à l'intérieur »
+                // de l'app. On délègue désormais au navigateur/app SYSTÈME
+                // (Intent ACTION_VIEW) — jamais au WebView de l'application.
+                openExternally(url);
                 return true;
             }
         });
@@ -108,6 +122,22 @@ public class MainActivity extends AppCompatActivity {
         myWebView.addJavascriptInterface(new AndroidUpdateBridge(), "AndroidUpdater");
 
         myWebView.loadUrl(MEDCONNECT_PWA_URL);
+    }
+
+    /* v2.9.35 (audit sécurité Android) : ouvre une destination hors
+       domaine officiel dans le navigateur / l'application système, jamais
+       dans le WebView de MedConnect. Couvre aussi les schémas non-http
+       (tel:, mailto:, geo:…). Un lien sans application capable de le gérer
+       est ignoré silencieusement plutôt que rechargé dans le WebView. */
+    private void openExternally(String url) {
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(intent);
+        } catch (Exception ignored) {
+            // Aucune application disponible pour cette URL : on n'ouvre rien
+            // (ne jamais retomber sur un chargement in-WebView).
+        }
     }
 
     /* Pont JS <-> natif pour la mise à jour de l'APK : la PWA (version-manager.js)

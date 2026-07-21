@@ -1,8 +1,16 @@
 {
-  "version": "2.9.34",
-  "build": "2026.07.21.1",
+  "version": "2.9.35",
+  "build": "2026.07.21.2",
   "buildDate": "2026-07-21",
   "changelog": [
+    {
+      "version": "2.9.35",
+      "date": "2026-07-21",
+      "notes": [
+        "Intégrité des stocks : une vente en pharmacie passe désormais par une transaction qui relit le stock réel au moment de l'écriture — il devient impossible de survendre un article, même si deux caisses vendent le même produit exactement en même temps (la vente est alors refusée entièrement au lieu de rendre le stock négatif)",
+        "Sécurité Android : un lien menant hors de l'application (reçu dans un message, page d'aide, lien externe) s'ouvre maintenant dans le navigateur du téléphone au lieu d'être chargé à l'intérieur de l'application"
+      ]
+    },
     {
       "version": "2.9.34",
       "date": "2026-07-21",
