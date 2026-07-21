@@ -119,3 +119,49 @@ test('mc_sales : admin conserve un accès global (non régressé)', async () => 
   const admin = env.authenticatedContext('root-admin-1', { role: 'admin' }).firestore();
   await assertSucceeds(getDoc(doc(admin, 'mc_sales', 'SALE-5')));
 });
+
+/* ── v2.9.34 (P1) : pharmacyUid immuable sur mc_medicines/mc_sales ── */
+
+test("mc_medicines : le propriétaire NE PEUT PAS réattribuer pharmacyUid à un autre pharmacien", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await seedDoc(env, 'mc_medicines', 'MED-IMM-1', { mid: 'MED-IMM-1', name: 'Stock', stock: '10', pharmacyUid: 'pharma-owner-7' });
+  const owner = env.authenticatedContext('pharma-owner-7', { role: 'pharmacist' }).firestore();
+  await assertFails(setDoc(doc(owner, 'mc_medicines', 'MED-IMM-1'), {
+    mid: 'MED-IMM-1', name: 'Stock', stock: '9', pharmacyUid: 'autre-pharma',
+  }));
+});
+
+test("mc_medicines : le propriétaire peut décrémenter SON stock (pharmacyUid inchangé)", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await seedDoc(env, 'mc_medicines', 'MED-IMM-2', { mid: 'MED-IMM-2', name: 'Stock', stock: '10', pharmacyUid: 'pharma-owner-8' });
+  const owner = env.authenticatedContext('pharma-owner-8', { role: 'pharmacist' }).firestore();
+  await assertSucceeds(setDoc(doc(owner, 'mc_medicines', 'MED-IMM-2'), {
+    mid: 'MED-IMM-2', name: 'Stock', stock: '7', pharmacyUid: 'pharma-owner-8',
+  }));
+});
+
+test("mc_medicines : une fiche legacy (sans pharmacyUid) peut se voir attribuer celui du propriétaire réel (backfill), jamais celui d'un tiers", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await seedDoc(env, 'mc_medicines', 'MED-IMM-3', { mid: 'MED-IMM-3', name: 'Legacy', stock: '4' });
+  const claimer = env.authenticatedContext('pharma-claimer-1', { role: 'pharmacist' }).firestore();
+  await assertSucceeds(setDoc(doc(claimer, 'mc_medicines', 'MED-IMM-3'), {
+    mid: 'MED-IMM-3', name: 'Legacy', stock: '4', pharmacyUid: 'pharma-claimer-1',
+  }));
+  await seedDoc(env, 'mc_medicines', 'MED-IMM-4', { mid: 'MED-IMM-4', name: 'Legacy2', stock: '4' });
+  await assertFails(setDoc(doc(claimer, 'mc_medicines', 'MED-IMM-4'), {
+    mid: 'MED-IMM-4', name: 'Legacy2', stock: '4', pharmacyUid: 'un-tiers',
+  }));
+});
+
+test("mc_sales : le propriétaire NE PEUT PAS réattribuer une vente à un autre pharmacien", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await seedDoc(env, 'mc_sales', 'SALE-IMM-1', { sid: 'SALE-IMM-1', total: '10.00', pharmacyUid: 'pharma-owner-9' });
+  const owner = env.authenticatedContext('pharma-owner-9', { role: 'pharmacist' }).firestore();
+  await assertFails(setDoc(doc(owner, 'mc_sales', 'SALE-IMM-1'), {
+    sid: 'SALE-IMM-1', total: '10.00', pharmacyUid: 'autre-pharma',
+  }));
+});

@@ -1594,6 +1594,13 @@ const DB = (() => {
   ══════════════════════════════════════════════════ */
   function getSales() { return load('mc_sales'); }
 
+  // Chantier v2.9.34 (P1) : addSale() OBSOLÈTE — conservé pour compat.
+  // Il écrivait la vente PUIS décrémentait le stock par écritures
+  // _push() INDÉPENDANTES (vente et chaque médicament séparément) : un
+  // échec partiel laissait la vente enregistrée sans déduction du stock
+  // (ou l'inverse), et Math.max(0, …) MASQUAIT une survente au lieu de
+  // la refuser (stock plancher à 0, mais la vente passait quand même).
+  // Utiliser addSaleAtomic() à la place.
   function addSale(items, total, patientId) {
     const list = getSales();
     const s = {
@@ -1601,15 +1608,10 @@ const DB = (() => {
       total: parseFloat(total).toFixed(2),
       patient_id: patientId || null,
       date: today(), time: new Date().toLocaleTimeString(),
-      // Chantier sécurité (section 11) : même correctif que
-      // addMedicine() — mc_sales n'avait aucun identifiant de
-      // propriétaire, et firestore.rules autorisait tout pharmacien à
-      // lire/écrire les ventes de N'IMPORTE QUEL AUTRE pharmacien.
       pharmacyUid: window.Auth?.getUser?.()?.uid || '',
     };
     list.push(s); store('mc_sales', list);
     _push('mc_sales', s.sid, s);
-    // Déduire le stock
     const meds = getMedicines();
     items.forEach(i => {
       const idx = meds.findIndex(m => m.mid === i.mid);
@@ -1618,6 +1620,105 @@ const DB = (() => {
     store('mc_medicines', meds);
     meds.forEach(m => _push('mc_medicines', m.mid, m));
     return s;
+  }
+
+  /* Chantier v2.9.34 (P1) : vente pharmacie ATOMIQUE et sans survente.
+     - Le stock est validé AVANT tout : si un article demande plus que le
+       stock disponible (ou une quantité ≤ 0, ou un médicament inconnu),
+       la vente entière est REFUSÉE — jamais de stock négatif, jamais de
+       vente partielle.
+     - La vente et les décréments de stock sont écrits dans UN SEUL lot
+       Firestore atomique (pushBatchAndReportDetailed) : tout ou rien.
+     - Le cache local n'est renseigné qu'APRÈS confirmation réelle.
+     - Contrat de retour (miroir de addPatientAndConfirmAtomic) :
+       { ok:true, confirmed:true, sale }                       → écrit.
+       { ok:false, confirmed:false, reason:'insufficient_stock',
+         insufficient:[…] }                                    → refus stock.
+       { ok:false, confirmed:false, queued:true, operationId } → hors ligne
+         (lot atomique en file, rejouable tel quel, cache NON renseigné).
+       { ok:false, confirmed:false, failed:true, blocked:true,
+         errorCode }                                           → rejet réel.
+       { ok:false, confirmed:false, failed:true, busy:true }   → double appel. */
+  let _sellingPharmacy = false;
+  async function addSaleAtomic(items, total, patientId) {
+    if (_sellingPharmacy) return { ok: false, confirmed: false, failed: true, busy: true };
+    _sellingPharmacy = true;
+    try {
+      const meds = getMedicines();
+      // 1) Validation du stock — jamais de survente / stock négatif.
+      const insufficient = [];
+      const plan = [];
+      for (const it of (items || [])) {
+        const idx = meds.findIndex(m => m.mid === it.mid);
+        if (idx === -1) { insufficient.push({ mid: it.mid, name: it.name || it.mid, reason: 'unknown' }); continue; }
+        const available = parseInt(meds[idx].stock) || 0;
+        const qty = parseInt(it.qty) || 0;
+        if (qty <= 0) { insufficient.push({ mid: it.mid, name: meds[idx].name, reason: 'invalid_qty' }); continue; }
+        if (qty > available) { insufficient.push({ mid: it.mid, name: meds[idx].name, available, requested: qty, reason: 'insufficient' }); continue; }
+        plan.push({ idx, mid: it.mid, newStock: available - qty });
+      }
+      if (insufficient.length) {
+        return { ok: false, confirmed: false, reason: 'insufficient_stock', insufficient };
+      }
+
+      // 2) Lot atomique : vente + médicaments décrémentés.
+      const s = {
+        sid: makeId('S'), items,
+        total: parseFloat(total).toFixed(2),
+        patient_id: patientId || null,
+        date: today(), time: new Date().toLocaleTimeString(),
+        pharmacyUid: window.Auth?.getUser?.()?.uid || '',
+      };
+      const updatedMeds = plan.map(pl => ({ ...meds[pl.idx], stock: String(pl.newStock), mid: pl.mid }));
+      const writes = [
+        ['mc_sales', s.sid, s],
+        ...updatedMeds.map(m => ['mc_medicines', m.mid, m]),
+      ];
+      const opMeta = { operationType: 'pharmacy_sale', module: 'pharmacy', groupId: s.sid };
+
+      const confirmLocally = () => {
+        const salesList = getSales();
+        if (!salesList.some(x => x.sid === s.sid)) { salesList.push(s); store('mc_sales', salesList); }
+        const freshMeds = getMedicines();
+        updatedMeds.forEach(um => { const i = freshMeds.findIndex(m => m.mid === um.mid); if (i !== -1) freshMeds[i] = um; });
+        store('mc_medicines', freshMeds);
+      };
+
+      // Hors ligne d'emblée : mise en file du lot atomique complet.
+      if (!_hasBatchSupport()) {
+        const operationId = _outboxAddBatch(writes, null, opMeta);
+        return { ok: false, confirmed: false, queued: true, operationId };
+      }
+
+      const result = await pushBatchAndReportDetailed(writes, { label: 'Vente pharmacie' });
+      if (result.ok) { confirmLocally(); return { ok: true, confirmed: true, sale: s }; }
+
+      if (result.timedOut) {
+        // Réconciliation : le commit est peut-être passé malgré le timeout.
+        try {
+          const doc = await firebaseDB.collection('mc_sales').doc(s.sid).get();
+          if (doc.exists) { confirmLocally(); return { ok: true, confirmed: true, sale: s, reconciled: true }; }
+        } catch (_) { /* relecture impossible : traité comme injoignable */ }
+        const operationId = _outboxAddBatch(writes, result.error, opMeta);
+        return { ok: false, confirmed: false, queued: true, operationId };
+      }
+
+      const classification = classifyOutboxError(result.error);
+      if (classification === 'blocked') {
+        // Rejet réel (permission, données invalides…) : rien n'est créé,
+        // rien n'est mis en file (le stock local reste intact).
+        return {
+          ok: false, confirmed: false, failed: true, blocked: true,
+          errorCode: result.error?.code || null,
+          errorMessage: result.error?.message || null,
+        };
+      }
+      // Échec transitoire : mise en file du lot atomique complet.
+      const operationId = _outboxAddBatch(writes, result.error, opMeta);
+      return { ok: false, confirmed: false, queued: true, operationId };
+    } finally {
+      _sellingPharmacy = false;
+    }
   }
 
   /* ══════════════════════════════════════════════════
@@ -1752,7 +1853,7 @@ const DB = (() => {
     getAllEmergencyCases, addEmergencyCaseRecord, updateEmergencyCaseRecord, getPatientEmergencyCases,
     getAllMaternityCases, addMaternityCaseRecord, updateMaternityCaseRecord, getPatientMaternityCases,
     getMedicines, addMedicine, updateMedicine, deleteMedicine,
-    getSales, addSale,
+    getSales, addSale, addSaleAtomic,
     getMessages, saveMessages,
     // Chantier v2.9.34 (P0 messagerie) : primitives ciblées — un seul
     // document écrit par action, plus jamais de réécriture de toute la

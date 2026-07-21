@@ -607,6 +607,17 @@ service cloud.firestore {
        explicite) — jusqu'à ce qu'une prochaine écriture les fasse
        passer sous ce même correctif (updateMedicine() préserve
        pharmacyUid une fois posé). */
+    // v2.9.34 (P1) : pharmacyUid IMMUABLE sur mc_medicines/mc_sales —
+    // un pharmacien ne peut pas réattribuer un stock ou une vente à un
+    // autre compte. Seule exception (rétro-compat) : un document legacy
+    // SANS pharmacyUid peut se voir attribuer celui du propriétaire réel
+    // qui écrit (backfill organique, jamais un tiers). L'admin plateforme
+    // (branche isAdmin séparée) reste libre.
+    function pharmacyUidImmutableOrClaim(before, after) {
+      return after.get('pharmacyUid', null) == before.get('pharmacyUid', null) ||
+        (before.get('pharmacyUid', null) == null &&
+         after.get('pharmacyUid', null) == request.auth.uid);
+    }
     function pharmacyOwnsOrLegacy(data) {
       return currentRoleIs('pharmacist') &&
         (data.get('pharmacyUid', null) == request.auth.uid || data.get('pharmacyUid', null) == null);
@@ -1378,7 +1389,12 @@ service cloud.firestore {
       allow read: if signedIn();
       allow create: if isAdmin() ||
         (currentRoleIs('pharmacist') && request.resource.data.get('pharmacyUid', null) == request.auth.uid);
-      allow update, delete: if isAdmin() || pharmacyOwnsOrLegacy(resource.data);
+      // v2.9.34 : la mise à jour du stock reste réservée au propriétaire,
+      // et ne peut jamais réattribuer pharmacyUid à un tiers.
+      allow update: if isAdmin() ||
+        (pharmacyOwnsOrLegacy(resource.data) &&
+         pharmacyUidImmutableOrClaim(resource.data, request.resource.data));
+      allow delete: if isAdmin() || pharmacyOwnsOrLegacy(resource.data);
     }
 
     match /mc_sales/{docId} {
@@ -1389,7 +1405,12 @@ service cloud.firestore {
       allow read: if isAdmin() || pharmacyOwnsOrLegacy(resource.data);
       allow create: if isAdmin() ||
         (currentRoleIs('pharmacist') && request.resource.data.get('pharmacyUid', null) == request.auth.uid);
-      allow update, delete: if isAdmin() || pharmacyOwnsOrLegacy(resource.data);
+      // v2.9.34 : une vente ne peut jamais être réattribuée à un autre
+      // pharmacien (pharmacyUid immuable).
+      allow update: if isAdmin() ||
+        (pharmacyOwnsOrLegacy(resource.data) &&
+         pharmacyUidImmutableOrClaim(resource.data, request.resource.data));
+      allow delete: if isAdmin() || pharmacyOwnsOrLegacy(resource.data);
     }
 
     /* PARTIE D — un utilisateur connecté quelconque pouvait auparavant
