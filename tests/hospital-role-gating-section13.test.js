@@ -59,8 +59,10 @@ function setupMaternity({ role = 'nurse' } = {}) {
   return { sandbox, opened, getEl };
 }
 
-test("hospital-maternity.js openNew() : masque les champs prénom/nom pour un rôle SANS 'create_patient' (nurse)", async () => {
-  const { sandbox, opened } = setupMaternity({ role: 'nurse' });
+test("hospital-maternity.js openNew() : masque les champs prénom/nom pour un rôle SANS 'create_patient' (lab)", async () => {
+  // v2.9.37 : l'infirmière possède désormais create_patient ; le témoin
+  // négatif est le laborantin, qui ne l'a pas (matrice HospitalCapabilities).
+  const { sandbox, opened } = setupMaternity({ role: 'lab' });
   await sandbox.HospitalMaternityModule.openNew();
   assert.doesNotMatch(opened.html, /id="mat-fn"/, "le champ prénom ne doit jamais être proposé à un rôle qui ne peut pas créer de patiente");
   assert.doesNotMatch(opened.html, /id="mat-ln"/);
@@ -74,8 +76,8 @@ test("hospital-maternity.js openNew() : affiche les champs prénom/nom pour un r
   assert.match(opened.html, /id="mat-ln"/);
 });
 
-test("hospital-maternity.js saveNew() : ne lève pas si mat-fn/mat-ln sont absents du DOM (nurse) — refuse proprement au lieu de crasher", async () => {
-  const { sandbox, getEl } = setupMaternity({ role: 'nurse' });
+test("hospital-maternity.js saveNew() : ne lève pas si mat-fn/mat-ln sont absents du DOM (lab) — refuse proprement au lieu de crasher", async () => {
+  const { sandbox, getEl } = setupMaternity({ role: 'lab' });
   await sandbox.HospitalMaternityModule.openNew();
   getEl('mat-lmp').value = '2026-01-01';
   getEl('mat-mc').value = '';
@@ -101,8 +103,9 @@ function setupEmergency({ role = 'nurse', cases = [] } = {}) {
   return { sandbox, opened, getEl };
 }
 
-test("hospital-emergency.js openIntake() : masque les champs prénom/nom pour un rôle SANS 'create_patient' (nurse)", async () => {
-  const { sandbox, opened } = setupEmergency({ role: 'nurse' });
+test("hospital-emergency.js openIntake() : masque les champs prénom/nom pour un rôle SANS 'create_patient' (lab)", async () => {
+  // v2.9.37 : l'infirmière a create_patient ; témoin négatif = lab.
+  const { sandbox, opened } = setupEmergency({ role: 'lab' });
   await sandbox.HospitalEmergencyModule.openIntake();
   assert.doesNotMatch(opened.html, /id="er-fn"/);
   assert.doesNotMatch(opened.html, /id="er-ln"/);
@@ -154,8 +157,10 @@ function setupReception({ role = 'nurse' } = {}) {
   return { sandbox, opened, getEl };
 }
 
-test("hospital-reception.js openIntake() : masque le mode 'Nouveau patient' pour un rôle SANS 'create_patient' (nurse)", async () => {
-  const { sandbox, opened } = setupReception({ role: 'nurse' });
+test("hospital-reception.js openIntake() : masque le mode 'Nouveau patient' pour un rôle SANS 'create_patient' (lab)", async () => {
+  // v2.9.37 : l'infirmière possède create_patient (et n'accède d'ailleurs
+  // plus à la réception) — le témoin négatif est désormais le laborantin.
+  const { sandbox, opened } = setupReception({ role: 'lab' });
   await sandbox.HospitalReceptionModule.openIntake();
   assert.doesNotMatch(opened.html, /rc-mode-new/);
   assert.doesNotMatch(opened.html, /id="rc-fn"/);

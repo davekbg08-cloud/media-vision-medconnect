@@ -1234,13 +1234,31 @@ const Auth = (() => {
   function _showAgentRegistrationDone(affiliationOutcome, affiliationReason) {
     let extra = '';
     if (affiliationOutcome === 'failed') {
-      const REASON_MESSAGES = {
-        establishment_not_found: 'Le compte a été créé, mais l\'établissement n\'a pas pu être retrouvé pour créer l\'affiliation. Contactez l\'administration.',
-        permission_denied: 'Le compte a été créé, mais Firestore a refusé la demande d\'affiliation.',
-        timeout: 'Le compte a été créé, mais la confirmation de l\'affiliation a expiré. Vérifiez la connexion.',
-      };
-      const msg = REASON_MESSAGES[affiliationReason] || 'Votre compte a été créé, mais la demande d\'affiliation n\'a pas été confirmée. Contactez l\'administration de l\'établissement.';
-      extra = `<p style="color:var(--danger);margin-top:.75rem">${esc(msg)}</p>`;
+      // Retour utilisateur (v2.9.37) : un TIMEOUT n'est pas un échec —
+      // c'est un cas RÉCUPÉRABLE, à distinguer d'un vrai refus. À
+      // l'inscription, la demande d'affiliation est déjà enregistrée
+      // localement (HospitalsRegistry.saveAffiliations) ET l'écriture
+      // Firestore reste en attente dans la persistance hors ligne : elle
+      // se synchronise automatiquement au retour du réseau, puis apparaît
+      // à l'administration pour approbation. On l'affiche donc comme une
+      // information neutre (le compte, lui, EST bien créé), pas comme une
+      // erreur rouge alarmante. Les vrais échecs (établissement
+      // introuvable, permission refusée) restent en rouge.
+      if (affiliationReason === 'timeout') {
+        extra = `<p style="color:var(--accent);margin-top:.75rem">
+          Votre compte est bien créé. La demande d'affiliation n'a pas encore
+          été confirmée par le serveur (réseau lent ou instable) : elle est
+          enregistrée et sera transmise automatiquement dès le retour de la
+          connexion, puis soumise à l'administration. Vous pourrez vous
+          connecter une fois l'affiliation approuvée.</p>`;
+      } else {
+        const REASON_MESSAGES = {
+          establishment_not_found: 'Le compte a été créé, mais l\'établissement n\'a pas pu être retrouvé pour créer l\'affiliation. Contactez l\'administration.',
+          permission_denied: 'Le compte a été créé, mais Firestore a refusé la demande d\'affiliation. Contactez l\'administration.',
+        };
+        const msg = REASON_MESSAGES[affiliationReason] || 'Votre compte a été créé, mais la demande d\'affiliation n\'a pas été confirmée. Contactez l\'administration de l\'établissement.';
+        extra = `<p style="color:var(--danger);margin-top:.75rem">${esc(msg)}</p>`;
+      }
     } else if (affiliationOutcome === 'no_establishment') {
       extra = `<p style="color:var(--text-muted);margin-top:.75rem">Votre affiliation sera demandée lors de votre première connexion à un établissement.</p>`;
     }

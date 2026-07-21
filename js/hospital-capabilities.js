@@ -56,9 +56,18 @@ const HospitalCapabilities = (() => {
       'admit_patient','discharge_patient','request_lab',
     ],
     nurse: [
-      'view_patient','edit_patient',
+      'view_patient','create_patient','edit_patient',
       'admit_patient','discharge_patient',
       'request_lab','manage_beds',
+      // create_patient (v2.9.37) : l'infirmière crée la FICHE D'ACCUEIL
+      // (saveNewPatient pose created_by_role:'nurse', status
+      // 'awaiting_doctor', medical_completion_status 'pending') — le
+      // médecin la complète médicalement à sa 1ʳᵉ consultation (parcours
+      // v2.9.36, DB.completeNurseCreatedPatientAfterConsultation). Sans
+      // cette capacité, le bouton « + Nouveau patient » restait masqué
+      // côté desktop (renderPatientsByYear), contredisant ce parcours et
+      // la consigne « ne pas retirer à l'infirmière le droit de créer une
+      // fiche ». Ne donne aucun droit médical supplémentaire.
       // PAS de decide_transfer, PAS de prescribe : l'infirmier
       // exécute des soins, il ne décide pas d'un transfert médical
       // ni ne prescrit.
