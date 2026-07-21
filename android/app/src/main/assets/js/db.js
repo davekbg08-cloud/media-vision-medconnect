@@ -857,16 +857,15 @@ const DB = (() => {
     return getPatientById(patientId)?.firstAccessCode || null;
   }
 
-  /* Variante async de addPatient() : attend la confirmation Firestore
-     réelle des 3 écritures avant de résoudre. addPatient() lance déjà
-     ces écritures en fire-and-forget (jamais attendu par ses
-     appelants historiques, ne pas changer son comportement) — ici on
-     les repousse explicitement en mode critique (_pushCritical, même
-     principe que pushAndReport) pour savoir si elles ont réellement
-     atteint le cloud. Nécessaire pour fermer la course où le code
-     d'accès (firstAccessCode) d'une fiche tout juste créée n'a pas
-     encore atteint Firestore au moment où le patient tente son
-     premier accès (voir firestore.rules patientFirstAccessOk). */
+  /* ⚠️ OBSOLÈTE (chantier v2.9.34, P0 création patient) : plus aucun
+     appelant applicatif — le parcours médecin (js/hospital.js
+     saveNewPatient) utilise désormais le service atomique unique
+     addPatientAndConfirmAtomic(), comme la réception. Conservée
+     uniquement pour la compatibilité de signature publique (consigne
+     du chantier : ne jamais casser un appelant externe éventuel) ; ne
+     pas réutiliser pour du nouveau code : cache local renseigné AVANT
+     confirmation, écritures indépendantes (non atomiques), pas de
+     patient_directory. */
   async function addPatientAndConfirm(data) {
     const p = addPatient(data);
     // Seul mc_patients est vérifié par patientFirstAccessOk() côté
@@ -933,40 +932,115 @@ const DB = (() => {
     };
   }
 
-  async function addPatientAndConfirmAtomic(data) {
-    const p = buildPatientRecord(data);
-    const medicalRecord = {
-      recordId: p.id,
-      patientId: p.id,
-      patientUid: p.uid || p.patient_uid || '',
-      created_by: p.created_by || '',
-      establishmentId: p.establishmentId || p.hospital_id || '',
-      type: 'patient_record',
-      status: 'active',
-      createdAt: p.created_at,
-      updatedAt: p.created_at,
-    };
-    const result = await pushBatchAndReportDetailed([
-      ['mc_patients', p.id, p],
-      ['patients', p.id, p],
-      ['medical_records', p.id, medicalRecord],
-      ['patient_directory', p.id, buildPatientDirectoryEntry(p)],
-    ], { label: 'Création patient (réception)' });
-    if (result.ok) {
-      // Le cache local n'est renseigné qu'APRÈS confirmation réelle du
-      // batch — jamais avant (voir correctif ci-dessus).
-      const list = getPatients();
-      list.push(p);
-      store('mc_patients', list);
+  /* Chantier v2.9.34 (P0 création patient) : SERVICE UNIQUE de création
+     patient, partagé par TOUS les rôles autorisés (médecin mobile,
+     médecin desktop, réception desktop) — le parcours médecin passait
+     encore par addPatientAndConfirm() (cache local immédiat + 3
+     écritures indépendantes, sans patient_directory, code d'accès
+     affiché même non confirmé).
+
+     Contrat de retour :
+     - { patient, confirmed: true }                    → les 4 documents
+       sont RÉELLEMENT dans Firestore (ou réconciliés après timeout) ;
+       le cache local vient d'être renseigné ; le code de premier accès
+       peut être affiché.
+     - { patient, confirmed: false, queued: true,
+         operationId }                                 → hors ligne (ou
+       cloud injoignable après timeout non réconciliable) : le groupe
+       ATOMIQUE complet est en file d'outbox comme UNE SEULE opération
+       (jamais décomposé), rejouable tel quel — le cache local n'est PAS
+       renseigné (il le sera par le listener Firestore quand le batch
+       aura réellement abouti), le code d'accès n'est PAS affichable.
+     - { patient: null, confirmed: false, failed: true,
+         blocked?, errorCode? }                        → rejet réel
+       (ex. permission refusée) : RIEN n'est créé nulle part, rien n'est
+       mis en file (un rejeu produirait le même refus ; et une nouvelle
+       tentative de l'agent, avec un NOUVEL identifiant, ne doit jamais
+       pouvoir entrer en collision avec une file fantôme). L'appelant
+       garde la modale ouverte pour permettre une nouvelle tentative.
+
+     Idempotence/réconciliation (Promise.race n'annule JAMAIS une
+     écriture déjà partie) : toutes les écritures sont des set() sur des
+     identifiants FIXES — rejouer le même groupe ne peut pas créer de
+     doublon. Après un timeout, on RELIT mc_patients/{id} : si le
+     document existe, le batch avait réellement abouti → confirmé
+     (jamais une nouvelle création proposée pour rien) ; sinon on met le
+     groupe en file (rejeu sans risque, mêmes ids). */
+  let _creatingPatient = false;
+  async function addPatientAndConfirmAtomic(data, options = {}) {
+    if (_creatingPatient) return { patient: null, confirmed: false, failed: true, busy: true };
+    _creatingPatient = true;
+    try {
+      const p = buildPatientRecord(data);
+      const medicalRecord = {
+        recordId: p.id,
+        patientId: p.id,
+        patientUid: p.uid || p.patient_uid || '',
+        created_by: p.created_by || '',
+        establishmentId: p.establishmentId || p.hospital_id || '',
+        type: 'patient_record',
+        status: 'active',
+        createdAt: p.created_at,
+        updatedAt: p.created_at,
+      };
+      const writes = [
+        ['mc_patients', p.id, p],
+        ['patients', p.id, p],
+        ['medical_records', p.id, medicalRecord],
+        ['patient_directory', p.id, buildPatientDirectoryEntry(p)],
+      ];
+      const opMeta = { operationType: 'patient_create', module: 'patients', groupId: p.id };
+
+      const confirmLocally = () => {
+        // Le cache local n'est renseigné qu'APRÈS confirmation réelle
+        // du batch — jamais avant.
+        const list = getPatients();
+        if (!list.some(x => x.id === p.id)) { list.push(p); store('mc_patients', list); }
+      };
+
+      // Hors ligne d'emblée : mise en file du groupe atomique complet.
+      if (!_hasBatchSupport()) {
+        const operationId = _outboxAddBatch(writes, null, opMeta);
+        return { patient: p, confirmed: false, queued: true, operationId };
+      }
+
+      const result = await pushBatchAndReportDetailed(writes, { label: 'Création patient', timeoutMs: options.timeoutMs });
+      if (result.ok) {
+        confirmLocally();
+        return { patient: p, confirmed: true };
+      }
+
+      if (result.timedOut) {
+        // Réconciliation : le commit est peut-être passé malgré le
+        // timeout côté interface.
+        try {
+          const doc = await firebaseDB.collection('mc_patients').doc(p.id).get();
+          if (doc.exists) {
+            confirmLocally();
+            return { patient: p, confirmed: true, reconciled: true };
+          }
+        } catch (_) { /* relecture impossible : traité comme injoignable ci-dessous */ }
+        const operationId = _outboxAddBatch(writes, result.error, opMeta);
+        return { patient: p, confirmed: false, queued: true, operationId };
+      }
+
+      const classification = classifyOutboxError(result.error);
+      if (classification === 'blocked') {
+        // Rejet réel (permission, données invalides…) : rien n'est créé,
+        // rien n'est mis en file — l'agent corrige et réessaie.
+        return {
+          patient: null, confirmed: false, failed: true, blocked: true,
+          errorCode: result.error?.code || null,
+          errorMessage: result.error?.message || null,
+        };
+      }
+      // Échec transitoire (service indisponible…) : le commit n'a pas
+      // abouti — mise en file du groupe atomique complet.
+      const operationId = _outboxAddBatch(writes, result.error, opMeta);
+      return { patient: p, confirmed: false, queued: true, operationId };
+    } finally {
+      _creatingPatient = false;
     }
-    // Limite connue (chantier outbox, sections 1-2 à venir) : un échec
-    // hors ligne ne met encore rien en file pour rejeu automatique ici
-    // — l'agent doit réessayer manuellement une fois reconnecté (voir
-    // le message affiché par l'appelant). C'est volontairement plus
-    // sûr que l'ancien comportement (trois écritures non groupées mises
-    // en file séparément), pas une régression : aucune écriture
-    // partielle n'est plus jamais tentée.
-    return { patient: p, confirmed: result.ok };
   }
 
   function updatePatient(id, data) {

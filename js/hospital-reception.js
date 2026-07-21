@@ -386,24 +386,31 @@ const HospitalReceptionModule = (() => {
         // dessus. addPatientAndConfirmAtomic() (js/db.js) attend un
         // batch atomique réellement confirmé (les 3 documents ensemble,
         // ou aucun) avant qu'on continue — jamais de fire-and-forget ici.
-        const { patient: createdPatient, confirmed } = await window.DB.addPatientAndConfirmAtomic({
+        const creation = await window.DB.addPatientAndConfirmAtomic({
           firstname: fn, lastname: ln,
           dob: document.getElementById('rc-dob').value,
           gender: document.getElementById('rc-gender').value,
           phone: document.getElementById('rc-phone').value.trim(),
           ...est,
         });
-        if (!confirmed) {
-          // addPatientAndConfirmAtomic() a déjà retiré la fiche
-          // provisoire du cache local en cas d'échec — on n'crée ni
-          // receptionVisits ni admission, et on laisse la modale ouverte
-          // pour que l'agent puisse réessayer sans ressaisir le
-          // formulaire.
-          App.toast("La fiche patient n'a pas été confirmée par Firestore. Vérifiez la connexion puis réessayez.", 'error');
+        if (!creation.confirmed) {
+          // Chantier v2.9.34 : contrat enrichi — l'arrivée
+          // (receptionVisits) ne doit JAMAIS être créée sur une fiche
+          // non confirmée, y compris quand la fiche est en file
+          // atomique (queued) : la visite référencerait un patient que
+          // Firestore ne connaît pas encore. Message différencié, modale
+          // laissée ouverte, champs intacts.
+          if (creation.queued) {
+            App.toast('📶 Pas de connexion — la fiche est en file de synchronisation (opération atomique). Enregistrez l\'arrivée une fois la fiche synchronisée (elle apparaîtra dans « Patient existant »).');
+          } else {
+            App.toast(creation.blocked
+              ? `❌ Création refusée par le serveur (${creation.errorCode || 'permission'}). Vérifiez vos droits puis réessayez.`
+              : "La fiche patient n'a pas été confirmée par Firestore. Vérifiez la connexion puis réessayez.", 'error');
+          }
           setBtn(saveLabel, false);
           return;
         }
-        patient = createdPatient;
+        patient = creation.patient;
         mc = patient.id;
       }
       setBtn("⏳ Enregistrement de l'arrivée…", true);
