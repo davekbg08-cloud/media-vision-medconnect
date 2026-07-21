@@ -60,15 +60,61 @@ const DB = (() => {
     return new Date(Date.now() + delay).toISOString();
   }
 
-  function _outboxAdd(collection, docId, data, err = null) {
-    const q = load(OUTBOX_KEY);
+  /* Contexte d'exécution capturé À LA MISE EN FILE (chantier v2.9.34,
+     P0 outbox) : module source, utilisateur, rôle, établissement —
+     purement informatif (inspecteur/diagnostic), jamais utilisé pour
+     décider d'un droit d'accès (les règles Firestore restent la seule
+     barrière). */
+  function _opContext(meta = {}) {
+    let userUid = null, userRole = null, hospitalId = null;
+    try {
+      const u = window.Auth?.getUser?.();
+      userUid = u?.uid || null; userRole = u?.role || null;
+    } catch (_) {}
+    try {
+      hospitalId = window.HospitalsRegistry?.getCurrentHospital?.()?.establishmentId || null;
+    } catch (_) {}
+    return {
+      module: meta.module || null,
+      operationType: meta.operationType || null,
+      userUid, userRole, hospitalId,
+      groupId: meta.groupId || null,
+    };
+  }
+
+  /* Rétro-compatibilité : les entrées écrites par les versions
+     précédentes n'ont ni operationId ni type — normalisées à la lecture
+     (jamais supprimées, jamais réinterprétées au-delà des champs
+     manquants). */
+  function _normalizeOutboxEntry(e) {
+    if (!e) return e;
+    const n = { ...e };
+    if (!n.operationId) n.operationId = makeId('OP');
+    if (!n.type) n.type = Array.isArray(n.writes) ? 'batch' : 'set';
+    if (!n.operationType) n.operationType = n.type === 'batch' ? 'batch' : `set:${n.collection || '?'}`;
+    if (!n.updatedAt) n.updatedAt = n.queuedAt || new Date().toISOString();
+    if (n.attempts == null) n.attempts = 0;
+    if (!n.classification) n.classification = 'retryable';
+    return n;
+  }
+  function _outboxLoad() { return load(OUTBOX_KEY).map(_normalizeOutboxEntry); }
+
+  function _outboxAdd(collection, docId, data, err = null, meta = {}) {
+    const q = _outboxLoad();
     // Dédoublonnage : une réécriture plus récente du même document
     // remplace l'ancienne en file (dernière valeur = la bonne) — repart
     // avec un compteur de tentatives à zéro (nouvelle donnée à écrire,
-    // pas un rejeu de l'ancienne).
-    const filtered = q.filter(e => !(e.collection === collection && e.docId === String(docId)));
+    // pas un rejeu de l'ancienne). Ne touche JAMAIS aux entrées batch
+    // (qui ne s'écrasent que par groupId, voir _outboxAddBatch).
+    const filtered = q.filter(e => !(e.type === 'set' && e.collection === collection && e.docId === String(docId)));
     filtered.push({
-      collection, docId: String(docId), data, queuedAt: new Date().toISOString(),
+      operationId: makeId('OP'),
+      type: 'set',
+      collection, docId: String(docId), data,
+      ..._opContext({ operationType: `set:${collection}`, ...meta }),
+      operationType: meta.operationType || `set:${collection}`,
+      queuedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
       attempts: 0, nextRetryAt: null,
       classification: classifyOutboxError(err),
       lastErrorCode: err?.code || null,
@@ -77,18 +123,46 @@ const DB = (() => {
     store(OUTBOX_KEY, filtered);
   }
 
-  function _outboxCount() { return load(OUTBOX_KEY).length; }
+  /* Mise en file d'un GROUPE ATOMIQUE (chantier v2.9.34, P0) : un batch
+     médical (ex. création patient : mc_patients+patients+medical_records+
+     patient_directory) est mémorisé comme UNE SEULE entrée, rejouée par
+     un seul firebaseDB.batch().commit() — jamais décomposée en
+     écritures indépendantes, ce qui romprait l'atomicité. */
+  function _outboxAddBatch(writes, err = null, meta = {}) {
+    const q = _outboxLoad();
+    const groupId = meta.groupId || makeId('GRP');
+    const filtered = q.filter(e => !(e.type === 'batch' && e.groupId === groupId));
+    const entry = {
+      operationId: makeId('OP'),
+      type: 'batch',
+      writes: writes.map(([col, id, data]) => [col, String(id), data]),
+      ..._opContext(meta),
+      groupId,
+      operationType: meta.operationType || 'batch',
+      queuedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      attempts: 0, nextRetryAt: null,
+      classification: classifyOutboxError(err),
+      lastErrorCode: err?.code || null,
+      lastErrorMessage: err?.message || null,
+    };
+    filtered.push(entry);
+    store(OUTBOX_KEY, filtered);
+    return entry.operationId;
+  }
+
+  function _outboxCount() { return _outboxLoad().length; }
   const outboxCount = _outboxCount;
 
   /** Instantané en lecture seule de la file — pour l'inspecteur UI
       (js/settings.js) : jamais utilisé pour décider quoi que ce soit,
       seulement pour AFFICHER l'état réel à l'utilisateur/l'admin. */
-  function getOutboxEntries() { return load(OUTBOX_KEY); }
+  function getOutboxEntries() { return _outboxLoad(); }
 
   /** Résumé agrégé — évite à chaque appelant (badge, inspecteur) de
       recompter lui-même les classifications. */
   function getOutboxSummary() {
-    const q = load(OUTBOX_KEY);
+    const q = _outboxLoad();
     const blocked = q.filter(e => e.classification === 'blocked').length;
     const retryable = q.length - blocked;
     const oldestQueuedAt = q.length
@@ -97,36 +171,69 @@ const DB = (() => {
     return { total: q.length, retryable, blocked, oldestQueuedAt };
   }
 
+  /** Rejoue UNE entrée (set ou batch). Retourne true si l'écriture a
+      abouti. Ne modifie pas la file — l'appelant s'en charge. */
+  async function _replayEntry(e) {
+    if (e.type === 'batch') {
+      if (typeof firebaseDB.batch !== 'function') throw new Error('batch non supporté');
+      const batch = firebaseDB.batch();
+      (e.writes || []).forEach(([col, id, data]) => {
+        batch.set(firebaseDB.collection(col).doc(String(id)), data);
+      });
+      await batch.commit();
+      return true;
+    }
+    await firebaseDB.collection(e.collection).doc(e.docId).set(e.data, { merge: true });
+    return true;
+  }
+
+  function _failedEntry(e, err) {
+    const attempts = (e.attempts || 0) + 1;
+    return {
+      ..._normalizeOutboxEntry(e), attempts,
+      updatedAt: new Date().toISOString(),
+      nextRetryAt: _computeNextRetryAt(attempts),
+      classification: classifyOutboxError(err),
+      lastErrorCode: err?.code || null,
+      lastErrorMessage: err?.message || null,
+    };
+  }
+
   let _flushing = false;
-  /** force:true (bouton "Vérifier la synchronisation") : rejoue même les
-      entrées dont le délai d'attente exponentiel (nextRetryAt) n'est pas
-      encore écoulé — jamais les entrées 'blocked' avant une nouvelle
-      tentative volontaire de l'utilisateur, qui a justement pour but de
-      vérifier si la situation a changé (ex. règle redéployée). */
+  /** Rejeu AUTOMATIQUE (et « Réessayer toutes les opérations normales »
+      avec force:true, qui ignore seulement le délai de backoff).
+
+      Correctif (chantier v2.9.34, P0) : bug confirmé — une entrée
+      'blocked' (permission refusée, argument invalide… : ne se
+      corrigera JAMAIS toute seule) était encore rejouée automatiquement
+      une fois son délai de backoff écoulé, et par le rejeu forcé
+      générique. Une entrée 'blocked' n'est désormais JAMAIS rejouée par
+      flushOutbox(), force ou pas — seules les actions manuelles
+      explicites la rejouent : retryOutboxOperation(operationId)
+      (« Réessayer cette opération ») ou retryBlockedOutbox()
+      (« Vérifier les opérations bloquées »). Elle n'est jamais
+      supprimée automatiquement non plus. */
   async function flushOutbox({ force = false } = {}) {
     if (_flushing || !firebaseReady || !firebaseDB) return;
-    const q = load(OUTBOX_KEY);
+    const q = _outboxLoad();
     if (!q.length) return;
     _flushing = true;
     const now = Date.now();
     const remaining = [];
     for (const e of q) {
+      if (e.classification === 'blocked') {
+        remaining.push(e); // jamais rejouée automatiquement — action manuelle requise
+        continue;
+      }
       if (!force && e.nextRetryAt && new Date(e.nextRetryAt).getTime() > now) {
         remaining.push(e); // pas encore l'heure du prochain essai (backoff)
         continue;
       }
       try {
-        await firebaseDB.collection(e.collection).doc(e.docId).set(e.data, { merge: true });
+        await _replayEntry(e);
       } catch (err) {
-        console.warn(`[MedConnect] Outbox : réécriture ${e.collection}/${e.docId} encore en échec :`, err?.message || err);
-        const attempts = (e.attempts || 0) + 1;
-        remaining.push({
-          ...e, attempts,
-          nextRetryAt: _computeNextRetryAt(attempts),
-          classification: classifyOutboxError(err),
-          lastErrorCode: err?.code || null,
-          lastErrorMessage: err?.message || null,
-        });
+        console.warn(`[MedConnect] Outbox : rejeu ${e.operationType || e.collection} encore en échec :`, err?.message || err);
+        remaining.push(_failedEntry(e, err));
       }
     }
     store(OUTBOX_KEY, remaining);
@@ -134,6 +241,88 @@ const DB = (() => {
     // Rafraîchit le badge de synchronisation pour refléter l'état réel.
     try { window.SyncBadge?.render?.(); } catch (_) {}
     if (remaining.length) console.warn(`[MedConnect] Outbox : ${remaining.length} écriture(s) toujours en attente.`);
+  }
+
+  /** Rejeu MANUEL d'UNE opération précise (y compris 'blocked') —
+      « Réessayer cette opération » dans l'inspecteur. */
+  async function retryOutboxOperation(operationId) {
+    if (!firebaseReady || !firebaseDB) return { ok: false, reason: 'offline' };
+    const q = _outboxLoad();
+    const idx = q.findIndex(e => e.operationId === operationId);
+    if (idx === -1) return { ok: false, reason: 'not_found' };
+    const e = q[idx];
+    try {
+      await _replayEntry(e);
+      q.splice(idx, 1);
+      store(OUTBOX_KEY, q);
+      try { window.SyncBadge?.render?.(); } catch (_) {}
+      return { ok: true };
+    } catch (err) {
+      q[idx] = _failedEntry(e, err);
+      store(OUTBOX_KEY, q);
+      try { window.SyncBadge?.render?.(); } catch (_) {}
+      return { ok: false, reason: 'failed', errorCode: err?.code || null, errorMessage: err?.message || null };
+    }
+  }
+
+  /** Rejeu MANUEL de TOUTES les opérations bloquées — « Vérifier les
+      opérations bloquées » dans l'inspecteur. Seule autre voie de rejeu
+      d'une entrée 'blocked' (ex. après redéploiement d'une règle). */
+  async function retryBlockedOutbox() {
+    if (!firebaseReady || !firebaseDB) return { attempted: 0, succeeded: 0, failed: 0 };
+    const q = _outboxLoad();
+    let attempted = 0, succeeded = 0;
+    const remaining = [];
+    for (const e of q) {
+      if (e.classification !== 'blocked') { remaining.push(e); continue; }
+      attempted++;
+      try {
+        await _replayEntry(e);
+        succeeded++;
+      } catch (err) {
+        remaining.push(_failedEntry(e, err));
+      }
+    }
+    store(OUTBOX_KEY, remaining);
+    try { window.SyncBadge?.render?.(); } catch (_) {}
+    return { attempted, succeeded, failed: attempted - succeeded };
+  }
+
+  /** Suppression MANUELLE d'une opération de la file — jamais appelée
+      automatiquement ; l'inspecteur (js/settings.js) exige une
+      confirmation explicite de l'utilisateur avant cet appel. */
+  function removeOutboxOperation(operationId) {
+    const q = _outboxLoad();
+    const filtered = q.filter(e => e.operationId !== operationId);
+    if (filtered.length === q.length) return false;
+    store(OUTBOX_KEY, filtered);
+    try { window.SyncBadge?.render?.(); } catch (_) {}
+    return true;
+  }
+
+  /* Export JSON de diagnostic — les valeurs dont la clé évoque un
+     secret (mot de passe, PIN, jeton…) sont expurgées récursivement :
+     le fichier peut être partagé pour diagnostic sans fuiter un
+     identifiant. */
+  const SENSITIVE_KEY_RE = /(password|passwd|pwd|pin|secret|token|apikey|api_key|credential|authkey|auth_key|privatekey|private_key)/i;
+  function _redactSecrets(value) {
+    if (Array.isArray(value)) return value.map(_redactSecrets);
+    if (value && typeof value === 'object') {
+      const out = {};
+      for (const [k, v] of Object.entries(value)) {
+        out[k] = SENSITIVE_KEY_RE.test(k) ? '[expurgé]' : _redactSecrets(v);
+      }
+      return out;
+    }
+    return value;
+  }
+  function exportOutboxDiagnostic() {
+    return JSON.stringify({
+      exportedAt: new Date().toISOString(),
+      appVersion: (typeof window !== 'undefined' && window.VersionManager?.getCurrent?.()?.version) || null,
+      summary: getOutboxSummary(),
+      entries: _redactSecrets(_outboxLoad()),
+    }, null, 2);
   }
 
   /* ── IDs UNIQUES ──────────────────────────────────────
@@ -1333,6 +1522,10 @@ const DB = (() => {
     // instantanés en LECTURE SEULE (js/settings.js, js/sync-badge.js) —
     // jamais utilisés pour décider quoi que ce soit côté métier.
     getOutboxEntries, getOutboxSummary, classifyOutboxError,
+    // Chantier v2.9.34 (P0 outbox) : rejeu manuel ciblé (seule voie de
+    // rejeu d'une entrée 'blocked'), suppression manuelle confirmée,
+    // export de diagnostic expurgé.
+    retryOutboxOperation, retryBlockedOutbox, removeOutboxOperation, exportOutboxDiagnostic,
     // pushCloud/deleteCloud : wrappers publics sur _push/_delete, à
     // utiliser par tout module (access_control.js, hospitals_registry.js,
     // affiliation-cleanup.js...) au lieu de réimplémenter un mini-push
