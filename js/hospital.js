@@ -433,29 +433,34 @@ const HospitalPortal = (() => {
       ...completionFields,
     });
 
-    if (result.busy) { // création déjà en cours (double appui absorbé)
-      if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = submitLabel; }
-      return;
-    }
-    if (result.confirmed) {
-      App.closeModal(); App.toast(`✅ ${t('msg_saved')} — ${result.patient.id}`); navigateMedConnect('patients');
+    // Chantier v2.9.34 (P1) : annonce du contrat atomique enrichi
+    // centralisée par ActionFeedback.reportAtomic (même helper pour toutes
+    // les actions critiques). La SUITE métier (modale, navigation, code
+    // d'accès, bouton) reste décidée ici — reportAtomic ne fait qu'émettre
+    // le toast et renvoyer l'état normalisé.
+    const state = window.ActionFeedback?.reportAtomic?.(result, {
+      confirmedMsg: `✅ ${t('msg_saved')} — ${result.patient?.id || ''}`,
+      queuedMsg: '📶 Pas de connexion — la fiche est en file de synchronisation (opération atomique, rejouée automatiquement). Le code d\'accès patient sera disponible via 🔑 une fois la fiche synchronisée.',
+      blockedMsg: `❌ Création refusée par le serveur (${result.errorCode || 'permission'}). Vérifiez vos droits/votre affiliation puis réessayez.`,
+      failedMsg: '❌ Création impossible pour le moment. Vérifiez la connexion puis réessayez.',
+    });
+
+    if (state === 'confirmed') {
+      App.closeModal(); navigateMedConnect('patients');
       // Le code de premier accès n'est affiché qu'ICI — après
       // confirmation réelle de Firestore (jamais sur un état incertain).
       showFirstAccessCodeModal(result.patient, true);
       return;
     }
-    if (result.queued) {
+    if (state === 'queued') {
       App.closeModal(); navigateMedConnect('patients');
-      App.toast('📶 Pas de connexion — la fiche est en file de synchronisation (opération atomique, rejouée automatiquement). Le code d\'accès patient sera disponible via 🔑 une fois la fiche synchronisée.');
       return;
     }
-    // Rejet réel : la modale RESTE OUVERTE, les champs saisis restent
-    // visibles pour une nouvelle tentative — aucun succès affiché,
-    // aucun numéro/code présenté comme sauvegardé.
+    // 'busy' (double appui absorbé) ou rejet réel : la modale RESTE
+    // OUVERTE, les champs saisis restent visibles pour une nouvelle
+    // tentative — aucun succès affiché, aucun code présenté comme
+    // sauvegardé. Le bouton est réactivé.
     if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = submitLabel; }
-    App.toast(result.blocked
-      ? `❌ Création refusée par le serveur (${result.errorCode || 'permission'}). Vérifiez vos droits/votre affiliation puis réessayez.`
-      : '❌ Création impossible pour le moment. Vérifiez la connexion puis réessayez.', 'error');
   }
 
   // Affiché une seule fois à la création de la fiche : le code n'est

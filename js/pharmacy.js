@@ -214,29 +214,30 @@ const PharmacyPortal = (() => {
       const pid   = document.getElementById('sale-pid')?.value?.trim() || null;
       const res   = await DB.addSaleAtomic([...cart], total, pid);
 
-      if (res?.confirmed) {
-        App.toast(`✅ ${t('sell')} — ${total.toFixed(2)} ${t('currency')}`);
+      // Message de stock insuffisant détaillé par article (spécifique à la
+      // vente) transmis à ActionFeedback, qui centralise l'annonce du
+      // contrat atomique enrichi et renvoie l'état normalisé.
+      const insufficientMsg = res?.reason === 'insufficient_stock'
+        ? `❌ Stock insuffisant : ${(res.insufficient || []).map(x =>
+            x.reason === 'insufficient' ? `${x.name} (stock ${x.available}, demandé ${x.requested})` : (x.name || x.mid)).join(', ')}. Vente annulée.`
+        : undefined;
+      const state = window.ActionFeedback?.reportAtomic?.(res, {
+        confirmedMsg: `✅ ${t('sell')} — ${total.toFixed(2)} ${t('currency')}`,
+        queuedMsg: '📶 Pas de connexion — la vente est en file de synchronisation (opération atomique). Le stock sera mis à jour une fois synchronisé.',
+        insufficientMsg,
+        failedMsg: '❌ Vente refusée par le serveur. Vérifiez vos droits et réessayez.',
+      });
+
+      // Suite métier décidée ici (jamais dans ActionFeedback).
+      if (state === 'confirmed') {
         printReceipt(res.sale);
         cart = [];
         PharmacyPortal._nav('pos');
-        return;
-      }
-      if (res?.reason === 'insufficient_stock') {
-        const names = (res.insufficient || []).map(x =>
-          x.reason === 'insufficient'
-            ? `${x.name} (stock ${x.available}, demandé ${x.requested})`
-            : (x.name || x.mid)).join(', ');
-        App.toast(`❌ Stock insuffisant : ${names}. Vente annulée.`, 'error');
-        return;
-      }
-      if (res?.queued) {
-        App.toast('📶 Pas de connexion — la vente est en file de synchronisation (opération atomique). Le stock sera mis à jour une fois synchronisé.', 'warning');
+      } else if (state === 'queued') {
         cart = [];
         PharmacyPortal._nav('pos');
-        return;
       }
-      // failed / blocked : rien n'a été écrit, le stock local reste intact.
-      App.toast('❌ Vente refusée par le serveur. Vérifiez vos droits et réessayez.', 'error');
+      // insufficient_stock / failed / busy : panier conservé, rien à faire.
     } finally {
       _checkingOut = false;
       const b = document.getElementById('checkout-btn');
