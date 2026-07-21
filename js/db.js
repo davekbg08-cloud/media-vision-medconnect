@@ -1622,48 +1622,67 @@ const DB = (() => {
     return s;
   }
 
-  /* Chantier v2.9.34 (P1) : vente pharmacie ATOMIQUE et sans survente.
-     - Le stock est validé AVANT tout : si un article demande plus que le
-       stock disponible (ou une quantité ≤ 0, ou un médicament inconnu),
-       la vente entière est REFUSÉE — jamais de stock négatif, jamais de
-       vente partielle.
-     - La vente et les décréments de stock sont écrits dans UN SEUL lot
-       Firestore atomique (pushBatchAndReportDetailed) : tout ou rien.
+  /* Chantier v2.9.34 (P1) + v2.9.35 (audit intégrité des stocks) : vente
+     pharmacie ATOMIQUE, sans survente, y compris CONCURRENTE.
+
+     v2.9.34 validait le stock à partir du cache LOCAL puis écrivait un lot
+     (batch.set) qui ÉCRASE le stock. Deux ventes simultanées sur deux
+     postes lisaient toutes deux « stock = 10 », vendaient 8 chacune et
+     écrivaient « stock = 2 » : 16 unités vendues pour 10 en stock, sans
+     erreur (survente concurrente). v2.9.35 réalise la vente EN LIGNE dans
+     une vraie transaction Firestore (runTransaction) : le stock de chaque
+     médicament est RELU au moment de l'écriture, la vente est refusée
+     ENTIÈREMENT si un article n'a plus assez de stock, et le SDK rejoue
+     la transaction si un document a changé entre-temps — jamais de
+     survente ni de stock négatif. Même mécanisme que l'attribution de lit
+     (CloudDB.assignBedTransaction).
+
      - Le cache local n'est renseigné qu'APRÈS confirmation réelle.
      - Contrat de retour (miroir de addPatientAndConfirmAtomic) :
        { ok:true, confirmed:true, sale }                       → écrit.
        { ok:false, confirmed:false, reason:'insufficient_stock',
-         insufficient:[…] }                                    → refus stock.
+         insufficient:[…] }                                    → refus stock
+         (relu en base : couvre la survente concurrente).
        { ok:false, confirmed:false, queued:true, operationId } → hors ligne
-         (lot atomique en file, rejouable tel quel, cache NON renseigné).
+         (lot en file, rejoué à la reconnexion — voir LIMITE ci-dessous).
        { ok:false, confirmed:false, failed:true, blocked:true,
          errorCode }                                           → rejet réel.
-       { ok:false, confirmed:false, failed:true, busy:true }   → double appel. */
+       { ok:false, confirmed:false, failed:true, busy:true }   → double appel.
+
+     LIMITE HONNÊTE : la garantie stricte anti-survente concurrente ne
+     s'applique qu'aux ventes réalisées EN LIGNE. Hors ligne, le SDK ne
+     permet pas de transaction : le lot optimiste (basé sur le stock
+     local) est mis en file et rejoué à la reconnexion — une survente
+     concurrente ne peut alors être totalement exclue. En pharmacie, le
+     poste de caisse est normalement connecté ; ce repli reste préférable
+     à un blocage de la vente. */
   let _sellingPharmacy = false;
   async function addSaleAtomic(items, total, patientId) {
     if (_sellingPharmacy) return { ok: false, confirmed: false, failed: true, busy: true };
     _sellingPharmacy = true;
     try {
+      const list = Array.isArray(items) ? items : [];
+      // 1) Pré-validation locale (feedback rapide, évite un aller-retour).
+      //    La garantie réelle vient de la RELECTURE transactionnelle plus
+      //    bas — le stock local peut être périmé (plus élevé que le réel).
       const meds = getMedicines();
-      // 1) Validation du stock — jamais de survente / stock négatif.
-      const insufficient = [];
+      const prelim = [];
       const plan = [];
-      for (const it of (items || [])) {
+      for (const it of list) {
         const idx = meds.findIndex(m => m.mid === it.mid);
-        if (idx === -1) { insufficient.push({ mid: it.mid, name: it.name || it.mid, reason: 'unknown' }); continue; }
+        if (idx === -1) { prelim.push({ mid: it.mid, name: it.name || it.mid, reason: 'unknown' }); continue; }
         const available = parseInt(meds[idx].stock) || 0;
         const qty = parseInt(it.qty) || 0;
-        if (qty <= 0) { insufficient.push({ mid: it.mid, name: meds[idx].name, reason: 'invalid_qty' }); continue; }
-        if (qty > available) { insufficient.push({ mid: it.mid, name: meds[idx].name, available, requested: qty, reason: 'insufficient' }); continue; }
+        if (qty <= 0) { prelim.push({ mid: it.mid, name: meds[idx].name, reason: 'invalid_qty' }); continue; }
+        if (qty > available) { prelim.push({ mid: it.mid, name: meds[idx].name, available, requested: qty, reason: 'insufficient' }); continue; }
         plan.push({ idx, mid: it.mid, newStock: available - qty });
       }
-      if (insufficient.length) {
-        return { ok: false, confirmed: false, reason: 'insufficient_stock', insufficient };
+      if (prelim.length) {
+        return { ok: false, confirmed: false, reason: 'insufficient_stock', insufficient: prelim };
       }
 
-      // 2) Lot atomique : vente + médicaments décrémentés.
       const s = {
-        sid: makeId('S'), items,
+        sid: makeId('S'), items: list,
         total: parseFloat(total).toFixed(2),
         patient_id: patientId || null,
         date: today(), time: new Date().toLocaleTimeString(),
@@ -1684,38 +1703,70 @@ const DB = (() => {
         store('mc_medicines', freshMeds);
       };
 
-      // Hors ligne d'emblée : mise en file du lot atomique complet.
-      if (!_hasBatchSupport()) {
+      // Hors ligne / pas de transaction disponible : mise en file du lot
+      // optimiste (voir LIMITE dans l'en-tête de cette fonction).
+      if (!firebaseReady || !firebaseDB || typeof firebaseDB.runTransaction !== 'function') {
         const operationId = _outboxAddBatch(writes, null, opMeta);
         return { ok: false, confirmed: false, queued: true, operationId };
       }
 
-      const result = await pushBatchAndReportDetailed(writes, { label: 'Vente pharmacie' });
-      if (result.ok) { confirmLocally(); return { ok: true, confirmed: true, sale: s }; }
-
-      if (result.timedOut) {
-        // Réconciliation : le commit est peut-être passé malgré le timeout.
-        try {
-          const doc = await firebaseDB.collection('mc_sales').doc(s.sid).get();
-          if (doc.exists) { confirmLocally(); return { ok: true, confirmed: true, sale: s, reconciled: true }; }
-        } catch (_) { /* relecture impossible : traité comme injoignable */ }
-        const operationId = _outboxAddBatch(writes, result.error, opMeta);
+      // 2) Vente EN LIGNE dans une transaction : relecture + décrément
+      //    atomiques du stock réel, pose de la vente. Tout ou rien.
+      try {
+        await withTimeout(firebaseDB.runTransaction(async (tx) => {
+          const refs = list.map(it => firebaseDB.collection('mc_medicines').doc(String(it.mid)));
+          const snaps = [];
+          for (const r of refs) snaps.push(await tx.get(r)); // lectures AVANT écritures (exigence Firestore)
+          const txInsufficient = [];
+          const txUpdates = [];
+          snaps.forEach((snap, i) => {
+            const it = list[i];
+            if (!snap.exists) { txInsufficient.push({ mid: it.mid, name: it.name || it.mid, reason: 'unknown' }); return; }
+            const d = snap.data() || {};
+            const available = parseInt(d.stock) || 0;
+            const qty = parseInt(it.qty) || 0;
+            if (qty <= 0) { txInsufficient.push({ mid: it.mid, name: d.name, reason: 'invalid_qty' }); return; }
+            if (qty > available) { txInsufficient.push({ mid: it.mid, name: d.name, available, requested: qty, reason: 'insufficient' }); return; }
+            txUpdates.push({ ref: refs[i], newStock: available - qty });
+          });
+          if (txInsufficient.length) {
+            const err = new Error('insufficient_stock');
+            err.code = 'insufficient_stock';
+            err.insufficient = txInsufficient;
+            throw err;
+          }
+          txUpdates.forEach(u => tx.update(u.ref, { stock: String(u.newStock), updatedAt: new Date().toISOString() }));
+          tx.set(firebaseDB.collection('mc_sales').doc(s.sid), s);
+        }), 15000, 'Vente pharmacie');
+      } catch (err) {
+        // a) refus stock RÉEL relu en base (couvre la survente concurrente).
+        if (err?.code === 'insufficient_stock') {
+          return { ok: false, confirmed: false, reason: 'insufficient_stock', insufficient: err.insufficient || [] };
+        }
+        // b) timeout côté interface : la transaction a peut-être abouti.
+        if (/délai dépassé/.test(err?.message || '')) {
+          try {
+            const doc = await firebaseDB.collection('mc_sales').doc(s.sid).get();
+            if (doc.exists) { confirmLocally(); return { ok: true, confirmed: true, sale: s, reconciled: true }; }
+          } catch (_) { /* relecture impossible : traité comme injoignable */ }
+          const operationId = _outboxAddBatch(writes, err, opMeta);
+          return { ok: false, confirmed: false, queued: true, operationId };
+        }
+        // c) rejet réel (permission, argument invalide) : rien, pas de file.
+        const classification = classifyOutboxError(err);
+        if (classification === 'blocked') {
+          return {
+            ok: false, confirmed: false, failed: true, blocked: true,
+            errorCode: err?.code || null, errorMessage: err?.message || null,
+          };
+        }
+        // d) échec transitoire (réseau/indisponible/hors ligne) : mise en file.
+        const operationId = _outboxAddBatch(writes, err, opMeta);
         return { ok: false, confirmed: false, queued: true, operationId };
       }
 
-      const classification = classifyOutboxError(result.error);
-      if (classification === 'blocked') {
-        // Rejet réel (permission, données invalides…) : rien n'est créé,
-        // rien n'est mis en file (le stock local reste intact).
-        return {
-          ok: false, confirmed: false, failed: true, blocked: true,
-          errorCode: result.error?.code || null,
-          errorMessage: result.error?.message || null,
-        };
-      }
-      // Échec transitoire : mise en file du lot atomique complet.
-      const operationId = _outboxAddBatch(writes, result.error, opMeta);
-      return { ok: false, confirmed: false, queued: true, operationId };
+      confirmLocally();
+      return { ok: true, confirmed: true, sale: s };
     } finally {
       _sellingPharmacy = false;
     }

@@ -7,6 +7,16 @@ jour) et l'écran **Paramètres → À propos**.
 La source unique de la version en cours est `config/app-version.json` —
 ce fichier doit rester cohérent avec elle.
 
+## 2.9.35 — 2026-07-21
+
+Audit post-déploiement (intégrité des stocks, confidentialité, isolation, fiabilité, sécurité Android). Deux vrais problèmes corrigés ; les autres axes se sont révélés conformes ou relèvent de limites structurelles documentées (lecture publique de `mc_accounts` nécessaire au login pré-authentification, sans backend).
+
+### Intégrité des données
+- **Ventes pharmacie sans survente concurrente** : bug confirmé — `addSaleAtomic` (v2.9.34) validait le stock à partir du cache **local** puis écrivait un lot `set` qui **écrase** le stock. Deux ventes simultanées sur deux postes lisaient toutes deux « stock = 10 », vendaient 8 chacune et écrivaient « stock = 2 » : 16 unités vendues pour 10 en stock, sans erreur. La vente en ligne passe désormais par une **transaction Firestore** (`runTransaction`) qui **relit le stock réel** au moment de l'écriture et refuse la vente entière si un article n'a plus assez de stock — jamais de survente ni de stock négatif (même mécanisme que l'attribution de lit). Limite documentée : la garantie stricte ne vaut que pour les ventes réalisées **en ligne** ; hors ligne, le lot optimiste est mis en file et rejoué à la reconnexion.
+
+### Sécurité
+- **Android — liens externes hors WebView** : `shouldOverrideUrlLoading` chargeait toute URL hors domaine officiel **dans le WebView de l'application** (celui qui expose le pont natif `AndroidUpdater`). Un lien externe (reçu dans un message, page d'aide, tentative de hameçonnage) s'ouvrait ainsi « à l'intérieur » de l'app, héritant de son contexte. Les destinations hors domaine officiel sont désormais ouvertes dans le **navigateur/application système** (Intent `ACTION_VIEW`), y compris les schémas `tel:`/`mailto:`. Le téléchargement d'APK restait déjà verrouillé à un préfixe de confiance (`TRUSTED_APK_URL_PREFIX`).
+
 ## 2.9.34 — 2026-07-21
 
 ### Sécurité
