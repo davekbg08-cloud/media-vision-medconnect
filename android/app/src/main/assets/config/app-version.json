@@ -1,8 +1,22 @@
 {
-  "version": "2.9.33",
-  "build": "2026.07.20.1",
-  "buildDate": "2026-07-20",
+  "version": "2.9.34",
+  "build": "2026.07.21.1",
+  "buildDate": "2026-07-21",
   "changelog": [
+    {
+      "version": "2.9.34",
+      "date": "2026-07-21",
+      "notes": [
+        "Fiabilité : une écriture définitivement refusée par le serveur (ex. permission refusée, donnée invalide) n'est plus jamais rejouée automatiquement — elle attend une action manuelle explicite. L'écran Synchronisation gagne un inspecteur détaillé par opération (nouvelle tentative, suppression, export du diagnostic sans aucune donnée sensible)",
+        "Fiabilité : la création d'une fiche patient utilise désormais un seul et même service, strictement atomique, pour tous les rôles (médecin sur mobile et desktop, réception) — les quatre documents (dont l'annuaire et l'historique médical) sont créés ensemble ou pas du tout, le code de premier accès n'est affiché qu'après confirmation réelle, et une coupure réseau met la création complète en file sans jamais créer de doublon",
+        "Correctif : l'envoi et le marquage lu/supprimé d'un message n'écrivent plus toute la boîte à chaque action mais uniquement le message concerné, vers un destinataire précis obligatoire (plus de diffusion générique par rôle depuis un formulaire mobile)",
+        "Correctif sécurité : la session desktop d'un agent est validée en priorité sur l'affiliation réelle (hospitalMembers) — un compte retiré, suspendu ou dont le rôle a changé est invalidé sans attendre, tout en restant résilient hors ligne",
+        "Pharmacie : sur le desktop hôpital, une pharmacie est toujours un service interne de l'établissement (rattaché et affilié) ; la pharmacie indépendante reste exclusivement mobile. Ce type (interne/externe) est désormais figé après création et l'affiliation à un établissement est réservée aux pharmacies internes",
+        "Amélioration : la réception et le laboratoire peuvent rechercher un patient par nom ou téléphone (et non plus seulement par numéro MC exact) via l'annuaire non clinique, borné à leur établissement",
+        "Correctif : une vente en pharmacie est désormais atomique et refuse toute survente (jamais de stock négatif) — la vente et la mise à jour du stock aboutissent ensemble ou pas du tout, sans reçu ni succès affiché tant que le serveur n'a pas confirmé",
+        "Sécurité : le destinataire d'une notification ne peut plus en réécrire le contenu ni réattribuer son expéditeur — seulement la marquer lue"
+      ]
+    },
     {
       "version": "2.9.33",
       "date": "2026-07-20",

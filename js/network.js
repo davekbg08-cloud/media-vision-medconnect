@@ -38,13 +38,29 @@ const Network = (() => {
     // (règles Firestore de mc_patients/mc_prescriptions, inchangées) :
     // joindre une référence n'élargit aucun accès.
     attachedRecordType = null, attachedRecordId = null, attachedRecordLabel = null,
+    // Chantier v2.9.34 (P0 messagerie) : une diffusion par RÔLE (sans
+    // personne précise) n'est plus jamais acceptée par défaut — seule
+    // une notification SYSTÈME explicitement autorisée par son appelant
+    // peut la demander. Aucun appelant actuel n'en a besoin (tous
+    // passent déjà un to_id précis) ; l'option existe pour un usage
+    // système futur assumé, jamais pour un formulaire utilisateur.
+    allowRoleBroadcast = false,
   }) {
+    // Destinataire PRÉCIS obligatoire (chantier v2.9.34) : un message
+    // sans personne/patient identifié est refusé — c'est ce qui a
+    // retiré l'envoi générique « à tous les médecins » du mobile.
+    if (!to_id && !recipientUid && !allowRoleBroadcast) {
+      return { ok: false, state: 'invalid_recipient', cloudConfirmed: false,
+               reason: 'Destinataire précis obligatoire (personne ou patient).' };
+    }
     const from = window.Auth?.getUser?.();
-    const msgs = DB.getMessages();
     const message = {
       mid:        DB.makeId('N'),
       to_role, to_id, type, subject, body,
-      toUid:      to_id || null,
+      // Champ CANONIQUE du destinataire (chantier v2.9.34) : toUid.
+      // to_id reste posé pour la compatibilité du matching existant
+      // (recipientKeys — numéro MC pour un patient, uid pour un pro).
+      toUid:      to_id || recipientUid || null,
       // PARTIE H — recipientUid : uid Firebase réel du destinataire
       // patient quand disponible (patientAuthUid, posé après migration
       // PIN → Firebase Auth), en plus de to_id qui reste le numéro MC
@@ -66,12 +82,16 @@ const Network = (() => {
       // qui restent donc toujours autorisés comme aujourd'hui. Seule la
       // messagerie pro→pro (js/transfer_ui_patch.js) le renseigne.
       hospitalId: hospitalId || null,
+      // Informatif uniquement — jamais une barrière de sécurité à lui
+      // seul (les règles vérifient l'appartenance réelle).
       sourceDevice: window.ExchangeBridge?.currentSourceDevice?.() || 'mobile',
       attachedRecordType, attachedRecordId, attachedRecordLabel,
     };
-    msgs.push(message);
-    DB.saveMessages(msgs);
-    const cloudConfirmed = await DB.pushCloud('mc_messages', message.mid, message);
+    // Chantier v2.9.34 : UNE écriture ciblée (le nouveau message
+    // seulement) — plus jamais DB.saveMessages() qui réécrivait toute
+    // la boîte dans mc_messages ET la recopiait dans notifications.
+    const cloudConfirmed = await DB.pushMessageAndConfirm(message);
+    refreshUnreadIndicators();
     return { ok: true, state: cloudConfirmed ? 'confirmed' : 'queued', cloudConfirmed, mid: message.mid };
   }
 
@@ -123,28 +143,26 @@ const Network = (() => {
   // fiable entre appareils. Un push ciblé et attendu (DB.pushCloud, un
   // seul document) donne un vrai signal confirmed/queued, sans
   // réécrire toute la liste des messages comme le fait saveMessages().
+  // Chantier v2.9.34 (P0 messagerie) : la lecture/le non-lu passent par
+  // DB.updateMessageStatusAndConfirm() — UNE mise à jour du seul
+  // message concerné, champs de statut uniquement (le contenu reste
+  // immuable, côté client comme côté règles).
   async function markRead(mid) {
-    const msgs = DB.getMessages();
-    const m    = msgs.find(x => x.mid === mid);
-    if (!m) return { ok: false, state: 'not_found' };
-    m.read = true;
-    m.readStatus = 'read';
-    m.readAt = new Date().toISOString();
-    DB.saveMessages(msgs);
-    const cloudConfirmed = await DB.pushCloud('mc_messages', mid, m);
+    const r = await DB.updateMessageStatusAndConfirm(mid, {
+      read: true, readStatus: 'read', readAt: new Date().toISOString(),
+    });
+    if (!r.ok) return r;
     refreshUnreadIndicators();
-    return { ok: true, state: cloudConfirmed ? 'confirmed' : 'queued', cloudConfirmed };
+    return { ok: true, state: r.state, cloudConfirmed: r.cloudConfirmed };
   }
 
   async function markUnread(mid) {
-    const msgs = DB.getMessages();
-    const m    = msgs.find(x => x.mid === mid);
-    if (!m) return { ok: false, state: 'not_found' };
-    m.read = false; m.readStatus = 'unread'; m.readAt = null;
-    DB.saveMessages(msgs);
-    const cloudConfirmed = await DB.pushCloud('mc_messages', mid, m);
+    const r = await DB.updateMessageStatusAndConfirm(mid, {
+      read: false, readStatus: 'unread', readAt: null,
+    });
+    if (!r.ok) return r;
     refreshUnreadIndicators();
-    return { ok: true, state: cloudConfirmed ? 'confirmed' : 'queued', cloudConfirmed };
+    return { ok: true, state: r.state, cloudConfirmed: r.cloudConfirmed };
   }
 
   // Correctif (audit "workflows mobile/desktop", section 10, point 7) :
@@ -220,15 +238,50 @@ const Network = (() => {
       </div>`);
   }
 
+  /* Chantier v2.9.34 (P0 messagerie) : bug confirmé — le formulaire
+     mobile n'offrait qu'un RÔLE de destinataire (« à tous les
+     médecins », « à tous les patients »…), sans personne précise : le
+     message partait sans to_id et atterrissait chez TOUS les
+     utilisateurs du rôle. Le formulaire exige désormais une personne
+     précise (professionnel) ou un patient précis — la diffusion par
+     rôle n'existe plus depuis un formulaire utilisateur. */
+  function _composeCandidates(role) {
+    if (role === 'patient') {
+      return (DB.getPatients?.() || []).map(p => ({
+        value: p.id,
+        label: `${(`${p.firstname || ''} ${p.lastname || ''}`).trim() || p.id} (${p.id})`,
+        recipientUid: p.patientAuthUid || p.patient_uid || null,
+      }));
+    }
+    const me = window.Auth?.getUser?.();
+    return (DB.getAccounts?.() || [])
+      .filter(a => a.role === role && ['approved', 'active'].includes(a.status) && a.uid !== me?.uid)
+      .map(a => ({ value: a.uid, label: `${a.name || a.uid}${a.order_num ? ` (${a.order_num})` : a.matricule ? ` (${a.matricule})` : ''}`, recipientUid: null }));
+  }
+
+  function _onComposeRoleChange() {
+    const role = document.getElementById('msg-role')?.value;
+    const personSel = document.getElementById('msg-person');
+    if (!personSel) return;
+    const candidates = _composeCandidates(role);
+    personSel.innerHTML = `<option value="">— Choisir ${role === 'patient' ? 'un patient' : 'une personne'} —</option>` +
+      candidates.map(c => `<option value="${esc(c.value)}" data-recipient-uid="${esc(c.recipientUid || '')}" data-label="${esc(c.label)}">${esc(c.label)}</option>`).join('');
+  }
+
   function openCompose() {
     App.openModal('✉️ Nouveau message', `
       <form onsubmit="Network.sendMessage(event)">
-        <div class="form-group"><label>Destinataire (rôle)</label>
-          <select id="msg-role">
+        <div class="form-group"><label>Type de destinataire</label>
+          <select id="msg-role" onchange="Network._onComposeRoleChange()">
             <option value="patient">🩺 Patient</option>
             <option value="doctor">👨‍⚕️ Médecin</option>
             <option value="pharmacist">💊 Pharmacien</option>
             <option value="nurse">🩹 Infirmier</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Destinataire (personne précise) *</label>
+          <select id="msg-person" required>
+            <option value="">— Choisir un patient —</option>
           </select>
         </div>
         <div class="form-group"><label>Priorité</label>
@@ -244,6 +297,7 @@ const Network = (() => {
           <button type="submit" class="btn btn-primary">📤 Envoyer</button>
         </div>
       </form>`);
+    _onComposeRoleChange();
   }
 
   // Correctif (audit "workflows mobile/desktop", section 10) : bug
@@ -257,20 +311,31 @@ const Network = (() => {
   // logique dupliquée, comportement observable inchangé.
   async function sendMessage(e) {
     e.preventDefault();
+    const personSel = document.getElementById('msg-person');
+    const selected = personSel?.selectedOptions?.[0];
+    const toId = personSel?.value || '';
+    // Chantier v2.9.34 : destinataire PRÉCIS obligatoire — plus jamais
+    // d'envoi générique par rôle depuis ce formulaire.
+    if (!toId) { App.toast('Choisissez un destinataire précis.', 'error'); return; }
+    const recipientUid = selected?.dataset?.recipientUid || null;
+    const toLabel = selected?.dataset?.label || '';
     const btn = e.target.querySelector('button[type="submit"]');
     const result = await window.ActionFeedback.withAction(btn, {
       startLabel: '⏳ Envoi en cours…',
-      confirmedMsg: '✅ Message envoyé.',
+      confirmedMsg: `✅ Message envoyé${toLabel ? ` à ${toLabel}` : ''}.`,
       queuedMsg: '📶 Message enregistré localement — synchronisation en attente.',
       failedMsg: "L'envoi a échoué. Réessayez.",
     }, () => notify({
       to_role:  document.getElementById('msg-role').value,
+      to_id:    toId,
+      recipientUid,
       type:     'info',
       priority: document.getElementById('msg-priority').value,
       subject:  document.getElementById('msg-subject').value,
       body:     document.getElementById('msg-body').value,
     })).catch(() => null); // déjà annoncé par ActionFeedback.failed().
     if (result?.ok) App.closeModal();
+    else if (result?.state === 'invalid_recipient') App.toast(result.reason || 'Destinataire précis obligatoire.', 'error');
   }
 
   /* ── DOCTOR → PHARMACY (ciblée, plus de diffusion globale) ──
@@ -498,7 +563,7 @@ const Network = (() => {
 
   return {
     notify, getUnread, markRead, markUnread, refreshUnreadIndicators,
-    renderInbox, openMsg, openCompose, sendMessage,
+    renderInbox, openMsg, openCompose, sendMessage, _onComposeRoleChange,
     sendPrescriptionToPharmacy, getAvailablePharmacies, setPrescriptionStatus, RX_STATUSES, RX_TRANSITIONS,
     canSendPrescription,
     smartCheck, renderSmartCheckResult,

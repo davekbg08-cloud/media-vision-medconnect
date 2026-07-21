@@ -204,8 +204,8 @@ const HospitalReceptionModule = (() => {
 
       <div id="rc-panel-existing">
         <div class="form-group">
-          <label>Numéro MC du patient</label>
-          <input id="rc-mc" placeholder="MC-2026-CD-XXXXXXXX">
+          <label>Numéro MC, nom ou téléphone du patient</label>
+          <input id="rc-mc" placeholder="MC-2026-CD-XXXXXXXX, nom ou téléphone">
           <button class="btn btn-ghost btn-xs" style="margin-top:.3rem" onclick="HospitalReceptionModule.lookupPatient()">🔍 Rechercher</button>
           <div id="rc-found" style="margin-top:.3rem"></div>
         </div>
@@ -286,17 +286,54 @@ const HospitalReceptionModule = (() => {
     }
   }
 
+  // Chantier v2.9.34 (P1) : sélection d'un patient trouvé par recherche
+  // annuaire (nom/téléphone) — remplit le champ MC avec le numéro exact
+  // puis relance la résolution ciblée (mc_patients/{mc}) pour confirmer
+  // l'accès et alimenter le cache local.
+  function selectDirectoryPatient(mc) {
+    const input = document.getElementById('rc-mc');
+    if (input) input.value = String(mc || '').toUpperCase();
+    lookupPatient();
+  }
+
   async function lookupPatient() {
     const raw = document.getElementById('rc-mc').value.trim();
     const mc = raw.toUpperCase();
     const box = document.getElementById('rc-found');
     if (!mc) { box.innerHTML = ''; return; }
-    // Correctif (section 4, point 9-10) : un texte qui n'a jamais la
-    // forme d'un numéro MC (ex. "DK") ne doit jamais être envoyé en
-    // recherche silencieuse — message immédiat et explicite, jamais un
-    // échec générique découvert seulement à l'enregistrement.
+    // Chantier v2.9.34 (P1) : si la saisie n'a PAS la forme d'un numéro
+    // MC, on ne rejette plus — on lance une recherche dans l'annuaire non
+    // clinique (patient_directory) par nom/téléphone, bornée à
+    // l'établissement actif (DB.searchPatientDirectory). L'ancien
+    // comportement (rejet immédiat "attend un numéro MC") empêchait la
+    // réception de retrouver un patient dont elle n'avait pas le numéro.
     if (!MC_FORMAT_RE.test(mc)) {
-      box.innerHTML = `<small style="color:var(--accent)">⚠️ Ce champ attend un numéro patient MedConnect (ex. MC-2026-CD-XXXXXXXX). Pour enregistrer un nouveau patient, choisissez « 🆕 Nouveau patient » ci-dessus.</small>`;
+      if (raw.length < 2) {
+        box.innerHTML = `<small style="color:var(--accent)">⚠️ Saisissez au moins 2 caractères (numéro MC, nom ou téléphone).</small>`;
+        return;
+      }
+      const token = ++_rcSearchToken;
+      box.innerHTML = `<small class="muted">⏳ Recherche dans l'annuaire…</small>`;
+      try {
+        const estId = await CloudDB.getActiveHospitalId();
+        const results = await (window.DB?.searchPatientDirectory?.(raw, estId) || Promise.resolve([]));
+        if (token !== _rcSearchToken) return;
+        if (!results.length) {
+          box.innerHTML = `<small style="color:var(--accent)">⚠️ Aucun patient trouvé pour « ${esc(raw)} ».</small>
+            <button type="button" class="btn btn-ghost btn-xs" style="margin-top:.3rem" onclick="HospitalReceptionModule.setMode('new')">➕ Créer un nouveau patient</button>`;
+          return;
+        }
+        const rows = results.slice(0, 12).map(p =>
+          `<button type="button" class="btn btn-ghost btn-xs" style="display:block;width:100%;text-align:left;margin-top:.2rem"
+             onclick="HospitalReceptionModule.selectDirectoryPatient('${esc(p.id)}')">
+             👤 ${esc(p.firstname || '')} ${esc(p.lastname || '')} — <span class="muted">${esc(p.id)}${p.phone ? ' · ' + esc(p.phone) : ''}</span>
+           </button>`).join('');
+        box.innerHTML = `<small style="color:var(--secondary)">${results.length} résultat(s) :</small>${rows}`;
+      } catch (e) {
+        if (token !== _rcSearchToken) return;
+        console.error('[Reception] Recherche annuaire :', e);
+        box.innerHTML = `<small style="color:var(--danger)">❌ Recherche impossible — vérifiez la connexion.</small>`;
+      }
       return;
     }
     const token = ++_rcSearchToken;
@@ -386,24 +423,31 @@ const HospitalReceptionModule = (() => {
         // dessus. addPatientAndConfirmAtomic() (js/db.js) attend un
         // batch atomique réellement confirmé (les 3 documents ensemble,
         // ou aucun) avant qu'on continue — jamais de fire-and-forget ici.
-        const { patient: createdPatient, confirmed } = await window.DB.addPatientAndConfirmAtomic({
+        const creation = await window.DB.addPatientAndConfirmAtomic({
           firstname: fn, lastname: ln,
           dob: document.getElementById('rc-dob').value,
           gender: document.getElementById('rc-gender').value,
           phone: document.getElementById('rc-phone').value.trim(),
           ...est,
         });
-        if (!confirmed) {
-          // addPatientAndConfirmAtomic() a déjà retiré la fiche
-          // provisoire du cache local en cas d'échec — on n'crée ni
-          // receptionVisits ni admission, et on laisse la modale ouverte
-          // pour que l'agent puisse réessayer sans ressaisir le
-          // formulaire.
-          App.toast("La fiche patient n'a pas été confirmée par Firestore. Vérifiez la connexion puis réessayez.", 'error');
+        if (!creation.confirmed) {
+          // Chantier v2.9.34 : contrat enrichi — l'arrivée
+          // (receptionVisits) ne doit JAMAIS être créée sur une fiche
+          // non confirmée, y compris quand la fiche est en file
+          // atomique (queued) : la visite référencerait un patient que
+          // Firestore ne connaît pas encore. Message différencié, modale
+          // laissée ouverte, champs intacts.
+          if (creation.queued) {
+            App.toast('📶 Pas de connexion — la fiche est en file de synchronisation (opération atomique). Enregistrez l\'arrivée une fois la fiche synchronisée (elle apparaîtra dans « Patient existant »).');
+          } else {
+            App.toast(creation.blocked
+              ? `❌ Création refusée par le serveur (${creation.errorCode || 'permission'}). Vérifiez vos droits puis réessayez.`
+              : "La fiche patient n'a pas été confirmée par Firestore. Vérifiez la connexion puis réessayez.", 'error');
+          }
           setBtn(saveLabel, false);
           return;
         }
-        patient = createdPatient;
+        patient = creation.patient;
         mc = patient.id;
       }
       setBtn("⏳ Enregistrement de l'arrivée…", true);
@@ -487,7 +531,7 @@ const HospitalReceptionModule = (() => {
     }
   }
 
-  return { render, openIntake, setMode, lookupPatient, saveIntake, closeVisit };
+  return { render, openIntake, setMode, lookupPatient, selectDirectoryPatient, saveIntake, closeVisit };
 })();
 
 window.HospitalReceptionModule = HospitalReceptionModule;

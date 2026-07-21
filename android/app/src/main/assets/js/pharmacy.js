@@ -129,7 +129,7 @@ const PharmacyPortal = (() => {
           </div>
           <div id="cart-body" class="cart-items"><p class="cart-empty">${t('msg_cart_empty')}</p></div>
           <div class="cart-total"><strong>${t('total')} : <span id="cart-sum">0.00</span> ${cur}</strong></div>
-          <button class="btn btn-primary btn-full" onclick="PharmacyPortal.checkout()">✅ ${t('sell')}</button>
+          <button class="btn btn-primary btn-full" id="checkout-btn" onclick="PharmacyPortal.checkout()">✅ ${t('sell')}</button>
         </div>
       </div>`;
   }
@@ -195,15 +195,54 @@ const PharmacyPortal = (() => {
     el.textContent = p ? `✅ ${t('patient_found')} : ${p.firstname} ${p.lastname}` : '';
   }
 
-  function checkout() {
+  // Chantier v2.9.34 (P1) : vente ATOMIQUE et sans survente. On n'annonce
+  // plus un succès (toast + reçu) avant la confirmation réelle : DB.
+  // addSaleAtomic valide le stock (refus si insuffisant), écrit vente +
+  // décréments dans un lot atomique, et ne renseigne le cache local
+  // qu'après confirmation. L'ancien checkout appelait DB.addSale() de
+  // façon synchrone et imprimait le reçu même si l'écriture cloud
+  // échouait ou si le panier dépassait le stock.
+  let _checkingOut = false;
+  async function checkout() {
+    if (_checkingOut) return;
     if (!cart.length) { App.toast(t('msg_cart_empty'), 'error'); return; }
-    const total = cart.reduce((s,i)=>s+i.price*i.qty,0);
-    const pid   = document.getElementById('sale-pid')?.value?.trim() || null;
-    const sale  = DB.addSale([...cart], total, pid);
-    App.toast(`✅ ${t('sell')} — ${total.toFixed(2)} ${t('currency')}`);
-    printReceipt(sale);
-    cart = [];
-    PharmacyPortal._nav('pos');
+    _checkingOut = true;
+    const btn = document.getElementById('checkout-btn');
+    if (btn) btn.disabled = true;
+    try {
+      const total = cart.reduce((s,i)=>s+i.price*i.qty,0);
+      const pid   = document.getElementById('sale-pid')?.value?.trim() || null;
+      const res   = await DB.addSaleAtomic([...cart], total, pid);
+
+      // Message de stock insuffisant détaillé par article (spécifique à la
+      // vente) transmis à ActionFeedback, qui centralise l'annonce du
+      // contrat atomique enrichi et renvoie l'état normalisé.
+      const insufficientMsg = res?.reason === 'insufficient_stock'
+        ? `❌ Stock insuffisant : ${(res.insufficient || []).map(x =>
+            x.reason === 'insufficient' ? `${x.name} (stock ${x.available}, demandé ${x.requested})` : (x.name || x.mid)).join(', ')}. Vente annulée.`
+        : undefined;
+      const state = window.ActionFeedback?.reportAtomic?.(res, {
+        confirmedMsg: `✅ ${t('sell')} — ${total.toFixed(2)} ${t('currency')}`,
+        queuedMsg: '📶 Pas de connexion — la vente est en file de synchronisation (opération atomique). Le stock sera mis à jour une fois synchronisé.',
+        insufficientMsg,
+        failedMsg: '❌ Vente refusée par le serveur. Vérifiez vos droits et réessayez.',
+      });
+
+      // Suite métier décidée ici (jamais dans ActionFeedback).
+      if (state === 'confirmed') {
+        printReceipt(res.sale);
+        cart = [];
+        PharmacyPortal._nav('pos');
+      } else if (state === 'queued') {
+        cart = [];
+        PharmacyPortal._nav('pos');
+      }
+      // insufficient_stock / failed / busy : panier conservé, rien à faire.
+    } finally {
+      _checkingOut = false;
+      const b = document.getElementById('checkout-btn');
+      if (b) b.disabled = false;
+    }
   }
 
   function printReceipt(sale) {

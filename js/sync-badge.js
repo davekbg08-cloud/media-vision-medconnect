@@ -72,6 +72,10 @@ const SyncBadge = (() => {
       // même les entrées dont le délai d'attente exponentiel
       // (nextRetryAt) n'est pas encore écoulé — c'est justement le but
       // d'un rejeu manuel (vérifier si la situation a changé).
+      // Chantier v2.9.34 (P0) : ne rejoue JAMAIS les entrées bloquées —
+      // seuls les boutons explicites de Paramètres → Synchronisation
+      // (« Vérifier les bloquées », « Réessayer cette opération ») le
+      // font, en connaissance de cause.
       await window.DB?.flushOutbox?.({ force: true });
       render();
       const { total: left, blocked } = summary();

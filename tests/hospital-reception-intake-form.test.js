@@ -139,17 +139,44 @@ test('setMode("existing") restaure le panneau existant', async () => {
   assert.strictEqual(getEl('rc-panel-new').style.display, 'none');
 });
 
-/* ── Validation immédiate du format MC-xxx (points 9-10) ────────── */
+/* ── v2.9.34 (P1) : recherche annuaire par nom/téléphone ───────────
+   L'ancien comportement (rejet immédiat de tout texte non-MC) a été
+   remplacé par une recherche dans l'annuaire non clinique
+   (patient_directory), bornée à l'établissement actif. Une saisie < 2
+   caractères ne lance rien ; un nom sans résultat propose de créer une
+   nouvelle fiche. */
 
-test('lookupPatient() : un texte qui n\'a pas la forme MC-xxx (ex. "DK") affiche un message de format clair, sans lancer de recherche', async () => {
+test('lookupPatient() : une saisie < 2 caractères ne lance aucune recherche', async () => {
   const { sandbox, getEl } = setup();
   await sandbox.HospitalReceptionModule.openIntake();
-  getEl('rc-mc').value = 'DK';
+  getEl('rc-mc').value = 'D';
   await sandbox.HospitalReceptionModule.lookupPatient();
   const box = getEl('rc-found');
-  assert.match(box.innerHTML, /numéro patient MedConnect/);
-  assert.match(box.innerHTML, /Nouveau patient/);
-  assert.doesNotMatch(box.innerHTML, /Recherche en cours/);
+  assert.match(box.innerHTML, /au moins 2 caractères/);
+});
+
+test('lookupPatient() : un nom sans résultat annuaire propose de créer un nouveau patient', async () => {
+  const { sandbox, getEl } = setup();
+  // DB.searchPatientDirectory absent du mock → repli [] : aucun résultat.
+  await sandbox.HospitalReceptionModule.openIntake();
+  getEl('rc-mc').value = 'Diallo';
+  await sandbox.HospitalReceptionModule.lookupPatient();
+  const box = getEl('rc-found');
+  assert.match(box.innerHTML, /Aucun patient trouvé/);
+  assert.match(box.innerHTML, /setMode\('new'\)/);
+});
+
+test('lookupPatient() : un nom avec résultats annuaire affiche une liste cliquable', async () => {
+  const { sandbox, getEl } = setup();
+  sandbox.DB.searchPatientDirectory = async () => ([
+    { id: 'MC-2026-CD-DIR1', firstname: 'Awa', lastname: 'Diallo', phone: '0810' },
+  ]);
+  await sandbox.HospitalReceptionModule.openIntake();
+  getEl('rc-mc').value = 'Diallo';
+  await sandbox.HospitalReceptionModule.lookupPatient();
+  const box = getEl('rc-found');
+  assert.match(box.innerHTML, /Awa/);
+  assert.match(box.innerHTML, /selectDirectoryPatient\('MC-2026-CD-DIR1'\)/);
 });
 
 test('lookupPatient() : un numéro MC bien formaté mais introuvable propose de créer un nouveau patient', async () => {

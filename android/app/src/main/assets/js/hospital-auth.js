@@ -86,9 +86,29 @@ const HospitalAuth = (() => {
      ou tout juste créée) correspond réellement à une identité Firebase
      Auth confirmée ET toujours affiliée à l'établissement — sans ce
      contrôle, un ancien tableau de bord pouvait se rouvrir sur la seule
-     foi du cache local (audit : "session fantôme"). Fonction PURE côté
-     nettoyage : ne modifie jamais l'état, c'est à l'appelant de décider
-     quoi faire du résultat (voir invalidateSession). */
+     foi du cache local (audit : "session fantôme").
+
+     Chantier v2.9.34 (P0 session) : bug confirmé — cette fonction
+     dépendait encore du tableau LOCAL establishments.staff (miroir
+     d'affichage, potentiellement en retard, et modifiable par le
+     propriétaire de l'établissement), alors que verifyAgent() s'appuie
+     déjà, elle, sur hospitalMembers (source de vérité des règles
+     serveur). Un staff local en retard invalidait à tort une session
+     pourtant valide. hospitalMembers/{estId}_{uid} devient la source de
+     vérité ici aussi (via HospitalsRegistry.resolveAgentAffiliation,
+     même primitive que verifyAgent) :
+     - status 'active'            → session cohérente.
+     - status 'pending'/'rejected' → hospitalMembers/affiliation lus
+       avec succès et NON actifs (membre retiré, non encore approuvé,
+       rejeté) → invalidation immédiate.
+     - status 'none'              → ambigu (hors ligne OU réellement non
+       affilié) : repli sur le miroir staff local (résilience hors
+       ligne, ne jamais invalider une session valide faute de réseau).
+     En plus : compte suspendu ou rôle changé (users/{uid} côté
+     Firestore, avec repli sur le compte local) → invalidation.
+     Effet de bord minime et sûr : resolveAgentAffiliation peut
+     réconcilier le miroir staff local depuis Firestore (jamais
+     l'inverse, jamais d'élévation de privilège). */
   async function isSessionConsistent(session) {
     if (!session?.establishmentId || !session?.agentUid) return false;
     if (isSessionExpired(session)) return false;
@@ -103,6 +123,42 @@ const HospitalAuth = (() => {
     if (!est) return false;
     if (!['active', 'approved'].includes(String(est.status || '').toLowerCase())) return false;
 
+    // Compte suspendu / rôle changé : lecture directe users/{uid} quand
+    // Firestore est joignable (source de vérité), repli sur le compte
+    // local sinon (hors ligne). Un statut explicitement suspendu, ou un
+    // rôle qui ne correspond plus à la session, invalide immédiatement.
+    let accountRole = user.role;
+    let accountStatus = user.status;
+    if (typeof firebaseDB !== 'undefined' && firebaseDB) {
+      try {
+        const uDoc = await firebaseDB.collection('users').doc(fbUser.uid).get();
+        if (uDoc.exists) {
+          const u = uDoc.data() || {};
+          accountRole = u.role || accountRole;
+          accountStatus = u.status || accountStatus;
+        }
+      } catch (e) { console.warn('[HospitalAuth] Lecture users/{uid} (session) :', e?.message || e); }
+    }
+    if (accountStatus && ['suspended', 'rejected', 'disabled'].includes(String(accountStatus).toLowerCase())) return false;
+    if (accountRole && accountRole !== session.role) return false;
+
+    // hospitalMembers = source de vérité de l'affiliation.
+    let resolution = null;
+    try {
+      resolution = await window.HospitalsRegistry?.resolveAgentAffiliation?.(
+        session.establishmentId, fbUser.uid, session.role);
+    } catch (e) { console.warn('[HospitalAuth] resolveAgentAffiliation (session) :', e?.message || e); }
+
+    if (resolution) {
+      if (resolution.status === 'active') return true;
+      // pending/rejected ne sont renvoyés QUE si Firestore a répondu et
+      // que le membre n'est pas actif → session non valide.
+      if (resolution.status === 'pending' || resolution.status === 'rejected') return false;
+      // 'none' : ambigu (hors ligne OU réellement non affilié) → repli.
+    }
+
+    // Repli hors ligne : miroir staff local (ne jamais invalider une
+    // session valide uniquement parce que le réseau est indisponible).
     const staff = Array.isArray(est.staff) ? est.staff : [];
     const activeOk = s => s.status === 'active' || s.status === 'approved';
     const member = staff.find(s => s.uid === fbUser.uid && s.role === session.role && activeOk(s));
@@ -344,10 +400,12 @@ const HospitalAuth = (() => {
   // connexion (verifyAgent), qui doit chercher un compte pharmacist
   // "interne" via mc_accounts/users (comme lab/reception), jamais via
   // le registre professionnel (réservé à la pharmacie indépendante).
-  // Pharmacist a deux parcours distincts à l'inscription (voir
-  // choosePharmacistRegisterType ci-dessous) : interne à CET
-  // établissement (flux strict, comme lab/reception) ou indépendante
-  // (parcours registre existant, inchangé — Auth._registerRole).
+  // v2.9.34 (règle IMPÉRATIVE pharmacie) : le desktop n'inscrit QUE des
+  // pharmacies INTERNES à CET établissement (flux strict comme
+  // lab/reception, compte tagué pharmacyType:'internal', affiliation
+  // hospitalMembers). La pharmacie indépendante (externe) reste
+  // exclusivement mobile (parcours registre inchangé) — voir
+  // choosePharmacistRegisterType ci-dessous.
   const AGENT_SELF_REGISTER_ROLES = ['lab', 'reception', 'pharmacist'];
 
   // Établissement complet conservé en mémoire dès le sélecteur de rôle
@@ -441,12 +499,15 @@ const HospitalAuth = (() => {
     const opening = wrap.style.display === 'none';
     wrap.style.display = opening ? 'block' : 'none';
     if (opening) {
-      // Correctif (section 8) : pour pharmacist, propose d'abord le
-      // choix interne/indépendante — la demande d'affiliation
-      // automatique n'a de sens QUE pour une pharmacie interne (voir
-      // choosePharmacistRegisterType ci-dessous).
+      // v2.9.34 (règle IMPÉRATIVE pharmacie) : sur le desktop hôpital, la
+      // pharmacie est TOUJOURS un service INTERNE de CET établissement
+      // (liée à hospitalMembers actif). Le choix « pharmacie
+      // indépendante » est retiré du desktop — la pharmacie indépendante
+      // (externe) s'inscrit exclusivement depuis la version mobile
+      // (parcours registre, inchangé). On ouvre donc directement le
+      // formulaire interne strict.
       if (role === 'pharmacist') {
-        _renderPharmacistRegisterChoice(establishmentId);
+        choosePharmacistRegisterType('internal', establishmentId);
         return;
       }
       // Correctif : utilise l'établissement COMPLET déjà en mémoire
@@ -467,46 +528,29 @@ const HospitalAuth = (() => {
     }
   }
 
-  // Correctif (audit "workflows mobile/desktop", section 8) : choix
-  // explicite avant l'inscription pharmacie — jamais de création
-  // automatique de hospitalMembers/affiliation pour une pharmacie
-  // indépendante (spec point 5).
-  function _renderPharmacistRegisterChoice(establishmentId) {
-    const rf = document.getElementById('register-form');
-    if (!rf) return;
-    rf.innerHTML = `
-      <p style="font-size:.85rem;margin-bottom:.6rem">Quel type de pharmacie souhaitez-vous inscrire ?</p>
-      <button type="button" class="btn btn-primary btn-full" style="margin-bottom:.5rem"
-        onclick="HospitalAuth.choosePharmacistRegisterType('internal', '${esc(establishmentId || '')}')">
-        🏥 Service pharmacie de cet établissement
-      </button>
-      <button type="button" class="btn btn-ghost btn-full"
-        onclick="HospitalAuth.choosePharmacistRegisterType('independent', '${esc(establishmentId || '')}')">
-        🏪 Pharmacie indépendante
-      </button>`;
-  }
-
+  // v2.9.34 (règle IMPÉRATIVE pharmacie) : le desktop hôpital n'inscrit
+  // QUE des pharmacies INTERNES (service de l'établissement, liées à
+  // hospitalMembers). Le paramètre `type` est conservé pour la
+  // compatibilité d'appel (anciens gestionnaires onclick en cache),
+  // mais l'option « indépendante » n'est plus proposée NI honorée ici —
+  // la pharmacie indépendante (externe) reste exclusivement mobile
+  // (parcours registre inchangé, jamais d'establishmentId/hospitalId).
   function choosePharmacistRegisterType(type, establishmentId) {
-    if (type === 'internal') {
-      // Pharmacie interne : même flux strict que lab/reception —
-      // establishmentId obligatoire, affiliation créée dès l'inscription.
-      const est = _activeEstablishment ||
-        (establishmentId ? window.HospitalsRegistry?.getHospitalById?.(establishmentId) : null);
-      window.Auth?._setRegistrationContext?.(establishmentId ? {
-        establishmentId,
-        establishmentName: est?.name || '',
-        officialId: est?.officialId || '',
-        establishment: est || null,
-      } : null);
-      window.Auth?._showAgentStrictRegisterForm?.('pharmacist');
-    } else {
-      // Pharmacie indépendante : parcours registre existant, inchangé —
-      // jamais de contexte d'établissement (pas de hospitalMembers créé
-      // automatiquement, conformément au parcours pharmacie indépendant
-      // déjà en place).
-      window.Auth?._setRegistrationContext?.(null);
-      window.Auth?._registerRole?.('pharmacist');
-    }
+    // Pharmacie interne uniquement : même flux strict que lab/reception —
+    // establishmentId obligatoire, affiliation créée dès l'inscription,
+    // compte tagué pharmacyType:'internal' (voir js/auth.js
+    // _regAgentStrict). On force donc le type interne quel que soit
+    // l'argument reçu.
+    const est = _activeEstablishment ||
+      (establishmentId ? window.HospitalsRegistry?.getHospitalById?.(establishmentId) : null);
+    window.Auth?._setRegistrationContext?.(establishmentId ? {
+      establishmentId,
+      establishmentName: est?.name || '',
+      officialId: est?.officialId || '',
+      establishment: est || null,
+      pharmacyType: 'internal',
+    } : null);
+    window.Auth?._showAgentStrictRegisterForm?.('pharmacist');
   }
 
   function _normNum(s) { return String(s || '').trim().toUpperCase().replace(/\s+/g, ' '); }

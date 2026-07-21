@@ -158,3 +158,62 @@ test("withAction() sans bouton (btn null) fonctionne quand même (formulaires sa
   assert.strictEqual(result.state, 'confirmed');
   assert.strictEqual(toasts[0].msg, '✅ OK.');
 });
+
+/* ── v2.9.34 (P1) : reportAtomic — interprétation centralisée du
+   contrat atomique enrichi ({confirmed}|{queued}|{failed,blocked}|
+   {busy}|{reason:'insufficient_stock'}) ── */
+
+test("reportAtomic() : { confirmed } → toast succès et renvoie 'confirmed'", () => {
+  const { win, toasts } = setup();
+  const state = win.ActionFeedback.reportAtomic({ confirmed: true }, { confirmedMsg: '✅ Fait.' });
+  assert.strictEqual(state, 'confirmed');
+  assert.strictEqual(toasts[0].msg, '✅ Fait.');
+  assert.strictEqual(toasts[0].type, undefined, 'un succès n\'est jamais un toast d\'erreur');
+});
+
+test("reportAtomic() : { busy } → aucun toast, renvoie 'busy' (double-appui déjà absorbé)", () => {
+  const { win, toasts } = setup();
+  const state = win.ActionFeedback.reportAtomic({ busy: true }, { confirmedMsg: '✅' });
+  assert.strictEqual(state, 'busy');
+  assert.strictEqual(toasts.length, 0);
+});
+
+test("reportAtomic() : { queued } → toast en attente et renvoie 'queued'", () => {
+  const { win, toasts } = setup();
+  const state = win.ActionFeedback.reportAtomic({ queued: true, operationId: 'op1' }, { queuedMsg: '📶 En file.' });
+  assert.strictEqual(state, 'queued');
+  assert.strictEqual(toasts[0].msg, '📶 En file.');
+  assert.strictEqual(toasts[0].type, undefined);
+});
+
+test("reportAtomic() : { reason:'insufficient_stock' } → toast erreur et renvoie 'insufficient_stock'", () => {
+  const { win, toasts } = setup();
+  const state = win.ActionFeedback.reportAtomic({ reason: 'insufficient_stock' }, { insufficientMsg: '❌ Stock.' });
+  assert.strictEqual(state, 'insufficient_stock');
+  assert.strictEqual(toasts[0].msg, '❌ Stock.');
+  assert.strictEqual(toasts[0].type, 'error');
+});
+
+test("reportAtomic() : { failed, blocked } → toast erreur (blockedMsg prioritaire) et renvoie 'failed'", () => {
+  const { win, toasts } = setup();
+  const state = win.ActionFeedback.reportAtomic(
+    { failed: true, blocked: true, errorCode: 'permission-denied' },
+    { blockedMsg: '❌ Refusé.', failedMsg: '❌ Générique.' });
+  assert.strictEqual(state, 'failed');
+  assert.strictEqual(toasts[0].msg, '❌ Refusé.');
+  assert.strictEqual(toasts[0].type, 'error');
+});
+
+test("reportAtomic() : échec transitoire (failed sans blocked) → failedMsg et renvoie 'failed'", () => {
+  const { win, toasts } = setup();
+  const state = win.ActionFeedback.reportAtomic({ failed: true }, { failedMsg: '❌ Réessayez.' });
+  assert.strictEqual(state, 'failed');
+  assert.strictEqual(toasts[0].msg, '❌ Réessayez.');
+  assert.strictEqual(toasts[0].type, 'error');
+});
+
+test("reportAtomic() : priorité confirmed sur les autres champs, jamais de double toast", () => {
+  const { win, toasts } = setup();
+  win.ActionFeedback.reportAtomic({ confirmed: true }, {});
+  assert.strictEqual(toasts.length, 1);
+});

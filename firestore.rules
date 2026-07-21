@@ -277,6 +277,79 @@ service cloud.firestore {
         (data.get('createdByUid', null) == null || data.get('createdByUid', null) == request.auth.uid);
     }
 
+    /* Chantier v2.9.34 (P0 messagerie) : un message professionnel doit
+       avoir un DESTINATAIRE précis — au moins un des champs canonique
+       (toUid) / historique (to_id, recipientUid) non vide. Ferme
+       l'envoi générique « à tous les X » (aucun destinataire précis)
+       côté serveur, en plus du formulaire client déjà corrigé. */
+    function messageRecipientOk(data) {
+      return data.get('toUid', null) != null ||
+             data.get('to_id', null) != null ||
+             data.get('recipientUid', null) != null;
+    }
+
+    /* Le destinataire courant d'un message (canonique toUid, historiques
+       to_id/recipientUid) — utilisé pour read/update. */
+    function isMessageRecipient(data) {
+      return data.get('toUid', null) == request.auth.uid ||
+             data.get('to_id', null) == request.auth.uid ||
+             data.get('recipientUid', null) == request.auth.uid;
+    }
+
+    /* Chantier v2.9.34 (notifications.create) : l'auteur doit être
+       cohérent — aucun champ d'auteur ne peut désigner un autre uid que
+       le sien (mais un champ absent est toléré : toutes les
+       notifications n'exposent pas leur auteur). */
+    function notificationAuthorOk(data) {
+      return (data.get('fromUid', null) == null || data.get('fromUid', null) == request.auth.uid) &&
+             (data.get('createdByUid', null) == null || data.get('createdByUid', null) == request.auth.uid) &&
+             (data.get('senderUid', null) == null || data.get('senderUid', null) == request.auth.uid);
+    }
+
+    /* Un destinataire/scope doit être défini : soit un utilisateur
+       précis (l'une des 5 clés reconnues par la règle read/update
+       ci-dessous), soit un établissement (alerte inter-hôpitaux comme
+       le transfert d'urgence js/emergency-transfer.js, ou demande
+       hospitalière adressée à l'admin plateforme comme la demande de
+       plan js/hospital-subscription.js). L'essentiel de la sécurité
+       ajoutée reste la COHÉRENCE de l'auteur (notificationAuthorOk) :
+       plus personne ne peut forger l'expéditeur d'une notification.
+       Ce qui est fermé ici : une notification totalement sans cible. */
+    function notificationRecipientOk(data) {
+      return data.get('to_id', null) != null ||
+             data.get('recipientUid', null) != null ||
+             data.get('userUid', null) != null ||
+             data.get('toUid', null) != null ||
+             data.get('recipientUserId', null) != null ||
+             data.get('recipientHospitalId', null) != null ||
+             data.get('hospitalId', null) != null ||
+             data.get('establishmentId', null) != null;
+    }
+
+    /* Audit v2.9.34 (P1) : destinataire utilisateur PRÉCIS d'une
+       notification (l'une des 5 clés d'adressage individuel) — utilisé
+       pour la lecture ET pour restreindre la mise à jour au seul
+       destinataire réel. */
+    function isNotificationRecipient(data) {
+      return data.get('to_id', null) == request.auth.uid ||
+             data.get('recipientUid', null) == request.auth.uid ||
+             data.get('userUid', null) == request.auth.uid ||
+             data.get('toUid', null) == request.auth.uid ||
+             data.get('recipientUserId', null) == request.auth.uid;
+    }
+
+    /* Audit v2.9.34 (P1) : le destinataire d'une notification ne peut
+       modifier QUE des champs de statut (marquer lue/vue/rejetée) —
+       jamais le contenu (title/message/type), ni l'adressage
+       (toUid/…/fromUid). Même principe que MESSAGE_STATUS_FIELDS pour
+       mc_messages. */
+    function notificationStatusFieldsOk(before, after) {
+      return after.diff(before).affectedKeys().hasOnly([
+        'read', 'readStatus', 'readAt', 'seen', 'seenAt',
+        'status', 'dismissedAt', 'archivedAt', 'updatedAt'
+      ]);
+    }
+
     /* ── LECTURE mobile du dossier médical par le personnel clinique ──
        Demande client : un contenu (consultation/ordonnance/résultat de
        labo) créé côté DESKTOP hôpital ne doit être visible au médecin/
@@ -525,6 +598,26 @@ service cloud.firestore {
       );
     }
 
+    /* ── v2.9.34 (règle IMPÉRATIVE pharmacie) — split interne/externe ──
+       Desktop hôpital = pharmacie INTERNE uniquement (service de
+       l'établissement, liée à un hospitalMembers actif) ; mobile =
+       pharmacie EXTERNE indépendante (jamais affiliée, jamais
+       d'establishmentId/hospitalId). L'affiliation (affiliation_requests
+       puis hospitalMembers) est donc RÉSERVÉE aux pharmacies internes :
+       une pharmacie explicitement taguée pharmacyType:'external' ne peut
+       jamais s'affilier à un établissement.
+       Périmètre : ne concerne QUE le rôle pharmacist (les autres rôles
+       renvoient true). Rétro-compatibilité : un pharmacien SANS
+       pharmacyType (compte antérieur à ce chantier, ou dont le document
+       users n'est pas lisible) reste autorisé — seule la valeur
+       'external' EXPLICITE bloque ; la migration
+       scripts/migrate-pharmacy-type.mjs backfill le type sur l'existant. */
+    function pharmacistAffiliationAllowed() {
+      return !currentRoleIs('pharmacist') ||
+        !hasCurrentUserDoc() ||
+        get(currentUserDoc()).data.get('pharmacyType', 'internal') != 'external';
+    }
+
     /* ── Chantier "reception/affiliation sans régression" — section 11 ──
        Bug confirmé : mc_medicines/mc_sales n'avaient jamais de champ
        pharmacyUid, et leur règle write/read se limitait à
@@ -538,6 +631,17 @@ service cloud.firestore {
        explicite) — jusqu'à ce qu'une prochaine écriture les fasse
        passer sous ce même correctif (updateMedicine() préserve
        pharmacyUid une fois posé). */
+    // v2.9.34 (P1) : pharmacyUid IMMUABLE sur mc_medicines/mc_sales —
+    // un pharmacien ne peut pas réattribuer un stock ou une vente à un
+    // autre compte. Seule exception (rétro-compat) : un document legacy
+    // SANS pharmacyUid peut se voir attribuer celui du propriétaire réel
+    // qui écrit (backfill organique, jamais un tiers). L'admin plateforme
+    // (branche isAdmin séparée) reste libre.
+    function pharmacyUidImmutableOrClaim(before, after) {
+      return after.get('pharmacyUid', null) == before.get('pharmacyUid', null) ||
+        (before.get('pharmacyUid', null) == null &&
+         after.get('pharmacyUid', null) == request.auth.uid);
+    }
     function pharmacyOwnsOrLegacy(data) {
       return currentRoleIs('pharmacist') &&
         (data.get('pharmacyUid', null) == request.auth.uid || data.get('pharmacyUid', null) == null);
@@ -650,6 +754,12 @@ service cloud.firestore {
         request.resource.data.uid == uid &&
         request.resource.data.role == resource.data.role &&
         request.resource.data.status == resource.data.status &&
+        // v2.9.34 : pharmacyType (interne/externe) est IMMUABLE après
+        // création — seul l'admin plateforme (isAdmin, branche séparée)
+        // peut le modifier. Une pharmacie ne peut donc pas se
+        // requalifier elle-même d'externe en interne pour contourner le
+        // split et s'affilier.
+        request.resource.data.get('pharmacyType', null) == resource.data.get('pharmacyType', null) &&
         hasNoSecretFields(request.resource.data);
     }
 
@@ -778,6 +888,9 @@ service cloud.firestore {
           ownsUid(uid) &&
           request.resource.data.role == resource.data.role &&
           request.resource.data.status == resource.data.status &&
+          // v2.9.34 : pharmacyType immuable après création (seul l'admin
+          // plateforme peut le changer — branche isAdmin ci-dessus).
+          request.resource.data.get('pharmacyType', null) == resource.data.get('pharmacyType', null) &&
           hasNoSecretFields(request.resource.data)
         );
       allow delete: if isAdmin() || ownsUid(uid);
@@ -890,18 +1003,38 @@ service cloud.firestore {
       // partout (au lieu de l'accès pointé direct) : un document qui ne
       // porte qu'UN sous-ensemble de ces 5 clés optionnelles levait
       // sinon une erreur d'évaluation sur les clés absentes.
-      allow read, update: if isAdmin() ||
-        (
-          signedIn() &&
-          (
-            resource.data.get('to_id', null) == request.auth.uid ||
-            resource.data.get('recipientUid', null) == request.auth.uid ||
-            resource.data.get('userUid', null) == request.auth.uid ||
-            resource.data.get('toUid', null) == request.auth.uid ||
-            resource.data.get('recipientUserId', null) == request.auth.uid
-          )
-        );
-      allow create: if signedIn();
+      allow read: if isAdmin() ||
+        (signedIn() && isNotificationRecipient(resource.data));
+      // Audit v2.9.34 (P1) : "read, update" partageaient la MÊME clause —
+      // le destinataire pouvait donc RÉÉCRIRE le contenu de la notification
+      // reçue (titre, message, type), voire réattribuer son auteur/
+      // destinataire, pas seulement la marquer lue. Même faille que celle
+      // corrigée pour mc_messages. La mise à jour par le destinataire est
+      // désormais restreinte aux SEULS champs de statut
+      // (notificationStatusFieldsOk) — le contenu et l'adressage sont
+      // immuables (seul l'admin plateforme garde un accès complet).
+      allow update: if isAdmin() ||
+        (signedIn() &&
+         isNotificationRecipient(resource.data) &&
+         notificationStatusFieldsOk(resource.data, request.resource.data));
+      // Chantier v2.9.34 (P0/sécurité) : "create: if signedIn()" laissait
+      // N'IMPORTE QUEL utilisateur connecté créer une notification pour
+      // n'importe qui, sous n'importe quelle identité. Resserré :
+      // l'auteur doit être authentifié ET cohérent (aucun champ auteur
+      // ne peut désigner un autre uid — même principe que
+      // messageSenderIdentityOk), et un DESTINATAIRE doit être défini
+      // (utilisateur précis ou établissement destinataire). L'action
+      // métier sous-jacente reste, elle, protégée par sa propre
+      // collection (emergencyTransfers/labResults/… : c'est là que
+      // s'applique le contrôle d'appartenance/de capacité) — une
+      // notification n'est qu'un signal secondaire. On n'exige donc pas
+      // ici l'appartenance à l'établissement : une alerte de transfert
+      // est légitimement inter-hôpitaux (l'auteur, membre de l'hôpital
+      // SOURCE, informe l'hôpital DESTINATAIRE).
+      allow create: if isAdmin() ||
+        (signedIn() &&
+         notificationAuthorOk(request.resource.data) &&
+         notificationRecipientOk(request.resource.data));
       allow delete: if isAdmin();
     }
 
@@ -938,9 +1071,14 @@ service cloud.firestore {
     }
 
     match /affiliation_requests/{requestId} {
+      // v2.9.34 : une pharmacie EXTERNE (indépendante/mobile) ne peut
+      // jamais demander d'affiliation à un établissement — seule une
+      // pharmacie interne le peut (pharmacistAffiliationAllowed). Ajout
+      // ADDITIF : les autres rôles conservent exactement leur droit.
       allow create: if signedIn() &&
         request.resource.data.requesterUid == request.auth.uid &&
-        request.resource.data.status == 'pending';
+        request.resource.data.status == 'pending' &&
+        pharmacistAffiliationAllowed();
       // Correctif (audit sécurité, section 9) : admin_hospital peut
       // désormais lire les demandes de SON établissement (nécessaire
       // pour afficher la file "Demandes d'affiliation en attente" du
@@ -1094,6 +1232,10 @@ service cloud.firestore {
       // professionalNumber/matricule n'étaient pas encore figés — un
       // propriétaire pouvait en théorie réécrire ces champs d'identité
       // après création. Ajout ADDITIF, même principe.
+      // v2.9.34 : pharmacyType (interne/externe) rejoint les champs
+      // d'identité IMMUABLES — une pharmacie ne peut pas se requalifier
+      // elle-même pour contourner le split ; seul l'admin plateforme
+      // (isAdmin, branche séparée) peut le modifier.
       function mcAccountImmutableFieldsOk(before, after) {
         return after.get('status', null) == before.get('status', null) &&
           after.get('role', null) == before.get('role', null) &&
@@ -1101,7 +1243,8 @@ service cloud.firestore {
           after.get('uid', null) == before.get('uid', null) &&
           after.get('patient_id', null) == before.get('patient_id', null) &&
           after.get('professionalNumber', null) == before.get('professionalNumber', null) &&
-          after.get('matricule', null) == before.get('matricule', null);
+          after.get('matricule', null) == before.get('matricule', null) &&
+          after.get('pharmacyType', null) == before.get('pharmacyType', null);
       }
       allow update: if hasNoSecretFields(request.resource.data) && (
         isAdmin() ||
@@ -1273,7 +1416,12 @@ service cloud.firestore {
       allow read: if signedIn();
       allow create: if isAdmin() ||
         (currentRoleIs('pharmacist') && request.resource.data.get('pharmacyUid', null) == request.auth.uid);
-      allow update, delete: if isAdmin() || pharmacyOwnsOrLegacy(resource.data);
+      // v2.9.34 : la mise à jour du stock reste réservée au propriétaire,
+      // et ne peut jamais réattribuer pharmacyUid à un tiers.
+      allow update: if isAdmin() ||
+        (pharmacyOwnsOrLegacy(resource.data) &&
+         pharmacyUidImmutableOrClaim(resource.data, request.resource.data));
+      allow delete: if isAdmin() || pharmacyOwnsOrLegacy(resource.data);
     }
 
     match /mc_sales/{docId} {
@@ -1284,7 +1432,12 @@ service cloud.firestore {
       allow read: if isAdmin() || pharmacyOwnsOrLegacy(resource.data);
       allow create: if isAdmin() ||
         (currentRoleIs('pharmacist') && request.resource.data.get('pharmacyUid', null) == request.auth.uid);
-      allow update, delete: if isAdmin() || pharmacyOwnsOrLegacy(resource.data);
+      // v2.9.34 : une vente ne peut jamais être réattribuée à un autre
+      // pharmacien (pharmacyUid immuable).
+      allow update: if isAdmin() ||
+        (pharmacyOwnsOrLegacy(resource.data) &&
+         pharmacyUidImmutableOrClaim(resource.data, request.resource.data));
+      allow delete: if isAdmin() || pharmacyOwnsOrLegacy(resource.data);
     }
 
     /* PARTIE D — un utilisateur connecté quelconque pouvait auparavant
@@ -1474,7 +1627,9 @@ service cloud.firestore {
     }
 
     match /mc_messages/{docId} {
-      allow read: if isAdmin() || (signedIn() && resource.data.to_id == request.auth.uid);
+      // Chantier v2.9.34 : lecture par le destinataire, champ CANONIQUE
+      // toUid reconnu en plus des historiques to_id/recipientUid.
+      allow read: if isAdmin() || (signedIn() && isMessageRecipient(resource.data));
       // Correctif (chantier sécurité, section 12) : "update" acceptait
       // n'importe quel champ (corps, expéditeur, destinataire, pièce
       // jointe...) dès lors que le destinataire était le bon — un
@@ -1482,10 +1637,14 @@ service cloud.firestore {
       // Resserré aux seuls champs de statut de lecture/suppression
       // locale ; le contenu (body/subject/from*/to*/attachedRecord*)
       // reste IMMUABLE après création.
+      // Chantier v2.9.34 : ajoute deletedAt/deletedByUid (suppression
+      // logique par le destinataire, désormais écrite via la primitive
+      // updateMessageStatusAndConfirm) — toujours PAS de champ de
+      // contenu/d'identité modifiable.
       allow update: if isAdmin() ||
-        (signedIn() && resource.data.to_id == request.auth.uid &&
+        (signedIn() && isMessageRecipient(resource.data) &&
          request.resource.data.diff(resource.data).affectedKeys()
-           .hasOnly(['readStatus', 'read', 'readAt', 'deletedFor', 'updatedAt']));
+           .hasOnly(['readStatus', 'read', 'readAt', 'deletedFor', 'deletedAt', 'deletedByUid', 'updatedAt']));
       // Correctif (audit) : seuls les messages qui portent explicitement
       // un hospitalId (messagerie pro→pro, js/transfer_ui_patch.js) sont
       // soumis à hospitalCanWriteFromDevice — les 8 autres types de
@@ -1498,8 +1657,11 @@ service cloud.firestore {
       // l'expéditeur soit RÉELLEMENT membre actif de cet établissement
       // (hospitalCanWriteFromDevice ne vérifiait que l'abonnement, jamais
       // l'appartenance).
+      // Chantier v2.9.34 : exige AUSSI un destinataire précis
+      // (messageRecipientOk) — plus jamais un message sans destinataire.
       allow create: if isAdmin() ||
         (signedIn() && messageSenderIdentityOk(request.resource.data) &&
+         messageRecipientOk(request.resource.data) &&
          ((!('hospitalId' in request.resource.data)) ||
           request.resource.data.hospitalId in [null, ''] ||
           (isHospitalMember(resolveHospitalId(request.resource.data)) &&
@@ -1657,6 +1819,9 @@ service cloud.firestore {
          docId == (resolveHospitalId(request.resource.data) + '_' + request.auth.uid) &&
          request.resource.data.uid == request.auth.uid &&
          request.resource.data.status == 'active' &&
+         // v2.9.34 : une pharmacie externe ne peut jamais s'auto-écrire
+         // une affiliation active, même en présence d'une demande.
+         pharmacistAffiliationAllowed() &&
          hasApprovedAffiliation(resolveHospitalId(request.resource.data))) ||
         // Correctif (audit sécurité, section 9) : sans cette clause,
         // même une fois affiliation_requests.update autorisé pour

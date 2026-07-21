@@ -60,15 +60,61 @@ const DB = (() => {
     return new Date(Date.now() + delay).toISOString();
   }
 
-  function _outboxAdd(collection, docId, data, err = null) {
-    const q = load(OUTBOX_KEY);
+  /* Contexte d'exécution capturé À LA MISE EN FILE (chantier v2.9.34,
+     P0 outbox) : module source, utilisateur, rôle, établissement —
+     purement informatif (inspecteur/diagnostic), jamais utilisé pour
+     décider d'un droit d'accès (les règles Firestore restent la seule
+     barrière). */
+  function _opContext(meta = {}) {
+    let userUid = null, userRole = null, hospitalId = null;
+    try {
+      const u = window.Auth?.getUser?.();
+      userUid = u?.uid || null; userRole = u?.role || null;
+    } catch (_) {}
+    try {
+      hospitalId = window.HospitalsRegistry?.getCurrentHospital?.()?.establishmentId || null;
+    } catch (_) {}
+    return {
+      module: meta.module || null,
+      operationType: meta.operationType || null,
+      userUid, userRole, hospitalId,
+      groupId: meta.groupId || null,
+    };
+  }
+
+  /* Rétro-compatibilité : les entrées écrites par les versions
+     précédentes n'ont ni operationId ni type — normalisées à la lecture
+     (jamais supprimées, jamais réinterprétées au-delà des champs
+     manquants). */
+  function _normalizeOutboxEntry(e) {
+    if (!e) return e;
+    const n = { ...e };
+    if (!n.operationId) n.operationId = makeId('OP');
+    if (!n.type) n.type = Array.isArray(n.writes) ? 'batch' : 'set';
+    if (!n.operationType) n.operationType = n.type === 'batch' ? 'batch' : `set:${n.collection || '?'}`;
+    if (!n.updatedAt) n.updatedAt = n.queuedAt || new Date().toISOString();
+    if (n.attempts == null) n.attempts = 0;
+    if (!n.classification) n.classification = 'retryable';
+    return n;
+  }
+  function _outboxLoad() { return load(OUTBOX_KEY).map(_normalizeOutboxEntry); }
+
+  function _outboxAdd(collection, docId, data, err = null, meta = {}) {
+    const q = _outboxLoad();
     // Dédoublonnage : une réécriture plus récente du même document
     // remplace l'ancienne en file (dernière valeur = la bonne) — repart
     // avec un compteur de tentatives à zéro (nouvelle donnée à écrire,
-    // pas un rejeu de l'ancienne).
-    const filtered = q.filter(e => !(e.collection === collection && e.docId === String(docId)));
+    // pas un rejeu de l'ancienne). Ne touche JAMAIS aux entrées batch
+    // (qui ne s'écrasent que par groupId, voir _outboxAddBatch).
+    const filtered = q.filter(e => !(e.type === 'set' && e.collection === collection && e.docId === String(docId)));
     filtered.push({
-      collection, docId: String(docId), data, queuedAt: new Date().toISOString(),
+      operationId: makeId('OP'),
+      type: 'set',
+      collection, docId: String(docId), data,
+      ..._opContext({ operationType: `set:${collection}`, ...meta }),
+      operationType: meta.operationType || `set:${collection}`,
+      queuedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
       attempts: 0, nextRetryAt: null,
       classification: classifyOutboxError(err),
       lastErrorCode: err?.code || null,
@@ -77,18 +123,46 @@ const DB = (() => {
     store(OUTBOX_KEY, filtered);
   }
 
-  function _outboxCount() { return load(OUTBOX_KEY).length; }
+  /* Mise en file d'un GROUPE ATOMIQUE (chantier v2.9.34, P0) : un batch
+     médical (ex. création patient : mc_patients+patients+medical_records+
+     patient_directory) est mémorisé comme UNE SEULE entrée, rejouée par
+     un seul firebaseDB.batch().commit() — jamais décomposée en
+     écritures indépendantes, ce qui romprait l'atomicité. */
+  function _outboxAddBatch(writes, err = null, meta = {}) {
+    const q = _outboxLoad();
+    const groupId = meta.groupId || makeId('GRP');
+    const filtered = q.filter(e => !(e.type === 'batch' && e.groupId === groupId));
+    const entry = {
+      operationId: makeId('OP'),
+      type: 'batch',
+      writes: writes.map(([col, id, data]) => [col, String(id), data]),
+      ..._opContext(meta),
+      groupId,
+      operationType: meta.operationType || 'batch',
+      queuedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      attempts: 0, nextRetryAt: null,
+      classification: classifyOutboxError(err),
+      lastErrorCode: err?.code || null,
+      lastErrorMessage: err?.message || null,
+    };
+    filtered.push(entry);
+    store(OUTBOX_KEY, filtered);
+    return entry.operationId;
+  }
+
+  function _outboxCount() { return _outboxLoad().length; }
   const outboxCount = _outboxCount;
 
   /** Instantané en lecture seule de la file — pour l'inspecteur UI
       (js/settings.js) : jamais utilisé pour décider quoi que ce soit,
       seulement pour AFFICHER l'état réel à l'utilisateur/l'admin. */
-  function getOutboxEntries() { return load(OUTBOX_KEY); }
+  function getOutboxEntries() { return _outboxLoad(); }
 
   /** Résumé agrégé — évite à chaque appelant (badge, inspecteur) de
       recompter lui-même les classifications. */
   function getOutboxSummary() {
-    const q = load(OUTBOX_KEY);
+    const q = _outboxLoad();
     const blocked = q.filter(e => e.classification === 'blocked').length;
     const retryable = q.length - blocked;
     const oldestQueuedAt = q.length
@@ -97,36 +171,69 @@ const DB = (() => {
     return { total: q.length, retryable, blocked, oldestQueuedAt };
   }
 
+  /** Rejoue UNE entrée (set ou batch). Retourne true si l'écriture a
+      abouti. Ne modifie pas la file — l'appelant s'en charge. */
+  async function _replayEntry(e) {
+    if (e.type === 'batch') {
+      if (typeof firebaseDB.batch !== 'function') throw new Error('batch non supporté');
+      const batch = firebaseDB.batch();
+      (e.writes || []).forEach(([col, id, data]) => {
+        batch.set(firebaseDB.collection(col).doc(String(id)), data);
+      });
+      await batch.commit();
+      return true;
+    }
+    await firebaseDB.collection(e.collection).doc(e.docId).set(e.data, { merge: true });
+    return true;
+  }
+
+  function _failedEntry(e, err) {
+    const attempts = (e.attempts || 0) + 1;
+    return {
+      ..._normalizeOutboxEntry(e), attempts,
+      updatedAt: new Date().toISOString(),
+      nextRetryAt: _computeNextRetryAt(attempts),
+      classification: classifyOutboxError(err),
+      lastErrorCode: err?.code || null,
+      lastErrorMessage: err?.message || null,
+    };
+  }
+
   let _flushing = false;
-  /** force:true (bouton "Vérifier la synchronisation") : rejoue même les
-      entrées dont le délai d'attente exponentiel (nextRetryAt) n'est pas
-      encore écoulé — jamais les entrées 'blocked' avant une nouvelle
-      tentative volontaire de l'utilisateur, qui a justement pour but de
-      vérifier si la situation a changé (ex. règle redéployée). */
+  /** Rejeu AUTOMATIQUE (et « Réessayer toutes les opérations normales »
+      avec force:true, qui ignore seulement le délai de backoff).
+
+      Correctif (chantier v2.9.34, P0) : bug confirmé — une entrée
+      'blocked' (permission refusée, argument invalide… : ne se
+      corrigera JAMAIS toute seule) était encore rejouée automatiquement
+      une fois son délai de backoff écoulé, et par le rejeu forcé
+      générique. Une entrée 'blocked' n'est désormais JAMAIS rejouée par
+      flushOutbox(), force ou pas — seules les actions manuelles
+      explicites la rejouent : retryOutboxOperation(operationId)
+      (« Réessayer cette opération ») ou retryBlockedOutbox()
+      (« Vérifier les opérations bloquées »). Elle n'est jamais
+      supprimée automatiquement non plus. */
   async function flushOutbox({ force = false } = {}) {
     if (_flushing || !firebaseReady || !firebaseDB) return;
-    const q = load(OUTBOX_KEY);
+    const q = _outboxLoad();
     if (!q.length) return;
     _flushing = true;
     const now = Date.now();
     const remaining = [];
     for (const e of q) {
+      if (e.classification === 'blocked') {
+        remaining.push(e); // jamais rejouée automatiquement — action manuelle requise
+        continue;
+      }
       if (!force && e.nextRetryAt && new Date(e.nextRetryAt).getTime() > now) {
         remaining.push(e); // pas encore l'heure du prochain essai (backoff)
         continue;
       }
       try {
-        await firebaseDB.collection(e.collection).doc(e.docId).set(e.data, { merge: true });
+        await _replayEntry(e);
       } catch (err) {
-        console.warn(`[MedConnect] Outbox : réécriture ${e.collection}/${e.docId} encore en échec :`, err?.message || err);
-        const attempts = (e.attempts || 0) + 1;
-        remaining.push({
-          ...e, attempts,
-          nextRetryAt: _computeNextRetryAt(attempts),
-          classification: classifyOutboxError(err),
-          lastErrorCode: err?.code || null,
-          lastErrorMessage: err?.message || null,
-        });
+        console.warn(`[MedConnect] Outbox : rejeu ${e.operationType || e.collection} encore en échec :`, err?.message || err);
+        remaining.push(_failedEntry(e, err));
       }
     }
     store(OUTBOX_KEY, remaining);
@@ -134,6 +241,88 @@ const DB = (() => {
     // Rafraîchit le badge de synchronisation pour refléter l'état réel.
     try { window.SyncBadge?.render?.(); } catch (_) {}
     if (remaining.length) console.warn(`[MedConnect] Outbox : ${remaining.length} écriture(s) toujours en attente.`);
+  }
+
+  /** Rejeu MANUEL d'UNE opération précise (y compris 'blocked') —
+      « Réessayer cette opération » dans l'inspecteur. */
+  async function retryOutboxOperation(operationId) {
+    if (!firebaseReady || !firebaseDB) return { ok: false, reason: 'offline' };
+    const q = _outboxLoad();
+    const idx = q.findIndex(e => e.operationId === operationId);
+    if (idx === -1) return { ok: false, reason: 'not_found' };
+    const e = q[idx];
+    try {
+      await _replayEntry(e);
+      q.splice(idx, 1);
+      store(OUTBOX_KEY, q);
+      try { window.SyncBadge?.render?.(); } catch (_) {}
+      return { ok: true };
+    } catch (err) {
+      q[idx] = _failedEntry(e, err);
+      store(OUTBOX_KEY, q);
+      try { window.SyncBadge?.render?.(); } catch (_) {}
+      return { ok: false, reason: 'failed', errorCode: err?.code || null, errorMessage: err?.message || null };
+    }
+  }
+
+  /** Rejeu MANUEL de TOUTES les opérations bloquées — « Vérifier les
+      opérations bloquées » dans l'inspecteur. Seule autre voie de rejeu
+      d'une entrée 'blocked' (ex. après redéploiement d'une règle). */
+  async function retryBlockedOutbox() {
+    if (!firebaseReady || !firebaseDB) return { attempted: 0, succeeded: 0, failed: 0 };
+    const q = _outboxLoad();
+    let attempted = 0, succeeded = 0;
+    const remaining = [];
+    for (const e of q) {
+      if (e.classification !== 'blocked') { remaining.push(e); continue; }
+      attempted++;
+      try {
+        await _replayEntry(e);
+        succeeded++;
+      } catch (err) {
+        remaining.push(_failedEntry(e, err));
+      }
+    }
+    store(OUTBOX_KEY, remaining);
+    try { window.SyncBadge?.render?.(); } catch (_) {}
+    return { attempted, succeeded, failed: attempted - succeeded };
+  }
+
+  /** Suppression MANUELLE d'une opération de la file — jamais appelée
+      automatiquement ; l'inspecteur (js/settings.js) exige une
+      confirmation explicite de l'utilisateur avant cet appel. */
+  function removeOutboxOperation(operationId) {
+    const q = _outboxLoad();
+    const filtered = q.filter(e => e.operationId !== operationId);
+    if (filtered.length === q.length) return false;
+    store(OUTBOX_KEY, filtered);
+    try { window.SyncBadge?.render?.(); } catch (_) {}
+    return true;
+  }
+
+  /* Export JSON de diagnostic — les valeurs dont la clé évoque un
+     secret (mot de passe, PIN, jeton…) sont expurgées récursivement :
+     le fichier peut être partagé pour diagnostic sans fuiter un
+     identifiant. */
+  const SENSITIVE_KEY_RE = /(password|passwd|pwd|pin|secret|token|apikey|api_key|credential|authkey|auth_key|privatekey|private_key)/i;
+  function _redactSecrets(value) {
+    if (Array.isArray(value)) return value.map(_redactSecrets);
+    if (value && typeof value === 'object') {
+      const out = {};
+      for (const [k, v] of Object.entries(value)) {
+        out[k] = SENSITIVE_KEY_RE.test(k) ? '[expurgé]' : _redactSecrets(v);
+      }
+      return out;
+    }
+    return value;
+  }
+  function exportOutboxDiagnostic() {
+    return JSON.stringify({
+      exportedAt: new Date().toISOString(),
+      appVersion: (typeof window !== 'undefined' && window.VersionManager?.getCurrent?.()?.version) || null,
+      summary: getOutboxSummary(),
+      entries: _redactSecrets(_outboxLoad()),
+    }, null, 2);
   }
 
   /* ── IDs UNIQUES ──────────────────────────────────────
@@ -187,11 +376,11 @@ const DB = (() => {
                        doit savoir si le cloud a réellement confirmé
                        (inscription, approbation admin...).
   ──────────────────────────────────────────────────── */
-  async function _push(collection, docId, data) {
+  async function _push(collection, docId, data, meta = {}) {
     if (!firebaseReady || !firebaseDB) {
       // Firestore pas prêt : on ne perd PAS l'écriture, on la met en
       // file pour rejeu automatique dès que le cloud répond.
-      _outboxAdd(collection, docId, data);
+      _outboxAdd(collection, docId, data, null, meta);
       return false;
     }
     try {
@@ -199,7 +388,7 @@ const DB = (() => {
       return true;
     } catch (e) {
       console.warn(`[MedConnect] Échec écriture Firestore ${collection}/${docId} — mise en file :`, e?.message || e);
-      _outboxAdd(collection, docId, data, e);
+      _outboxAdd(collection, docId, data, e, meta);
       return false;
     }
   }
@@ -566,6 +755,14 @@ const DB = (() => {
                 const section = { mc_prescriptions: 'prescriptions', mc_messages: 'messages' }[key];
                 if (section && window.App?.refreshIfCurrent) window.App.refreshIfCurrent(section);
               } catch (_) {}
+              // Chantier v2.9.34 (P0 messagerie) : badges de non-lus
+              // (mobile ET desktop) rafraîchis dès qu'un snapshot
+              // messages arrive — réception d'un nouveau message,
+              // reconnexion, resynchronisation, lecture faite sur un
+              // autre appareil.
+              if (key === 'mc_messages') {
+                try { window.Network?.refreshUnreadIndicators?.(); } catch (_) {}
+              }
             }
           },
           err => console.warn(`[MedConnect] Listener ${key} (scoped) rejeté :`, err?.message || err)
@@ -576,9 +773,15 @@ const DB = (() => {
       }
     };
 
-    // Messagerie : la règle exige to_id == uid — c'est la seule
-    // écoute des messages qui fonctionne réellement.
+    // Messagerie — champs CANONIQUES (chantier v2.9.34) : toUid est la
+    // référence, to_id/recipientUid restent écoutés pour la
+    // compatibilité des messages historiques. mergeStore() fusionne par
+    // mid : trois écoutes ne créent jamais de doublon local.
+    scoped(firebaseDB.collection('mc_messages').where('toUid', '==', user.uid),
+      'mc_messages', 'mid');
     scoped(firebaseDB.collection('mc_messages').where('to_id', '==', user.uid),
+      'mc_messages', 'mid');
+    scoped(firebaseDB.collection('mc_messages').where('recipientUid', '==', user.uid),
       'mc_messages', 'mid');
 
     // Pharmacien : ses ordonnances reçues (pharmacyCanReadPrescription).
@@ -668,16 +871,15 @@ const DB = (() => {
     return getPatientById(patientId)?.firstAccessCode || null;
   }
 
-  /* Variante async de addPatient() : attend la confirmation Firestore
-     réelle des 3 écritures avant de résoudre. addPatient() lance déjà
-     ces écritures en fire-and-forget (jamais attendu par ses
-     appelants historiques, ne pas changer son comportement) — ici on
-     les repousse explicitement en mode critique (_pushCritical, même
-     principe que pushAndReport) pour savoir si elles ont réellement
-     atteint le cloud. Nécessaire pour fermer la course où le code
-     d'accès (firstAccessCode) d'une fiche tout juste créée n'a pas
-     encore atteint Firestore au moment où le patient tente son
-     premier accès (voir firestore.rules patientFirstAccessOk). */
+  /* ⚠️ OBSOLÈTE (chantier v2.9.34, P0 création patient) : plus aucun
+     appelant applicatif — le parcours médecin (js/hospital.js
+     saveNewPatient) utilise désormais le service atomique unique
+     addPatientAndConfirmAtomic(), comme la réception. Conservée
+     uniquement pour la compatibilité de signature publique (consigne
+     du chantier : ne jamais casser un appelant externe éventuel) ; ne
+     pas réutiliser pour du nouveau code : cache local renseigné AVANT
+     confirmation, écritures indépendantes (non atomiques), pas de
+     patient_directory. */
   async function addPatientAndConfirm(data) {
     const p = addPatient(data);
     // Seul mc_patients est vérifié par patientFirstAccessOk() côté
@@ -744,40 +946,115 @@ const DB = (() => {
     };
   }
 
-  async function addPatientAndConfirmAtomic(data) {
-    const p = buildPatientRecord(data);
-    const medicalRecord = {
-      recordId: p.id,
-      patientId: p.id,
-      patientUid: p.uid || p.patient_uid || '',
-      created_by: p.created_by || '',
-      establishmentId: p.establishmentId || p.hospital_id || '',
-      type: 'patient_record',
-      status: 'active',
-      createdAt: p.created_at,
-      updatedAt: p.created_at,
-    };
-    const result = await pushBatchAndReportDetailed([
-      ['mc_patients', p.id, p],
-      ['patients', p.id, p],
-      ['medical_records', p.id, medicalRecord],
-      ['patient_directory', p.id, buildPatientDirectoryEntry(p)],
-    ], { label: 'Création patient (réception)' });
-    if (result.ok) {
-      // Le cache local n'est renseigné qu'APRÈS confirmation réelle du
-      // batch — jamais avant (voir correctif ci-dessus).
-      const list = getPatients();
-      list.push(p);
-      store('mc_patients', list);
+  /* Chantier v2.9.34 (P0 création patient) : SERVICE UNIQUE de création
+     patient, partagé par TOUS les rôles autorisés (médecin mobile,
+     médecin desktop, réception desktop) — le parcours médecin passait
+     encore par addPatientAndConfirm() (cache local immédiat + 3
+     écritures indépendantes, sans patient_directory, code d'accès
+     affiché même non confirmé).
+
+     Contrat de retour :
+     - { patient, confirmed: true }                    → les 4 documents
+       sont RÉELLEMENT dans Firestore (ou réconciliés après timeout) ;
+       le cache local vient d'être renseigné ; le code de premier accès
+       peut être affiché.
+     - { patient, confirmed: false, queued: true,
+         operationId }                                 → hors ligne (ou
+       cloud injoignable après timeout non réconciliable) : le groupe
+       ATOMIQUE complet est en file d'outbox comme UNE SEULE opération
+       (jamais décomposé), rejouable tel quel — le cache local n'est PAS
+       renseigné (il le sera par le listener Firestore quand le batch
+       aura réellement abouti), le code d'accès n'est PAS affichable.
+     - { patient: null, confirmed: false, failed: true,
+         blocked?, errorCode? }                        → rejet réel
+       (ex. permission refusée) : RIEN n'est créé nulle part, rien n'est
+       mis en file (un rejeu produirait le même refus ; et une nouvelle
+       tentative de l'agent, avec un NOUVEL identifiant, ne doit jamais
+       pouvoir entrer en collision avec une file fantôme). L'appelant
+       garde la modale ouverte pour permettre une nouvelle tentative.
+
+     Idempotence/réconciliation (Promise.race n'annule JAMAIS une
+     écriture déjà partie) : toutes les écritures sont des set() sur des
+     identifiants FIXES — rejouer le même groupe ne peut pas créer de
+     doublon. Après un timeout, on RELIT mc_patients/{id} : si le
+     document existe, le batch avait réellement abouti → confirmé
+     (jamais une nouvelle création proposée pour rien) ; sinon on met le
+     groupe en file (rejeu sans risque, mêmes ids). */
+  let _creatingPatient = false;
+  async function addPatientAndConfirmAtomic(data, options = {}) {
+    if (_creatingPatient) return { patient: null, confirmed: false, failed: true, busy: true };
+    _creatingPatient = true;
+    try {
+      const p = buildPatientRecord(data);
+      const medicalRecord = {
+        recordId: p.id,
+        patientId: p.id,
+        patientUid: p.uid || p.patient_uid || '',
+        created_by: p.created_by || '',
+        establishmentId: p.establishmentId || p.hospital_id || '',
+        type: 'patient_record',
+        status: 'active',
+        createdAt: p.created_at,
+        updatedAt: p.created_at,
+      };
+      const writes = [
+        ['mc_patients', p.id, p],
+        ['patients', p.id, p],
+        ['medical_records', p.id, medicalRecord],
+        ['patient_directory', p.id, buildPatientDirectoryEntry(p)],
+      ];
+      const opMeta = { operationType: 'patient_create', module: 'patients', groupId: p.id };
+
+      const confirmLocally = () => {
+        // Le cache local n'est renseigné qu'APRÈS confirmation réelle
+        // du batch — jamais avant.
+        const list = getPatients();
+        if (!list.some(x => x.id === p.id)) { list.push(p); store('mc_patients', list); }
+      };
+
+      // Hors ligne d'emblée : mise en file du groupe atomique complet.
+      if (!_hasBatchSupport()) {
+        const operationId = _outboxAddBatch(writes, null, opMeta);
+        return { patient: p, confirmed: false, queued: true, operationId };
+      }
+
+      const result = await pushBatchAndReportDetailed(writes, { label: 'Création patient', timeoutMs: options.timeoutMs });
+      if (result.ok) {
+        confirmLocally();
+        return { patient: p, confirmed: true };
+      }
+
+      if (result.timedOut) {
+        // Réconciliation : le commit est peut-être passé malgré le
+        // timeout côté interface.
+        try {
+          const doc = await firebaseDB.collection('mc_patients').doc(p.id).get();
+          if (doc.exists) {
+            confirmLocally();
+            return { patient: p, confirmed: true, reconciled: true };
+          }
+        } catch (_) { /* relecture impossible : traité comme injoignable ci-dessous */ }
+        const operationId = _outboxAddBatch(writes, result.error, opMeta);
+        return { patient: p, confirmed: false, queued: true, operationId };
+      }
+
+      const classification = classifyOutboxError(result.error);
+      if (classification === 'blocked') {
+        // Rejet réel (permission, données invalides…) : rien n'est créé,
+        // rien n'est mis en file — l'agent corrige et réessaie.
+        return {
+          patient: null, confirmed: false, failed: true, blocked: true,
+          errorCode: result.error?.code || null,
+          errorMessage: result.error?.message || null,
+        };
+      }
+      // Échec transitoire (service indisponible…) : le commit n'a pas
+      // abouti — mise en file du groupe atomique complet.
+      const operationId = _outboxAddBatch(writes, result.error, opMeta);
+      return { patient: p, confirmed: false, queued: true, operationId };
+    } finally {
+      _creatingPatient = false;
     }
-    // Limite connue (chantier outbox, sections 1-2 à venir) : un échec
-    // hors ligne ne met encore rien en file pour rejeu automatique ici
-    // — l'agent doit réessayer manuellement une fois reconnecté (voir
-    // le message affiché par l'appelant). C'est volontairement plus
-    // sûr que l'ancien comportement (trois écritures non groupées mises
-    // en file séparément), pas une régression : aucune écriture
-    // partielle n'est plus jamais tentée.
-    return { patient: p, confirmed: result.ok };
   }
 
   function updatePatient(id, data) {
@@ -825,6 +1102,77 @@ const DB = (() => {
       (p.firstname||'').toLowerCase().includes(ql) ||
       (p.lastname||'').toLowerCase().includes(ql) ||
       (p.phone||'').includes(ql));
+  }
+
+  /* Chantier v2.9.34 (P1) : recherche dans l'ANNUAIRE non clinique
+     (patient_directory) pour la réception et le laboratoire. Une fiche
+     patient créée sur un autre poste/établissement n'est PAS dans le
+     cache local ; l'ancienne recherche réception (js/hospital-reception.js
+     lookupPatient) ne savait résoudre qu'un numéro MC EXACT (lecture d'un
+     seul document mc_patients/{mc}), jamais un nom ou un téléphone. Cette
+     fonction interroge patient_directory — l'index non clinique alimenté
+     dans le même batch atomique que la fiche (buildPatientDirectoryEntry)
+     — et ne renvoie JAMAIS de contenu clinique (seulement identité +
+     rattachement administratif).
+
+     Isolation : la requête est TOUJOURS bornée à establishmentId (égalité)
+     — c'est la seule forme qu'autorise firestore.rules (lecture
+     patient_directory = belongsToSameEstablishment, qui résout d'abord
+     establishmentId). Le filtrage nom/téléphone se fait ensuite côté
+     client (Firestore n'a pas de recherche plein texte ; pas d'index
+     composite requis avec une seule égalité). Repli hors ligne : cache
+     local (searchPatients). */
+  async function searchPatientDirectory(q, establishmentId) {
+    const ql = String(q || '').trim().toLowerCase();
+    if (!ql) return [];
+
+    const matchesLocal = searchPatients(ql).map(p => ({
+      id: p.id, firstname: p.firstname || '', lastname: p.lastname || '',
+      phone: p.phone || '', dob: p.dob || p.birthdate || '', gender: p.gender || '',
+      establishmentId: p.establishmentId || p.hospital_id || '',
+      administrativeStatus: p.administrativeStatus || 'active', _source: 'local',
+    }));
+
+    if (!establishmentId || typeof firebaseDB === 'undefined' || !firebaseDB) {
+      return matchesLocal;
+    }
+
+    try {
+      const snap = await firebaseDB.collection('patient_directory')
+        .where('establishmentId', '==', establishmentId).get();
+      const cloud = [];
+      snap.forEach(doc => {
+        const d = doc.data() || {};
+        const hay = [
+          d.patientId || doc.id, d.firstname, d.lastname, d.phone,
+        ].map(v => String(v || '').toLowerCase());
+        // Correspondance sur l'un des champs identité (nom, prénom,
+        // téléphone, numéro MC). Le téléphone se compare sans casse mais
+        // le motif reste inclusif comme pour searchPatients.
+        if (hay.some(h => h.includes(ql))) {
+          cloud.push({
+            id: d.patientId || doc.id,
+            firstname: d.firstname || '', lastname: d.lastname || '',
+            phone: d.phone || '', dob: d.dob || '', gender: d.gender || '',
+            establishmentId: d.establishmentId || d.hospital_id || '',
+            administrativeStatus: d.administrativeStatus || 'active', _source: 'directory',
+          });
+        }
+      });
+      // Fusion : l'entrée locale (potentiellement plus fraîche) prime sur
+      // le doublon annuaire pour un même id.
+      const byId = new Map();
+      for (const c of cloud) byId.set(c.id, c);
+      for (const l of matchesLocal) byId.set(l.id, l); // le local écrase
+      return Array.from(byId.values());
+    } catch (e) {
+      if (e?.code === 'permission-denied') {
+        console.warn('[MedConnect] Recherche annuaire refusée (établissement) :', e?.message || e);
+        return matchesLocal;
+      }
+      console.warn('[MedConnect] Recherche annuaire patient :', e?.message || e);
+      return matchesLocal;
+    }
   }
 
   /* ══════════════════════════════════════════════════
@@ -1246,6 +1594,13 @@ const DB = (() => {
   ══════════════════════════════════════════════════ */
   function getSales() { return load('mc_sales'); }
 
+  // Chantier v2.9.34 (P1) : addSale() OBSOLÈTE — conservé pour compat.
+  // Il écrivait la vente PUIS décrémentait le stock par écritures
+  // _push() INDÉPENDANTES (vente et chaque médicament séparément) : un
+  // échec partiel laissait la vente enregistrée sans déduction du stock
+  // (ou l'inverse), et Math.max(0, …) MASQUAIT une survente au lieu de
+  // la refuser (stock plancher à 0, mais la vente passait quand même).
+  // Utiliser addSaleAtomic() à la place.
   function addSale(items, total, patientId) {
     const list = getSales();
     const s = {
@@ -1253,15 +1608,10 @@ const DB = (() => {
       total: parseFloat(total).toFixed(2),
       patient_id: patientId || null,
       date: today(), time: new Date().toLocaleTimeString(),
-      // Chantier sécurité (section 11) : même correctif que
-      // addMedicine() — mc_sales n'avait aucun identifiant de
-      // propriétaire, et firestore.rules autorisait tout pharmacien à
-      // lire/écrire les ventes de N'IMPORTE QUEL AUTRE pharmacien.
       pharmacyUid: window.Auth?.getUser?.()?.uid || '',
     };
     list.push(s); store('mc_sales', list);
     _push('mc_sales', s.sid, s);
-    // Déduire le stock
     const meds = getMedicines();
     items.forEach(i => {
       const idx = meds.findIndex(m => m.mid === i.mid);
@@ -1272,17 +1622,162 @@ const DB = (() => {
     return s;
   }
 
+  /* Chantier v2.9.34 (P1) : vente pharmacie ATOMIQUE et sans survente.
+     - Le stock est validé AVANT tout : si un article demande plus que le
+       stock disponible (ou une quantité ≤ 0, ou un médicament inconnu),
+       la vente entière est REFUSÉE — jamais de stock négatif, jamais de
+       vente partielle.
+     - La vente et les décréments de stock sont écrits dans UN SEUL lot
+       Firestore atomique (pushBatchAndReportDetailed) : tout ou rien.
+     - Le cache local n'est renseigné qu'APRÈS confirmation réelle.
+     - Contrat de retour (miroir de addPatientAndConfirmAtomic) :
+       { ok:true, confirmed:true, sale }                       → écrit.
+       { ok:false, confirmed:false, reason:'insufficient_stock',
+         insufficient:[…] }                                    → refus stock.
+       { ok:false, confirmed:false, queued:true, operationId } → hors ligne
+         (lot atomique en file, rejouable tel quel, cache NON renseigné).
+       { ok:false, confirmed:false, failed:true, blocked:true,
+         errorCode }                                           → rejet réel.
+       { ok:false, confirmed:false, failed:true, busy:true }   → double appel. */
+  let _sellingPharmacy = false;
+  async function addSaleAtomic(items, total, patientId) {
+    if (_sellingPharmacy) return { ok: false, confirmed: false, failed: true, busy: true };
+    _sellingPharmacy = true;
+    try {
+      const meds = getMedicines();
+      // 1) Validation du stock — jamais de survente / stock négatif.
+      const insufficient = [];
+      const plan = [];
+      for (const it of (items || [])) {
+        const idx = meds.findIndex(m => m.mid === it.mid);
+        if (idx === -1) { insufficient.push({ mid: it.mid, name: it.name || it.mid, reason: 'unknown' }); continue; }
+        const available = parseInt(meds[idx].stock) || 0;
+        const qty = parseInt(it.qty) || 0;
+        if (qty <= 0) { insufficient.push({ mid: it.mid, name: meds[idx].name, reason: 'invalid_qty' }); continue; }
+        if (qty > available) { insufficient.push({ mid: it.mid, name: meds[idx].name, available, requested: qty, reason: 'insufficient' }); continue; }
+        plan.push({ idx, mid: it.mid, newStock: available - qty });
+      }
+      if (insufficient.length) {
+        return { ok: false, confirmed: false, reason: 'insufficient_stock', insufficient };
+      }
+
+      // 2) Lot atomique : vente + médicaments décrémentés.
+      const s = {
+        sid: makeId('S'), items,
+        total: parseFloat(total).toFixed(2),
+        patient_id: patientId || null,
+        date: today(), time: new Date().toLocaleTimeString(),
+        pharmacyUid: window.Auth?.getUser?.()?.uid || '',
+      };
+      const updatedMeds = plan.map(pl => ({ ...meds[pl.idx], stock: String(pl.newStock), mid: pl.mid }));
+      const writes = [
+        ['mc_sales', s.sid, s],
+        ...updatedMeds.map(m => ['mc_medicines', m.mid, m]),
+      ];
+      const opMeta = { operationType: 'pharmacy_sale', module: 'pharmacy', groupId: s.sid };
+
+      const confirmLocally = () => {
+        const salesList = getSales();
+        if (!salesList.some(x => x.sid === s.sid)) { salesList.push(s); store('mc_sales', salesList); }
+        const freshMeds = getMedicines();
+        updatedMeds.forEach(um => { const i = freshMeds.findIndex(m => m.mid === um.mid); if (i !== -1) freshMeds[i] = um; });
+        store('mc_medicines', freshMeds);
+      };
+
+      // Hors ligne d'emblée : mise en file du lot atomique complet.
+      if (!_hasBatchSupport()) {
+        const operationId = _outboxAddBatch(writes, null, opMeta);
+        return { ok: false, confirmed: false, queued: true, operationId };
+      }
+
+      const result = await pushBatchAndReportDetailed(writes, { label: 'Vente pharmacie' });
+      if (result.ok) { confirmLocally(); return { ok: true, confirmed: true, sale: s }; }
+
+      if (result.timedOut) {
+        // Réconciliation : le commit est peut-être passé malgré le timeout.
+        try {
+          const doc = await firebaseDB.collection('mc_sales').doc(s.sid).get();
+          if (doc.exists) { confirmLocally(); return { ok: true, confirmed: true, sale: s, reconciled: true }; }
+        } catch (_) { /* relecture impossible : traité comme injoignable */ }
+        const operationId = _outboxAddBatch(writes, result.error, opMeta);
+        return { ok: false, confirmed: false, queued: true, operationId };
+      }
+
+      const classification = classifyOutboxError(result.error);
+      if (classification === 'blocked') {
+        // Rejet réel (permission, données invalides…) : rien n'est créé,
+        // rien n'est mis en file (le stock local reste intact).
+        return {
+          ok: false, confirmed: false, failed: true, blocked: true,
+          errorCode: result.error?.code || null,
+          errorMessage: result.error?.message || null,
+        };
+      }
+      // Échec transitoire : mise en file du lot atomique complet.
+      const operationId = _outboxAddBatch(writes, result.error, opMeta);
+      return { ok: false, confirmed: false, queued: true, operationId };
+    } finally {
+      _sellingPharmacy = false;
+    }
+  }
+
   /* ══════════════════════════════════════════════════
      MESSAGES
   ══════════════════════════════════════════════════ */
   function getMessages()    { return load('mc_messages'); }
-  function saveMessages(l)  {
-    store('mc_messages', l);
-    l.forEach(m => {
-      _push('mc_messages', m.mid, m);
-      _push('notifications', m.mid, m);
-    });
+
+  /* Chantier v2.9.34 (P0 messagerie) : bug confirmé — saveMessages()
+     réécrivait TOUTE la liste des messages dans mc_messages ET la
+     recopiait intégralement dans notifications à CHAQUE appel (envoi,
+     lecture, suppression…) : N×2 écritures cloud pour une seule action,
+     doublons de notifications, et mélange de deux objets métier
+     différents (un message utilisateur n'est PAS une notification
+     métier). Architecture remplacée par trois primitives explicites :
+     - saveMessagesLocal(messages)              : cache local UNIQUEMENT.
+     - pushMessageAndConfirm(message)           : écrit LE nouveau
+       message (un seul document, mc_messages uniquement — plus jamais
+       de copie automatique vers notifications).
+     - updateMessageStatusAndConfirm(mid,patch) : met à jour LE message
+       concerné, champs de STATUT uniquement (lu/non-lu/suppression
+       logique) — le contenu reste immuable, comme côté règles. */
+  function saveMessagesLocal(l) { store('mc_messages', l); }
+
+  async function pushMessageAndConfirm(message) {
+    if (!message || !message.mid) return false;
+    const msgs = getMessages();
+    const idx = msgs.findIndex(m => m.mid === message.mid);
+    if (idx === -1) msgs.push(message); else msgs[idx] = message;
+    saveMessagesLocal(msgs);
+    return _push('mc_messages', message.mid, message,
+      { operationType: 'message_send', module: 'messagerie' });
   }
+
+  // Miroir client de la règle serveur (mc_messages.update) : seuls les
+  // champs de statut du destinataire sont modifiables — tout autre
+  // champ du patch est ignoré (jamais envoyé), le contenu/l'expéditeur/
+  // le destinataire/la pièce jointe restent immuables.
+  const MESSAGE_STATUS_FIELDS = new Set([
+    'read', 'readStatus', 'readAt', 'deletedFor', 'deletedAt', 'deletedByUid', 'updatedAt',
+  ]);
+  async function updateMessageStatusAndConfirm(mid, patch) {
+    const msgs = getMessages();
+    const m = msgs.find(x => x.mid === mid);
+    if (!m) return { ok: false, state: 'not_found' };
+    for (const [k, v] of Object.entries(patch || {})) {
+      if (MESSAGE_STATUS_FIELDS.has(k)) m[k] = v;
+    }
+    m.updatedAt = new Date().toISOString();
+    saveMessagesLocal(msgs);
+    const cloudConfirmed = await _push('mc_messages', mid, m,
+      { operationType: 'message_status', module: 'messagerie' });
+    return { ok: true, state: cloudConfirmed ? 'confirmed' : 'queued', cloudConfirmed, message: m };
+  }
+
+  /* ⚠️ OBSOLÈTE (chantier v2.9.34) : conservée pour compatibilité de
+     signature, mais n'écrit plus QUE le cache local — plus jamais la
+     réécriture cloud de toute la liste ni la copie vers notifications.
+     Utiliser pushMessageAndConfirm()/updateMessageStatusAndConfirm(). */
+  function saveMessages(l)  { saveMessagesLocal(l); }
 
   /* ══════════════════════════════════════════════════
      PARAMÈTRES
@@ -1333,6 +1828,10 @@ const DB = (() => {
     // instantanés en LECTURE SEULE (js/settings.js, js/sync-badge.js) —
     // jamais utilisés pour décider quoi que ce soit côté métier.
     getOutboxEntries, getOutboxSummary, classifyOutboxError,
+    // Chantier v2.9.34 (P0 outbox) : rejeu manuel ciblé (seule voie de
+    // rejeu d'une entrée 'blocked'), suppression manuelle confirmée,
+    // export de diagnostic expurgé.
+    retryOutboxOperation, retryBlockedOutbox, removeOutboxOperation, exportOutboxDiagnostic,
     // pushCloud/deleteCloud : wrappers publics sur _push/_delete, à
     // utiliser par tout module (access_control.js, hospitals_registry.js,
     // affiliation-cleanup.js...) au lieu de réimplémenter un mini-push
@@ -1342,7 +1841,7 @@ const DB = (() => {
     pushCloud: _push, deleteCloud: _delete, roleCollection,
     getAccounts, saveAccounts, getUsers, saveUsers, upsertUserProfile,
     getRegistrationRequests, saveRegistrationRequests, createRegistrationRequest,
-    getPatients, savePatients, addPatient, addPatientAndConfirm, buildPatientRecord, buildPatientDirectoryEntry, addPatientAndConfirmAtomic, updatePatient, deletePatient, getPatientById, searchPatients,
+    getPatients, savePatients, addPatient, addPatientAndConfirm, buildPatientRecord, buildPatientDirectoryEntry, addPatientAndConfirmAtomic, updatePatient, deletePatient, getPatientById, searchPatients, searchPatientDirectory,
     accountExistsForPatient, getPatientAccessCode,
     getConsultations, addConsultation, getPatientConsultations, deleteConsultation,
     getPrescriptions, addPrescription, updatePrescription, updatePrescriptionAndConfirm, getPatientPrescriptions,
@@ -1354,8 +1853,12 @@ const DB = (() => {
     getAllEmergencyCases, addEmergencyCaseRecord, updateEmergencyCaseRecord, getPatientEmergencyCases,
     getAllMaternityCases, addMaternityCaseRecord, updateMaternityCaseRecord, getPatientMaternityCases,
     getMedicines, addMedicine, updateMedicine, deleteMedicine,
-    getSales, addSale,
+    getSales, addSale, addSaleAtomic,
     getMessages, saveMessages,
+    // Chantier v2.9.34 (P0 messagerie) : primitives ciblées — un seul
+    // document écrit par action, plus jamais de réécriture de toute la
+    // boîte ni de copie automatique vers notifications.
+    saveMessagesLocal, pushMessageAndConfirm, updateMessageStatusAndConfirm,
     getSettings, saveSettings,
     getStats,
   };

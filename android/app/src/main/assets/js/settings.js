@@ -110,10 +110,36 @@ const Settings = (() => {
      attente" normal. Cette section (mobile ET desktop, même
      Settings.render() container-agnostic que le reste du module)
      rend l'état réel visible et permet un rejeu manuel immédiat. */
+  function _opLabel(e) {
+    if (e.type === 'batch') {
+      const cols = (e.writes || []).map(w => w[0]).join(' + ');
+      return `Opération atomique (${cols || 'batch'})`;
+    }
+    return `${e.collection}/${e.docId}`;
+  }
+
+  function _opRow(e) {
+    const isBlocked = e.classification === 'blocked';
+    return `
+      <div class="settings-row" style="flex-direction:column;align-items:stretch;gap:.25rem;border-left:3px solid ${isBlocked ? 'var(--danger)' : 'var(--accent)'};padding-left:.6rem;margin-top:.5rem">
+        <span style="font-size:.85rem"><strong>${isBlocked ? '⛔' : '⏳'} ${esc(_opLabel(e))}</strong></span>
+        <span class="settings-desc" style="font-size:.78rem">
+          ${esc(e.module || e.operationType || '—')} · ${esc(e.userRole || '—')}${e.userUid ? ` (${esc(String(e.userUid).slice(0, 12))}…)` : ''}${e.hospitalId ? ` · ${esc(e.hospitalId)}` : ''}<br>
+          Mise en file : ${esc(new Date(e.queuedAt).toLocaleString('fr-FR'))} · ${e.attempts || 0} tentative(s)
+          ${e.lastErrorCode ? `<br>Dernière erreur : ${esc(e.lastErrorCode)}${e.lastErrorMessage ? ` — ${esc(String(e.lastErrorMessage).slice(0, 120))}` : ''}` : ''}
+        </span>
+        <div style="display:flex;gap:.4rem">
+          <button type="button" class="btn btn-ghost btn-xs" onclick="Settings.retrySyncOperation('${esc(e.operationId)}', event)">🔄 Réessayer</button>
+          <button type="button" class="btn btn-ghost btn-xs" style="color:var(--danger)" onclick="Settings.removeSyncOperation('${esc(e.operationId)}')">🗑️ Supprimer de la file</button>
+        </div>
+      </div>`;
+  }
+
   function renderSyncInspectorSection() {
     const summary = window.DB?.getOutboxSummary?.() || { total: 0, retryable: 0, blocked: 0, oldestQueuedAt: null };
     const entries = window.DB?.getOutboxEntries?.() || [];
     const blockedEntries = entries.filter(e => e.classification === 'blocked');
+    const retryableEntries = entries.filter(e => e.classification !== 'blocked');
 
     let stateIcon, stateLabel, stateColor;
     if (summary.total === 0) {
@@ -127,24 +153,38 @@ const Settings = (() => {
     return `
       <div class="settings-section" id="settings-sync-inspector">
         <h3>🔄 Synchronisation</h3>
-        <p class="settings-desc">Chaque écriture qui n'atteint pas immédiatement le cloud est conservée en file et rejouée automatiquement — jamais perdue.</p>
+        <p class="settings-desc">Les écritures en attente normales sont rejouées automatiquement. Les écritures <strong>bloquées</strong> (ex. permission refusée) ne se résoudront pas toutes seules : elles restent conservées ici — jamais supprimées automatiquement — et ne sont rejouées que par vos actions ci-dessous.</p>
         <div class="settings-row">
           <span style="color:${stateColor}">${stateIcon} ${esc(stateLabel)}</span>
         </div>
         ${summary.oldestQueuedAt ? `<p class="settings-desc" style="margin-top:.3rem">En attente depuis : ${esc(new Date(summary.oldestQueuedAt).toLocaleString('fr-FR'))}</p>` : ''}
         ${blockedEntries.length ? `
         <div class="alert-box" style="margin-top:.6rem;text-align:left">
-          <strong>⚠️ Ces écritures ne se résoudront pas automatiquement :</strong>
-          <ul style="margin:.4rem 0 0 1.1rem;font-size:.82rem">
-            ${blockedEntries.slice(0, 10).map(e => `<li>${esc(e.collection)}/${esc(e.docId)} — ${esc(e.lastErrorCode || 'erreur inconnue')}</li>`).join('')}
-            ${blockedEntries.length > 10 ? `<li>… et ${blockedEntries.length - 10} autre(s).</li>` : ''}
-          </ul>
+          <strong>⛔ Opérations bloquées (intervention nécessaire) :</strong>
+          ${blockedEntries.slice(0, 10).map(_opRow).join('')}
+          ${blockedEntries.length > 10 ? `<p class="settings-desc">… et ${blockedEntries.length - 10} autre(s).</p>` : ''}
         </div>` : ''}
-        <button type="button" class="btn btn-ghost btn-sm" id="settings-check-sync-btn"
-          style="margin-top:.6rem" onclick="Settings.checkSync()">🔄 Vérifier la synchronisation</button>
+        ${retryableEntries.length ? `
+        <div style="margin-top:.6rem;text-align:left">
+          <strong style="font-size:.85rem">⏳ En attente (rejeu automatique) :</strong>
+          ${retryableEntries.slice(0, 10).map(_opRow).join('')}
+          ${retryableEntries.length > 10 ? `<p class="settings-desc">… et ${retryableEntries.length - 10} autre(s).</p>` : ''}
+        </div>` : ''}
+        <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.6rem">
+          <button type="button" class="btn btn-ghost btn-sm" id="settings-check-sync-btn"
+            onclick="Settings.checkSync()">🔄 Réessayer les opérations normales</button>
+          ${blockedEntries.length ? `
+          <button type="button" class="btn btn-ghost btn-sm" id="settings-check-blocked-btn" style="color:var(--danger)"
+            onclick="Settings.checkBlockedSync()">⛔ Vérifier les bloquées (${blockedEntries.length})</button>` : ''}
+          ${entries.length ? `
+          <button type="button" class="btn btn-ghost btn-sm" onclick="Settings.exportSyncDiagnostic()">📄 Export JSON de diagnostic</button>` : ''}
+        </div>
       </div>`;
   }
 
+  /* « Réessayer les opérations normales » : rejoue immédiatement les
+     entrées retryable (bypass du backoff) — flushOutbox() ne touche
+     JAMAIS aux entrées bloquées (voir js/db.js, chantier v2.9.34). */
   async function checkSync() {
     const btn = document.getElementById('settings-check-sync-btn');
     if (!window.ActionFeedback?.start?.(btn, '⏳ Vérification…')) return;
@@ -154,13 +194,91 @@ const Settings = (() => {
       if (summary.total === 0) {
         window.ActionFeedback?.confirmed?.('☁️ Tout est synchronisé.');
       } else if (summary.blocked > 0) {
-        window.ActionFeedback?.failed?.(`⚠️ ${summary.blocked} écriture(s) bloquée(s) nécessitent une vérification, ${summary.retryable} encore en attente normale.`);
+        window.ActionFeedback?.failed?.(`⚠️ ${summary.blocked} écriture(s) bloquée(s) — utilisez « Vérifier les bloquées » ou le rejeu par opération, ${summary.retryable} encore en attente normale.`);
       } else {
         window.ActionFeedback?.queued?.(`⏳ ${summary.retryable} écriture(s) encore en attente — nouvelle tentative automatique.`);
       }
     } finally {
       window.ActionFeedback?.reset?.(btn);
       refresh();
+    }
+  }
+
+  /* « Vérifier les opérations bloquées » : seule voie de rejeu GROUPÉ
+     des entrées bloquées (ex. après redéploiement d'une règle). */
+  async function checkBlockedSync() {
+    const btn = document.getElementById('settings-check-blocked-btn');
+    if (!window.ActionFeedback?.start?.(btn, '⏳ Vérification…')) return;
+    try {
+      const r = await window.DB?.retryBlockedOutbox?.() || { attempted: 0, succeeded: 0, failed: 0 };
+      if (!r.attempted) {
+        window.ActionFeedback?.confirmed?.('Aucune opération bloquée à vérifier.');
+      } else if (r.failed === 0) {
+        window.ActionFeedback?.confirmed?.(`✅ ${r.succeeded} opération(s) bloquée(s) synchronisée(s) avec succès.`);
+      } else {
+        window.ActionFeedback?.failed?.(`${r.succeeded} réussie(s), ${r.failed} toujours bloquée(s) — la cause n'est pas résolue.`);
+      }
+    } finally {
+      window.ActionFeedback?.reset?.(btn);
+      refresh();
+    }
+  }
+
+  /* « Réessayer cette opération » : rejeu manuel d'UNE opération,
+     y compris bloquée. */
+  async function retrySyncOperation(operationId, event) {
+    const btn = event?.target;
+    if (!window.ActionFeedback?.start?.(btn, '⏳…')) return;
+    try {
+      const r = await window.DB?.retryOutboxOperation?.(operationId);
+      if (r?.ok) {
+        window.ActionFeedback?.confirmed?.('✅ Opération synchronisée avec succès.');
+      } else if (r?.reason === 'offline') {
+        window.ActionFeedback?.queued?.('📡 Hors ligne — réessayez une fois connecté.');
+      } else if (r?.reason === 'not_found') {
+        window.ActionFeedback?.confirmed?.('Opération déjà synchronisée ou retirée.');
+      } else {
+        window.ActionFeedback?.failed?.(`Échec : ${r?.errorCode || 'erreur inconnue'} — la cause n'est pas résolue.`);
+      }
+    } finally {
+      window.ActionFeedback?.reset?.(btn);
+      refresh();
+    }
+  }
+
+  /* « Supprimer de la file » : suppression MANUELLE uniquement, toujours
+     confirmée — la donnée locale ne sera alors jamais synchronisée. */
+  function removeSyncOperation(operationId) {
+    const confirmed = window.confirm(
+      'Supprimer cette opération de la file de synchronisation ?\n\n' +
+      'Elle ne sera JAMAIS envoyée au cloud : la donnée concernée restera uniquement sur cet appareil (ou sera perdue à la réinstallation). Cette action est irréversible.'
+    );
+    if (!confirmed) return false;
+    const removed = window.DB?.removeOutboxOperation?.(operationId);
+    window.App?.toast?.(removed ? '🗑️ Opération retirée de la file.' : 'Opération introuvable (déjà synchronisée ou retirée).');
+    refresh();
+    return removed;
+  }
+
+  /* Export JSON de diagnostic — contenu expurgé des secrets côté
+     DB.exportOutboxDiagnostic() (jamais de mot de passe/PIN/token). */
+  function exportSyncDiagnostic() {
+    try {
+      const json = window.DB?.exportOutboxDiagnostic?.();
+      if (!json) { window.App?.toast?.('Aucune donnée à exporter.'); return; }
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `medconnect-sync-diagnostic-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      window.App?.toast?.('📄 Diagnostic exporté (secrets expurgés).');
+    } catch (e) {
+      console.error('[Settings] exportSyncDiagnostic :', e);
+      window.App?.toast?.(e.message || 'Export impossible.', 'error');
     }
   }
 
@@ -472,7 +590,10 @@ const Settings = (() => {
     Settings.refresh();
   }
 
-  return { render, refresh, updatePharmacyLocation, openAddDoctor, saveDoctor, openAddPharmacist, savePharmacist, renderAboutSection, checkSync };
+  return {
+    render, refresh, updatePharmacyLocation, openAddDoctor, saveDoctor, openAddPharmacist, savePharmacist, renderAboutSection,
+    checkSync, checkBlockedSync, retrySyncOperation, removeSyncOperation, exportSyncDiagnostic,
+  };
 })();
 
 window.Settings = Settings;

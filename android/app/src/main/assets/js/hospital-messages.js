@@ -133,11 +133,11 @@ const HospitalMessagesModule = (() => {
 
   function markRead(mid) {
     if (window.Network?.markRead) { window.Network.markRead(mid); return; }
-    const messages = window.DB?.getMessages?.() || [];
-    const msg = messages.find(m => m.mid === mid);
-    if (!msg) return;
-    msg.read = true; msg.readStatus = 'read'; msg.readAt = new Date().toISOString();
-    window.DB?.saveMessages?.(messages);
+    // Repli sans Network : même primitive ciblée (chantier v2.9.34) —
+    // UNE mise à jour du seul message, jamais une réécriture de la boîte.
+    window.DB?.updateMessageStatusAndConfirm?.(mid, {
+      read: true, readStatus: 'read', readAt: new Date().toISOString(),
+    });
   }
 
   // Correctif (audit "workflows mobile/desktop", section 10) : bug
@@ -153,21 +153,24 @@ const HospitalMessagesModule = (() => {
     if (!user) return false;
     if (!window.confirm('Supprimer ce message de votre boîte de réception ?')) return false;
 
-    const messages = window.DB?.getMessages?.() || [];
-    const msg = messages.find(m => m.mid === mid);
+    const msg = (window.DB?.getMessages?.() || []).find(m => m.mid === mid);
     if (!msg) return false;
 
     const deletedFor = new Set(Array.isArray(msg.deletedFor) ? msg.deletedFor.map(String) : []);
     _recipientKeys(user).forEach(key => deletedFor.add(key));
-    msg.deletedFor = Array.from(deletedFor);
-    msg.deletedAt = new Date().toISOString();
-    msg.deletedByUid = user.uid || user.username || '';
 
-    window.DB?.saveMessages?.(messages);
-    const cloudConfirmed = await window.DB?.pushCloud?.('mc_messages', mid, msg);
+    // Chantier v2.9.34 (P0 messagerie) : suppression logique = UNE mise
+    // à jour de statut du seul message concerné (primitive commune) —
+    // plus jamais DB.saveMessages() (réécriture de toute la boîte +
+    // copie notifications) suivi d'un second push ciblé redondant.
+    const r = await window.DB?.updateMessageStatusAndConfirm?.(mid, {
+      deletedFor: Array.from(deletedFor),
+      deletedAt: new Date().toISOString(),
+      deletedByUid: user.uid || user.username || '',
+    });
     window.Network?.refreshUnreadIndicators?.();
     App.closeModal?.();
-    App.toast?.(cloudConfirmed ? '🗑️ Message supprimé' : '🗑️ Message supprimé localement — synchronisation en attente.');
+    App.toast?.(r?.cloudConfirmed ? '🗑️ Message supprimé' : '🗑️ Message supprimé localement — synchronisation en attente.');
     HospitalDesktopUI.navigate('messages');
     return true;
   }

@@ -194,9 +194,10 @@ const HospitalLabModule = (() => {
     const currentUid = window.Auth?.getUser?.()?.uid || window.HospitalAuth?.getSession?.()?.agentUid || '';
 
     return App.openModal('🧪 Nouvelle demande d\'analyse', `
-      <div class="form-group"><label>Numéro MC du patient *</label>
-        <input id="lab-mc" placeholder="MC-2026-CD-XXXXXXXX" oninput="HospitalLabModule._searchPatient()"></div>
+      <div class="form-group"><label>Numéro MC, nom ou téléphone du patient *</label>
+        <input id="lab-mc" placeholder="MC-2026-CD-XXXXXXXX, nom ou téléphone" oninput="HospitalLabModule._searchPatient()"></div>
       <p class="muted" id="lab-mc-status" style="min-height:1.2em"></p>
+      <div id="lab-mc-results" style="margin-bottom:.5rem"></div>
       <div class="form-group" id="lab-mc-confirm-wrap" style="display:none">
         <label><input type="checkbox" id="lab-mc-confirm"> Créer quand même la demande pour ce numéro MC introuvable</label>
       </div>
@@ -248,14 +249,58 @@ const HospitalLabModule = (() => {
     }
   }
 
+  // Chantier v2.9.34 (P1) : sélection d'un patient trouvé par recherche
+  // annuaire (nom/téléphone) — remplit le champ MC puis relance la
+  // résolution ciblée.
+  function _selectDirectoryPatient(mc) {
+    const input = document.getElementById('lab-mc');
+    if (input) input.value = String(mc || '').toUpperCase();
+    const results = document.getElementById('lab-mc-results');
+    if (results) results.innerHTML = '';
+    _searchPatient();
+  }
+
   async function _searchPatient() {
     const mcInput = document.getElementById('lab-mc');
     const statusEl = document.getElementById('lab-mc-status');
     const confirmWrap = document.getElementById('lab-mc-confirm-wrap');
+    const resultsEl = document.getElementById('lab-mc-results');
     const nameEl = document.getElementById('lab-name');
     if (!mcInput || !statusEl) return;
-    const mc = mcInput.value.trim().toUpperCase();
+    const raw = mcInput.value.trim();
+    const mc = raw.toUpperCase();
+    if (resultsEl) resultsEl.innerHTML = '';
     if (!mc) { statusEl.textContent = ''; if (confirmWrap) confirmWrap.style.display = 'none'; return; }
+
+    // Chantier v2.9.34 (P1) : saisie qui n'est pas un numéro MC → recherche
+    // annuaire (patient_directory) par nom/téléphone, bornée à
+    // l'établissement actif. L'ancienne recherche ne résolvait qu'un
+    // numéro MC exact — le laboratoire ne pouvait pas retrouver un patient
+    // par son nom.
+    if (!/^MC-/.test(mc)) {
+      if (confirmWrap) confirmWrap.style.display = 'none';
+      if (raw.length < 2) { statusEl.textContent = ''; return; }
+      const token = ++_mcSearchToken;
+      statusEl.textContent = "Recherche dans l'annuaire…";
+      try {
+        const estId = await CloudDB.getActiveHospitalId();
+        const results = await (window.DB?.searchPatientDirectory?.(raw, estId) || Promise.resolve([]));
+        if (token !== _mcSearchToken) return;
+        if (!results.length) { statusEl.textContent = '⚠️ Aucun patient trouvé'; return; }
+        statusEl.textContent = `${results.length} résultat(s) :`;
+        if (resultsEl) {
+          resultsEl.innerHTML = results.slice(0, 12).map(p =>
+            `<button type="button" class="btn btn-ghost btn-xs" style="display:block;width:100%;text-align:left;margin-top:.2rem"
+               onclick="HospitalLabModule._selectDirectoryPatient('${esc(p.id)}')">
+               👤 ${esc(p.firstname || '')} ${esc(p.lastname || '')} — <span class="muted">${esc(p.id)}${p.phone ? ' · ' + esc(p.phone) : ''}</span>
+             </button>`).join('');
+        }
+      } catch (e) {
+        if (token !== _mcSearchToken) return;
+        statusEl.textContent = '❌ Recherche impossible — vérifiez la connexion.';
+      }
+      return;
+    }
 
     const token = ++_mcSearchToken;
     statusEl.textContent = 'Recherche…';
@@ -553,7 +598,7 @@ const HospitalLabModule = (() => {
     }
   }
 
-  return { render, openNew, saveOrder, setStatus, openResult, saveResult, _searchPatient };
+  return { render, openNew, saveOrder, setStatus, openResult, saveResult, _searchPatient, _selectDirectoryPatient };
 })();
 
 window.HospitalLabModule = HospitalLabModule;

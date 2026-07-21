@@ -7,6 +7,27 @@ jour) et l'écran **Paramètres → À propos**.
 La source unique de la version en cours est `config/app-version.json` —
 ce fichier doit rester cohérent avec elle.
 
+## 2.9.34 — 2026-07-21
+
+### Sécurité
+- Pharmacie interne/externe : sur le desktop hôpital, une pharmacie est désormais **toujours** un service interne de l'établissement (le choix « indépendante » a été retiré du desktop) ; la pharmacie indépendante (externe) reste exclusivement mobile. Le champ `pharmacyType` (`internal`/`external`) est **immuable** après création (seul l'admin plateforme peut le corriger), et l'affiliation à un établissement (`affiliation_requests` + `hospitalMembers`) est réservée aux pharmacies internes (`pharmacistAffiliationAllowed`).
+- Session desktop : `isSessionConsistent()` s'appuie en priorité sur l'affiliation réelle (`hospitalMembers` via `resolveAgentAffiliation`) — un membre retiré/en attente/rejeté, un compte suspendu ou un rôle changé invalident la session sans attendre ; le miroir staff local n'est plus qu'un repli hors ligne.
+- Messagerie : destinataire précis (`toUid` canonique) obligatoire à la création (plus de diffusion générique par rôle depuis un formulaire mobile) ; lecture/mise à jour réservées au destinataire réel, mise à jour restreinte aux champs de statut et à la suppression logique.
+- Notifications : le destinataire ne peut plus réécrire le contenu (titre/message/type) ni réattribuer l'expéditeur — seulement marquer lue/vue (champs de statut) ; cohérence d'auteur et présence d'un destinataire exigées à la création.
+- Ventes/stock pharmacie : `pharmacyUid` immuable sur `mc_medicines`/`mc_sales` (un pharmacien ne peut jamais réattribuer un stock ou une vente à un autre compte ; seul un document hérité sans `pharmacyUid` peut être réclamé par son propriétaire réel).
+
+### Fiabilité
+- Outbox : une écriture définitivement refusée par le serveur (permission refusée, donnée invalide…) n'est plus jamais rejouée automatiquement — elle attend une nouvelle tentative manuelle. Écran Synchronisation doté d'un inspecteur détaillé par opération (rejeu, suppression, export du diagnostic sans aucune donnée sensible).
+- Création patient : service unique strictement atomique pour tous les rôles (médecin mobile/desktop, réception) — les quatre documents (dont l'annuaire et le dossier médical racine) sont créés ensemble ou pas du tout ; le code de premier accès n'est affiché qu'après confirmation réelle ; une coupure réseau met la création complète en file (une seule opération atomique, rejouée sans doublon).
+- Vente en pharmacie : atomique et sans survente (jamais de stock négatif) — la vente et la mise à jour du stock aboutissent ensemble ou pas du tout ; aucun reçu ni succès affiché tant que le serveur n'a pas confirmé ; message clair sur stock insuffisant, hors ligne, ou refus serveur.
+- `ActionFeedback.reportAtomic()` : interprétation centralisée du contrat de résultat atomique enrichi (confirmé/en file/refusé/occupé/stock insuffisant), réutilisée par la création patient et la vente pharmacie.
+
+### Améliorations
+- Recherche patient (réception et laboratoire) : par nom ou téléphone via l'annuaire non clinique (`patient_directory`), borné à l'établissement — plus seulement par numéro MC exact.
+
+### Migration
+- `scripts/migrate-pharmacy-type.mjs` : backfill déterministe du champ `pharmacyType` sur les comptes pharmacien hérités (interne si rattachement à un établissement avéré, externe sinon ; dry-run par défaut, `--apply` pour écrire).
+
 ## 2.9.33 — 2026-07-20
 
 ### Sécurité

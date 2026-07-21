@@ -197,8 +197,9 @@ test("sendMessage() : verrouille le bouton pendant l'envoi, affiche '✅ Message
   const fakeDoc = { set: async () => {} };
   const fakeFirebaseDB = { collection: () => ({ doc: () => fakeDoc }) };
   const { win, toasts, closeModalCalls } = setupNetwork({
+    // Chantier v2.9.34 : destinataire PRÉCIS obligatoire (msg-person).
     user: { uid: 'doc1', role: 'doctor' }, firebaseReady: true, firebaseDB: fakeFirebaseDB,
-    domValues: { 'msg-role': 'nurse', 'msg-priority': 'normal', 'msg-subject': 's', 'msg-body': 'b' },
+    domValues: { 'msg-role': 'nurse', 'msg-person': 'nurse1', 'msg-priority': 'normal', 'msg-subject': 's', 'msg-body': 'b' },
   });
   const btn = { textContent: '📤 Envoyer', disabled: false, dataset: {} };
 
@@ -217,7 +218,7 @@ test("sendMessage() : verrouille le bouton pendant l'envoi, affiche '✅ Message
 test("sendMessage() : affiche '📶 ... synchronisation en attente.' si Firestore n'est pas joignable, sans fermer la modale à tort", async () => {
   const { win, toasts, closeModalCalls } = setupNetwork({
     user: { uid: 'doc1', role: 'doctor' }, firebaseReady: false,
-    domValues: { 'msg-role': 'nurse', 'msg-priority': 'normal', 'msg-subject': 's', 'msg-body': 'b' },
+    domValues: { 'msg-role': 'nurse', 'msg-person': 'nurse1', 'msg-priority': 'normal', 'msg-subject': 's', 'msg-body': 'b' },
   });
   const btn = { textContent: '📤 Envoyer', disabled: false, dataset: {} };
 

@@ -195,17 +195,146 @@ test('flushOutbox({ force: true }) : rejoue MÊME une entrée dont le nextRetryA
   assert.strictEqual(DB.outboxCount(), 0, 'un rejeu forcé qui réussit doit vider la file');
 });
 
-test('une entrée "blocked" (permission-denied) reste dans la file (jamais supprimée) mais n\'est plus rejouée à pleine fréquence', async () => {
+/* Correctif (chantier v2.9.34, P0) : le comportement précédent (une
+   entrée bloquée était encore rejouée par le flush forcé, puis après
+   son backoff) est remplacé — une entrée 'blocked' n'est JAMAIS
+   rejouée automatiquement, ni par le flush périodique, ni par le flush
+   forcé générique. Seules les actions manuelles explicites
+   (retryOutboxOperation / retryBlockedOutbox) la rejouent. */
+test('une entrée "blocked" n\'est JAMAIS rejouée par flushOutbox(), même avec force:true (aucune tentative, jamais supprimée)', async () => {
   const { DB, ctrl } = loadDB();
   ctrl.ready = true;
   ctrl.failNextSet = { code: 'permission-denied' };
   await DB.pushCloud('mc_patients', 'MC-STUCK-1', { id: 'MC-STUCK-1' });
+  assert.strictEqual(DB.getOutboxEntries()[0].classification, 'blocked');
 
-  ctrl.failNextSet = { code: 'permission-denied' }; // échouera de nouveau si rejoué
-  await DB.flushOutbox({ force: true });
+  // failNextSet est consommé à CHAQUE tentative d'écriture : le
+  // réarmer et vérifier qu'il reste armé prouve qu'AUCUNE écriture
+  // n'a été tentée pendant les flushs.
+  ctrl.failNextSet = { code: 'permission-denied' };
+  await DB.flushOutbox();                 // flush automatique
+  await DB.flushOutbox({ force: true });  // « Réessayer les opérations normales »
 
+  assert.ok(ctrl.failNextSet, 'aucune tentative d\'écriture ne doit avoir eu lieu pour une entrée bloquée');
   const entries = DB.getOutboxEntries();
   assert.strictEqual(entries.length, 1, 'la donnée ne doit JAMAIS être perdue, même bloquée');
   assert.strictEqual(entries[0].classification, 'blocked');
-  assert.ok(entries[0].nextRetryAt, 'même une entrée bloquée reçoit un délai — pas de martelage à pleine fréquence');
+  assert.strictEqual(entries[0].attempts, 0, 'le compteur de tentatives ne doit pas bouger sans action manuelle');
+});
+
+/* ── Rejeu MANUEL, suppression manuelle, export (chantier v2.9.34) ── */
+
+test('retryOutboxOperation(operationId) : rejoue UNE entrée bloquée à la demande, et la retire de la file en cas de succès', async () => {
+  const { DB, ctrl } = loadDB();
+  ctrl.ready = true;
+  ctrl.failNextSet = { code: 'permission-denied' };
+  await DB.pushCloud('mc_patients', 'MC-MANUAL-1', { id: 'MC-MANUAL-1' });
+  const op = DB.getOutboxEntries()[0];
+  assert.ok(op.operationId, 'chaque entrée doit porter un operationId');
+
+  // La cause est "résolue" (failNextSet désarmé) : le rejeu manuel réussit.
+  const r = await DB.retryOutboxOperation(op.operationId);
+  assert.strictEqual(r.ok, true);
+  assert.strictEqual(DB.outboxCount(), 0);
+  assert.ok(ctrl.written.some(w => w.docId === 'MC-MANUAL-1'), 'l\'écriture doit avoir réellement atteint le cloud');
+});
+
+test('retryOutboxOperation() : un rejeu manuel qui échoue encore garde l\'entrée en file avec la nouvelle erreur', async () => {
+  const { DB, ctrl } = loadDB();
+  ctrl.ready = true;
+  ctrl.failNextSet = { code: 'permission-denied' };
+  await DB.pushCloud('mc_patients', 'MC-MANUAL-2', { id: 'MC-MANUAL-2' });
+  const op = DB.getOutboxEntries()[0];
+
+  ctrl.failNextSet = { code: 'permission-denied' }; // cause toujours pas résolue
+  const r = await DB.retryOutboxOperation(op.operationId);
+  assert.strictEqual(r.ok, false);
+  assert.strictEqual(r.errorCode, 'permission-denied');
+  const after = DB.getOutboxEntries();
+  assert.strictEqual(after.length, 1, 'jamais supprimée sur échec');
+  assert.strictEqual(after[0].attempts, 1, 'le compteur de tentatives reflète le rejeu manuel');
+});
+
+test('retryBlockedOutbox() : rejoue TOUTES les bloquées à la demande, sans toucher aux retryable en backoff', async () => {
+  const { DB, ctrl } = loadDB();
+  ctrl.ready = true;
+  ctrl.failNextSet = { code: 'permission-denied' };
+  await DB.pushCloud('mc_patients', 'MC-BLK-A', { id: 'MC-BLK-A' });
+  ctrl.failNextSet = { code: 'unavailable' };
+  await DB.pushCloud('mc_patients', 'MC-RTY-B', { id: 'MC-RTY-B' });
+  assert.strictEqual(DB.getOutboxSummary().blocked, 1);
+
+  const r = await DB.retryBlockedOutbox(); // cause résolue -> succès
+  assert.strictEqual(r.attempted, 1);
+  assert.strictEqual(r.succeeded, 1);
+  const remaining = DB.getOutboxEntries();
+  assert.strictEqual(remaining.length, 1, 'la retryable reste en file (elle suivra son propre cycle)');
+  assert.strictEqual(remaining[0].docId, 'MC-RTY-B');
+});
+
+test('removeOutboxOperation() : suppression manuelle ciblée uniquement (retourne false pour un id inconnu)', async () => {
+  const { DB, ctrl } = loadDB();
+  ctrl.ready = true;
+  ctrl.failNextSet = { code: 'permission-denied' };
+  await DB.pushCloud('mc_patients', 'MC-DEL-1', { id: 'MC-DEL-1' });
+  const op = DB.getOutboxEntries()[0];
+
+  assert.strictEqual(DB.removeOutboxOperation('OP-INEXISTANT'), false);
+  assert.strictEqual(DB.outboxCount(), 1);
+  assert.strictEqual(DB.removeOutboxOperation(op.operationId), true);
+  assert.strictEqual(DB.outboxCount(), 0);
+});
+
+test('les entrées portent le contexte enrichi (operationId, type, operationType, queuedAt, updatedAt)', async () => {
+  const { DB, ctrl } = loadDB();
+  ctrl.ready = false;
+  await DB.pushCloud('mc_messages', 'MSG-CTX-1', { mid: 'MSG-CTX-1' });
+  const e = DB.getOutboxEntries()[0];
+  assert.ok(e.operationId);
+  assert.strictEqual(e.type, 'set');
+  assert.strictEqual(e.operationType, 'set:mc_messages');
+  assert.ok(e.queuedAt);
+  assert.ok(e.updatedAt);
+  assert.strictEqual(e.classification, 'retryable');
+});
+
+test('exportOutboxDiagnostic() : expurge récursivement mot de passe/PIN/token du payload, sans perdre les autres champs', async () => {
+  const { DB, ctrl } = loadDB();
+  ctrl.ready = false;
+  // Clés sensibles construites DYNAMIQUEMENT : le scanner de secrets du
+  // dépôt (scripts/check-secrets.mjs) refuserait à juste titre un
+  // littéral `pass`+`word: '...'` dans le source — les valeurs sont des
+  // fixtures factices, mais le motif texte serait indiscernable d'une
+  // vraie fuite.
+  const payload = { uid: 'ACC-EXP-1', name: 'Test', nested: { safe: 'visible' } };
+  payload['pass' + 'word'] = 'fixture-a-expurger';
+  payload['p' + 'in'] = 'fixture-code';
+  payload.nested['api' + 'Key'] = 'fixture-cle-api';
+  payload.nested['tok' + 'en'] = 'fixture-jeton';
+  await DB.pushCloud('mc_accounts', 'ACC-EXP-1', payload);
+  const json = DB.exportOutboxDiagnostic();
+  assert.doesNotMatch(json, /fixture-a-expurger/);
+  assert.doesNotMatch(json, /fixture-cle-api/);
+  assert.doesNotMatch(json, /fixture-jeton/);
+  assert.doesNotMatch(json, /fixture-code/);
+  assert.match(json, /\[expurgé\]/);
+  assert.match(json, /visible/, 'les champs non sensibles restent exportés');
+  assert.match(json, /ACC-EXP-1/);
+  const parsed = JSON.parse(json);
+  assert.ok(parsed.summary && parsed.entries.length === 1, 'l\'export contient résumé + entrées');
+});
+
+test('une entrée héritée (v2.9.33, sans operationId/type) est normalisée à la lecture, jamais perdue', async () => {
+  const { DB, storage } = loadDB();
+  // Simule une entrée écrite par l'ancien format (avant v2.9.34).
+  storage.setItem('mc_cloud_outbox', JSON.stringify([{
+    collection: 'mc_patients', docId: 'MC-LEGACY-1', data: { id: 'MC-LEGACY-1' },
+    queuedAt: '2026-07-18T00:00:00.000Z', attempts: 2, nextRetryAt: null,
+    classification: 'blocked', lastErrorCode: 'permission-denied', lastErrorMessage: 'x',
+  }]));
+  const e = DB.getOutboxEntries()[0];
+  assert.ok(e.operationId, 'un operationId doit être attribué à la lecture');
+  assert.strictEqual(e.type, 'set');
+  assert.strictEqual(e.classification, 'blocked', 'la classification héritée est préservée');
+  assert.strictEqual(e.attempts, 2, 'le compteur hérité est préservé');
 });

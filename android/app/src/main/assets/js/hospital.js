@@ -405,13 +405,19 @@ const HospitalPortal = (() => {
           medical_completion_status: (user.role === 'doctor') ? 'completed' : 'pending',
         };
     // (bouton déjà désactivé en tête de fonction — anti double-appui)
-    // Correctif (course create-fiche / premier-accès) : on attend la
-    // confirmation Firestore réelle de mc_patients avant d'afficher le
-    // code d'accès — sinon un premier accès tenté trop tôt tombait sur
-    // un document pas encore répliqué côté serveur, et
-    // patientFirstAccessOk() acceptait alors n'importe quel code (voir
-    // firestore.rules). Voir aussi DB.addPatientAndConfirm.
-    const { patient: p, confirmed } = await DB.addPatientAndConfirm({
+    // Chantier v2.9.34 (P0 création patient) : bug confirmé — ce
+    // parcours (médecin/infirmier, mobile ET desktop) passait encore
+    // par DB.addPatientAndConfirm() : cache local renseigné AVANT toute
+    // confirmation, 3 écritures indépendantes (sans patient_directory,
+    // décomposables en outbox), modale fermée + « ✅ enregistré » + code
+    // de premier accès affiché MÊME quand rien n'avait atteint
+    // Firestore. Unifié sur le service atomique unique
+    // (DB.addPatientAndConfirmAtomic, le même que la réception) :
+    // 4 documents ensemble ou rien, cache local et code d'accès
+    // seulement après confirmation réelle, groupe mis en file comme UNE
+    // opération atomique quand le cloud est injoignable, et modale
+    // GARDÉE OUVERTE (champs intacts) sur un rejet réel.
+    const result = await DB.addPatientAndConfirmAtomic({
       firstname: document.getElementById('hp-fn').value.trim(),
       lastname:  document.getElementById('hp-ln').value.trim(),
       dob:       document.getElementById('hp-dob').value,
@@ -426,8 +432,35 @@ const HospitalPortal = (() => {
       ...currentEstablishmentFields(),
       ...completionFields,
     });
-    App.closeModal(); App.toast(`✅ ${t('msg_saved')} — ${p.id}`); navigateMedConnect('patients');
-    showFirstAccessCodeModal(p, confirmed);
+
+    // Chantier v2.9.34 (P1) : annonce du contrat atomique enrichi
+    // centralisée par ActionFeedback.reportAtomic (même helper pour toutes
+    // les actions critiques). La SUITE métier (modale, navigation, code
+    // d'accès, bouton) reste décidée ici — reportAtomic ne fait qu'émettre
+    // le toast et renvoyer l'état normalisé.
+    const state = window.ActionFeedback?.reportAtomic?.(result, {
+      confirmedMsg: `✅ ${t('msg_saved')} — ${result.patient?.id || ''}`,
+      queuedMsg: '📶 Pas de connexion — la fiche est en file de synchronisation (opération atomique, rejouée automatiquement). Le code d\'accès patient sera disponible via 🔑 une fois la fiche synchronisée.',
+      blockedMsg: `❌ Création refusée par le serveur (${result.errorCode || 'permission'}). Vérifiez vos droits/votre affiliation puis réessayez.`,
+      failedMsg: '❌ Création impossible pour le moment. Vérifiez la connexion puis réessayez.',
+    });
+
+    if (state === 'confirmed') {
+      App.closeModal(); navigateMedConnect('patients');
+      // Le code de premier accès n'est affiché qu'ICI — après
+      // confirmation réelle de Firestore (jamais sur un état incertain).
+      showFirstAccessCodeModal(result.patient, true);
+      return;
+    }
+    if (state === 'queued') {
+      App.closeModal(); navigateMedConnect('patients');
+      return;
+    }
+    // 'busy' (double appui absorbé) ou rejet réel : la modale RESTE
+    // OUVERTE, les champs saisis restent visibles pour une nouvelle
+    // tentative — aucun succès affiché, aucun code présenté comme
+    // sauvegardé. Le bouton est réactivé.
+    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = submitLabel; }
   }
 
   // Affiché une seule fois à la création de la fiche : le code n'est

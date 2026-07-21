@@ -20,27 +20,39 @@ const path = require('path');
 const vm = require('vm');
 const { makeMemoryStorage } = require('./helper');
 
-function makeBatchFirestoreMock({ shouldFail = false } = {}) {
+function makeBatchFirestoreMock({ shouldFail = false, failCode = null, hangCommit = false, docExists = false } = {}) {
   const sets = [];
   return {
     batch() {
       return {
         set(ref, data) { sets.push({ col: ref.__col, id: ref.__id, data }); },
         async commit() {
-          if (shouldFail) throw new Error('Batch commit failed (simulated)');
+          if (hangCommit) return new Promise(() => {}); // ne résout jamais (timeout côté interface)
+          if (shouldFail) {
+            const err = new Error('Batch commit failed (simulated)');
+            if (failCode) err.code = failCode;
+            throw err;
+          }
           return true;
         },
       };
     },
     collection(name) {
-      return { doc: (id) => ({ __col: name, __id: id }) };
+      return {
+        doc: (id) => ({
+          __col: name, __id: id,
+          // Réconciliation post-timeout (chantier v2.9.34) :
+          // addPatientAndConfirmAtomic() relit mc_patients/{id}.
+          async get() { return { exists: docExists, data: () => ({}) }; },
+        }),
+      };
     },
     _sets: sets,
   };
 }
 
-function setup({ firebaseReady = true, shouldFail = false } = {}) {
-  const firebaseDB = firebaseReady ? makeBatchFirestoreMock({ shouldFail }) : undefined;
+function setup({ firebaseReady = true, shouldFail = false, failCode = null, hangCommit = false, docExists = false } = {}) {
+  const firebaseDB = firebaseReady ? makeBatchFirestoreMock({ shouldFail, failCode, hangCommit, docExists }) : undefined;
   const win = {
     matchMedia: () => ({ matches: false }), addEventListener(){},
     navigator: { userAgent: 'node-test', onLine: true, maxTouchPoints: 0 },
@@ -104,24 +116,95 @@ test('addPatientAndConfirmAtomic() alimente patient_directory sans AUCUN champ c
   assert.ok(!('chronic' in dirEntry.data), 'aucun champ clinique ne doit jamais atteindre patient_directory');
 });
 
-test("addPatientAndConfirmAtomic() échoué (batch rejeté) : AUCUNE trace en cache ni en outbox (plus de 3 écritures non groupées)", async () => {
-  const { win } = setup({ firebaseReady: true, shouldFail: true });
+/* Chantier v2.9.34 (P0 création patient) : le comportement v2.9.33
+   « échec = rien en file, réessai manuel obligatoire » évolue — un
+   échec TRANSITOIRE (hors ligne, service indisponible) met désormais le
+   groupe COMPLET en file comme UNE SEULE opération atomique (type
+   'batch', rejouée par un seul commit — jamais décomposée en écritures
+   indépendantes). Un REJET réel (permission refusée) ne met toujours
+   RIEN en file. Dans les deux cas, le cache local reste vierge. */
+test("addPatientAndConfirmAtomic() rejet réel (permission-denied) : rien en cache, rien en file — l'agent corrige et réessaie", async () => {
+  const { win } = setup({ firebaseReady: true, shouldFail: true, failCode: 'permission-denied' });
   const before = win.DB.outboxCount();
-  const { patient, confirmed } = await win.DB.addPatientAndConfirmAtomic({ firstname: 'Paul', lastname: 'Mukendi', country_code: 'CD' });
-  assert.strictEqual(confirmed, false);
-  assert.ok(patient.id, "l'objet patient est retourné pour affichage d'erreur, mais n'est écrit nulle part");
-  assert.strictEqual(win.DB.getPatients().length, 0, 'aucune fiche provisoire ne doit rester en cache après un échec');
+  const result = await win.DB.addPatientAndConfirmAtomic({ firstname: 'Paul', lastname: 'Mukendi', country_code: 'CD' });
+  assert.strictEqual(result.confirmed, false);
+  assert.strictEqual(result.failed, true);
+  assert.strictEqual(result.blocked, true);
+  assert.strictEqual(result.errorCode, 'permission-denied');
+  assert.strictEqual(result.patient, null, 'aucun objet patient présenté comme créé sur un rejet réel');
+  assert.strictEqual(win.DB.getPatients().length, 0, 'aucune fiche provisoire ne doit rester en cache après un rejet');
   assert.strictEqual(win.DB.outboxCount(), before,
-    "correctif central : contrairement à l'ancien addPatient(), aucune des 3 écritures ne doit être mise en file séparément");
+    'un rejet réel ne doit jamais laisser une file fantôme (une nouvelle tentative aurait un NOUVEL id : risque de doublon)');
 });
 
-test('addPatientAndConfirmAtomic() hors ligne (firebaseDB indisponible) : refusé proprement, sans écriture partielle', async () => {
+test("addPatientAndConfirmAtomic() échec transitoire (batch rejeté sans code) : groupe atomique mis en file comme UNE opération, cache vierge", async () => {
+  const { win } = setup({ firebaseReady: true, shouldFail: true });
+  const result = await win.DB.addPatientAndConfirmAtomic({ firstname: 'Sara', lastname: 'Mbuyi', country_code: 'CD' });
+  assert.strictEqual(result.confirmed, false);
+  assert.strictEqual(result.queued, true);
+  assert.ok(result.operationId);
+  assert.strictEqual(win.DB.getPatients().length, 0, 'le cache local ne doit être renseigné qu\'après confirmation réelle');
+  const entries = win.DB.getOutboxEntries();
+  assert.strictEqual(entries.length, 1, 'UNE seule entrée pour tout le groupe — jamais 4 écritures indépendantes');
+  assert.strictEqual(entries[0].type, 'batch');
+  assert.strictEqual(entries[0].operationType, 'patient_create');
+  assert.strictEqual(entries[0].writes.length, 4);
+  // join() : les tableaux issus du sandbox vm ont un AUTRE prototype
+  // Array — deepStrictEqual les refuse même à contenu identique.
+  assert.strictEqual(entries[0].writes.map(w => w[0]).sort().join(','),
+    'mc_patients,medical_records,patient_directory,patients');
+});
+
+test('addPatientAndConfirmAtomic() hors ligne (firebaseDB indisponible) : groupe atomique en file, cache vierge, code non affichable', async () => {
   const { win } = setup({ firebaseReady: false });
-  const before = win.DB.outboxCount();
-  const { confirmed } = await win.DB.addPatientAndConfirmAtomic({ firstname: 'Alice', lastname: 'Kabongo', country_code: 'CD' });
-  assert.strictEqual(confirmed, false);
+  const result = await win.DB.addPatientAndConfirmAtomic({ firstname: 'Alice', lastname: 'Kabongo', country_code: 'CD' });
+  assert.strictEqual(result.confirmed, false);
+  assert.strictEqual(result.queued, true);
   assert.strictEqual(win.DB.getPatients().length, 0);
-  assert.strictEqual(win.DB.outboxCount(), before);
+  const entries = win.DB.getOutboxEntries();
+  assert.strictEqual(entries.length, 1);
+  assert.strictEqual(entries[0].type, 'batch');
+});
+
+test('addPatientAndConfirmAtomic() timeout puis réconciliation : le document existe côté serveur → confirmé, JAMAIS un doublon proposé', async () => {
+  // Promise.race n'annule pas une écriture déjà partie : le commit
+  // « pend » côté interface (timeout), mais a réellement abouti côté
+  // serveur (docExists:true). La réconciliation par identifiant doit
+  // conclure « confirmé » — pas une nouvelle création.
+  const { win } = setup({ firebaseReady: true, hangCommit: true, docExists: true });
+  const result = await win.DB.addPatientAndConfirmAtomic(
+    { firstname: 'Timeout', lastname: 'Reconcilie', country_code: 'CD' },
+    { timeoutMs: 50 }
+  );
+  assert.strictEqual(result.confirmed, true);
+  assert.strictEqual(result.reconciled, true);
+  assert.strictEqual(win.DB.getPatients().length, 1, 'la fiche réconciliée entre dans le cache');
+  assert.strictEqual(win.DB.outboxCount(), 0, 'rien en file : le serveur a déjà le document');
+});
+
+test('addPatientAndConfirmAtomic() timeout et document ABSENT côté serveur : groupe atomique en file (rejeu idempotent, mêmes ids)', async () => {
+  const { win } = setup({ firebaseReady: true, hangCommit: true, docExists: false });
+  const result = await win.DB.addPatientAndConfirmAtomic(
+    { firstname: 'Timeout', lastname: 'EnFile', country_code: 'CD' },
+    { timeoutMs: 50 }
+  );
+  assert.strictEqual(result.confirmed, false);
+  assert.strictEqual(result.queued, true);
+  assert.strictEqual(win.DB.getOutboxEntries()[0].type, 'batch');
+  assert.strictEqual(win.DB.getPatients().length, 0);
+});
+
+test('addPatientAndConfirmAtomic() : verrou anti double-appel — un second appel concurrent est absorbé (busy), un seul patient créé', async () => {
+  const { win, firebaseDB } = setup({ firebaseReady: true });
+  const p1 = win.DB.addPatientAndConfirmAtomic({ firstname: 'Un', lastname: 'Seul', country_code: 'CD' });
+  const p2 = win.DB.addPatientAndConfirmAtomic({ firstname: 'Un', lastname: 'Seul', country_code: 'CD' });
+  const [r1, r2] = await Promise.all([p1, p2]);
+  const busyCount = [r1, r2].filter(r => r.busy).length;
+  const okCount = [r1, r2].filter(r => r.confirmed).length;
+  assert.strictEqual(busyCount, 1, 'le second appel concurrent doit être absorbé');
+  assert.strictEqual(okCount, 1);
+  assert.strictEqual(win.DB.getPatients().length, 1, 'un double-clic ne doit jamais créer deux patients');
+  assert.strictEqual(firebaseDB._sets.filter(s => s.col === 'mc_patients').length, 1);
 });
 
 test('addPatient() (chemin historique médecin/infirmier, INCHANGÉ) continue de peupler le cache immédiatement', () => {
