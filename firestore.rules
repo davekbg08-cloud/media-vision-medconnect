@@ -447,6 +447,56 @@ service cloud.firestore {
       return isHospitalMember(resolveHospitalId(data));
     }
 
+    /* ── Chantier v2.9.36 : complétion médicale d'une fiche créée par une
+       infirmière ─────────────────────────────────────────────────────
+       Le médecin n'a AUCUN droit update général sur mc_patients/patients.
+       Cette transition ULTRA-limitée (awaiting_doctor/pending →
+       active/completed) est la seule exception : elle ne peut modifier QUE
+       les champs de complétion, exige une consultation RÉELLE (vérifiée par
+       get()/exists(), jamais un id accepté à l'aveugle) confirmée,
+       appartenant au médecin qui écrit, pour CE patient et CET
+       établissement, et préserve toute l'identité, la traçabilité
+       infirmière (created_by/nurse_uid/nurse_name/…) et l'historique. */
+    function patientCompletionFieldsOnly(before, after) {
+      return after.diff(before).affectedKeys().hasOnly([
+        'status', 'medical_completion_status',
+        'completed_by_doctor_uid', 'completed_by_doctor_name',
+        'completed_at', 'completed_by_consultation_id',
+        'updated_at', 'updatedAt'
+      ]);
+    }
+    // Document de la consultation citée comme preuve de complétion.
+    function completingConsultationDoc(after) {
+      return get(/databases/$(database)/documents/mc_consultations/$(after.completed_by_consultation_id)).data;
+    }
+    // La consultation existe réellement, concerne CE patient (docId), CET
+    // établissement, et appartient au médecin qui écrit.
+    function completingConsultationOk(docId, after) {
+      return after.get('completed_by_consultation_id', null) != null &&
+        exists(/databases/$(database)/documents/mc_consultations/$(after.completed_by_consultation_id)) &&
+        completingConsultationDoc(after).get('patient_id', null) == docId &&
+        (completingConsultationDoc(after).get('doctor_uid', null) == request.auth.uid ||
+         completingConsultationDoc(after).get('created_by', null) == request.auth.uid) &&
+        resolveHospitalId(completingConsultationDoc(after)) == resolveHospitalId(after);
+    }
+    function doctorCanCompleteNurseCreatedPatient(docId, before, after) {
+      return hasRole('doctor') &&
+        // fiche créée par une infirmière, encore en attente de médecin
+        before.get('created_by_role', '') == 'nurse' &&
+        before.get('medical_completion_status', '') == 'pending' &&
+        before.get('status', '') == 'awaiting_doctor' &&
+        // transition cible EXACTE
+        after.get('medical_completion_status', '') == 'completed' &&
+        after.get('status', '') == 'active' &&
+        after.get('completed_by_doctor_uid', '') == request.auth.uid &&
+        // seuls les champs de complétion changent (identité/historique figés)
+        patientCompletionFieldsOnly(before, after) &&
+        // médecin affilié actif au même établissement que la fiche
+        isHospitalMember(resolveHospitalId(before)) &&
+        // preuve : consultation réelle, même patient, même établissement, à lui
+        completingConsultationOk(docId, after);
+    }
+
     /* ── Chantier "reception/affiliation sans régression" — section 9/10 ──
        Bug confirmé : belongsToSameEstablishment() seule (membre actif,
        n'importe quel rôle) était utilisée comme clause de lecture sur
@@ -825,7 +875,13 @@ service cloud.firestore {
          belongsToSameEstablishment(request.resource.data) &&
          (isEmergencyIntake(request.resource.data) ||
           hospitalCanWrite(resolveHospitalId(request.resource.data))));
-      allow update, delete: if isAdmin() || doctorCanRead(resource.data);
+      // Chantier v2.9.36 : miroir /patients — mêmes droits qu'avant
+      // (auteur direct médecin), PLUS la complétion médicale limitée d'une
+      // fiche créée par une infirmière (created_by == infirmière, donc
+      // doctorCanRead est faux pour le médecin qui complète).
+      allow update: if isAdmin() || doctorCanRead(resource.data) ||
+        doctorCanCompleteNurseCreatedPatient(patientId, resource.data, request.resource.data);
+      allow delete: if isAdmin() || doctorCanRead(resource.data);
     }
 
     match /doctors/{uid} {
@@ -1505,7 +1561,12 @@ service cloud.firestore {
          belongsToSameEstablishment(request.resource.data) &&
          (isEmergencyIntake(request.resource.data) ||
           hospitalCanWrite(resolveHospitalId(request.resource.data))));
-      allow update, delete: if isAdmin();
+      // Chantier v2.9.36 : le médecin ne reçoit PAS de droit update général.
+      // Seule exception : la complétion médicale ULTRA-limitée d'une fiche
+      // créée par une infirmière, après une vraie consultation confirmée.
+      allow update: if isAdmin() ||
+        doctorCanCompleteNurseCreatedPatient(docId, resource.data, request.resource.data);
+      allow delete: if isAdmin();
     }
 
     /* ── Correctif (audit "workflows mobile/desktop", section 7) ──────

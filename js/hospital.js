@@ -631,6 +631,11 @@ const HospitalPortal = (() => {
       patient_id: patientId,
       date:       fDate,
       doctor:     fDoctor,
+      // Traçabilité de l'auteur médical — nécessaire pour que la règle de
+      // complétion (v2.9.36) vérifie que la consultation appartient bien au
+      // médecin qui complète la fiche.
+      doctor_uid: user.uid || '',
+      created_by: user.uid || '',
       doctorOrderNumber: user.order_num || '',
       doctorSpecialty:   user.specialty || '',
       reason:     fReason,
@@ -641,20 +646,35 @@ const HospitalPortal = (() => {
     });
 
     // Parcours infirmière → médecin : si la fiche était « en attente de
-    // médecin », la première consultation médicale la marque complétée.
-    // On CONSERVE created_by / nurse_uid pour la traçabilité.
+    // médecin » (créée par une infirmière), la première consultation la
+    // marque complétée — via une fonction DÉDIÉE et une écriture PARTIELLE
+    // confirmée (plus jamais via updatePatient, qui réécrivait toute la
+    // fiche et échouait sur les règles : le médecin n'a aucun droit update
+    // général sur mc_patients). L'identité, la traçabilité infirmière
+    // (created_by/nurse_uid/nurse_name) et l'historique sont préservés. On
+    // n'annonce jamais la complétion avant confirmation cloud.
+    let _completionToast = null;
     if (user.role === 'doctor') {
       const pat = DB.getPatientById(patientId);
-      if (pat && pat.medical_completion_status === 'pending') {
-        DB.updatePatient(patientId, {
-          medical_completion_status: 'completed',
-          status: 'active',
-          completed_by_doctor_uid: user.uid || '',
-          completed_by_doctor_name: fDoctor || user.name || '',
-          completed_at: new Date().toISOString(),
+      if (pat && pat.created_by_role === 'nurse' &&
+          pat.medical_completion_status === 'pending' && pat.status === 'awaiting_doctor') {
+        const cres = await DB.completeNurseCreatedPatientAfterConsultation({
+          patientId,
+          consultation: consult,
+          doctorUid: user.uid || '',
+          doctorName: fDoctor || user.name || '',
+          establishmentId: est.establishmentId || est.hospital_id || '',
         });
+        if (cres?.confirmed || cres?.alreadyCompleted) {
+          _completionToast = { msg: '✅ Consultation enregistrée. La fiche médicale est maintenant complétée.' };
+        } else if (cres?.queued) {
+          _completionToast = { msg: 'Consultation enregistrée localement — complétion de la fiche en attente de synchronisation.' };
+        } else if (cres?.blocked || cres?.failed) {
+          _completionToast = { msg: '⚠️ Consultation enregistrée, mais le statut de la fiche n\'a pas pu être mis à jour. Réessayez la synchronisation.', type: 'error' };
+        }
       }
     }
+    if (_completionToast) App.toast(_completionToast.msg, _completionToast.type);
 
     DB.addEstablishmentDocument({
       relatedId:        consult.cid,
@@ -712,7 +732,10 @@ const HospitalPortal = (() => {
 
     if (rxId) { openPrescriptionTarget(rxId); return; }
 
-    App.toast(t('msg_saved')); navigateMedConnect('consultations');
+    // Le message de complétion (v2.9.36), quand il s'applique, remplace le
+    // toast générique pour éviter un double message.
+    if (!_completionToast) App.toast(t('msg_saved'));
+    navigateMedConnect('consultations');
     } finally { _savingConsult = false; }
   }
 

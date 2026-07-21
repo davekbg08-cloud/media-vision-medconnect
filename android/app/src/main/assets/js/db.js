@@ -136,6 +136,7 @@ const DB = (() => {
       operationId: makeId('OP'),
       type: 'batch',
       writes: writes.map(([col, id, data]) => [col, String(id), data]),
+      merge: meta.merge === true, // v2.9.36 : rejeu en écriture partielle (complétion médicale)
       ..._opContext(meta),
       groupId,
       operationType: meta.operationType || 'batch',
@@ -177,8 +178,14 @@ const DB = (() => {
     if (e.type === 'batch') {
       if (typeof firebaseDB.batch !== 'function') throw new Error('batch non supporté');
       const batch = firebaseDB.batch();
+      // Chantier v2.9.36 : un lot marqué merge:true est rejoué en écriture
+      // PARTIELLE (set(..., {merge:true})) — indispensable pour la
+      // complétion médicale d'une fiche patient, qui ne doit toucher que
+      // les champs de complétion sans jamais écraser le reste de la fiche.
+      // Par défaut (lots existants) : set() complet, comportement inchangé.
+      const opts = e.merge === true ? { merge: true } : undefined;
       (e.writes || []).forEach(([col, id, data]) => {
-        batch.set(firebaseDB.collection(col).doc(String(id)), data);
+        batch.set(firebaseDB.collection(col).doc(String(id)), data, opts);
       });
       await batch.commit();
       return true;
@@ -1262,6 +1269,142 @@ const DB = (() => {
     return c;
   }
 
+  /* Chantier v2.9.36 : complétion médicale d'une fiche patient créée par
+     une INFIRMIÈRE (status:'awaiting_doctor', medical_completion_status:
+     'pending') après la PREMIÈRE consultation médicale.
+
+     Fonction DÉDIÉE — n'utilise JAMAIS updatePatient() (qui réécrit la
+     fiche entière depuis le cache local et échoue de toute façon sur les
+     règles : le médecin n'a aucun droit update général sur mc_patients).
+     Elle ne touche QUE les champs de complétion, par une écriture
+     PARTIELLE (set merge) confinée à mc_patients/{id} + patients/{id}, et
+     ne renseigne le cache local qu'APRÈS confirmation Firestore.
+
+     La consultation n'étant pas atomique dans le code existant, on suit le
+     repli documenté (spec §3) : 1) confirmer la consultation dans
+     Firestore ; 2) lot limité de complétion ; 3) cache après confirmation.
+     La règle firestore (doctorCanCompleteNurseCreatedPatient) vérifie que
+     la consultation citée existe RÉELLEMENT, concerne ce patient, cet
+     établissement, et appartient au médecin — jamais un id accepté à
+     l'aveugle.
+
+     Contrat de retour :
+     { ok:true, confirmed:true }                        → complétée (cloud).
+     { ok:true, alreadyCompleted:true }                 → déjà complétée.
+     { ok:false, notApplicable:true, reason }           → fiche non concernée
+       (non créée par une infirmière, ou pas en attente de médecin).
+     { ok:false, queued:true, operationId }             → hors ligne / cloud
+       injoignable : complétion en file (rejeu PARTIEL), cache NON modifié.
+     { ok:false, failed:true, blocked:true, errorCode } → refus serveur.
+     { ok:false, failed:true, busy:true }               → double appel. */
+  let _completingPatient = false;
+  async function completeNurseCreatedPatientAfterConsultation({ patientId, consultation, doctorUid, doctorName, establishmentId } = {}) {
+    if (_completingPatient) return { ok: false, failed: true, busy: true };
+    _completingPatient = true;
+    try {
+      const pat = getPatientById(patientId);
+      if (!pat) return { ok: false, notApplicable: true, reason: 'patient_introuvable' };
+
+      // Idempotence : une fiche déjà complétée n'est jamais recomplétée.
+      if (pat.medical_completion_status === 'completed' || pat.status === 'active') {
+        return { ok: true, alreadyCompleted: true };
+      }
+      // Seules les fiches créées par une infirmière, encore en attente de
+      // médecin, sont concernées. Une fiche créée par un médecin (ou tout
+      // autre statut) n'est jamais complétée par cette voie.
+      if (pat.created_by_role !== 'nurse') {
+        return { ok: false, notApplicable: true, reason: 'non_cree_par_infirmiere' };
+      }
+      if (pat.medical_completion_status !== 'pending' || pat.status !== 'awaiting_doctor') {
+        return { ok: false, notApplicable: true, reason: 'statut_inattendu' };
+      }
+
+      const nowIso = new Date().toISOString();
+      const cid = consultation?.cid || null;
+      // Écriture PARTIELLE : uniquement les champs de complétion. Tout le
+      // reste de la fiche (identité, nurse_uid, created_by, numéro MC,
+      // allergies, historique…) est préservé par le merge.
+      const patch = {
+        status: 'active',
+        medical_completion_status: 'completed',
+        completed_by_doctor_uid: doctorUid || '',
+        completed_by_doctor_name: doctorName || '',
+        completed_at: nowIso,
+        completed_by_consultation_id: cid || '',
+        updated_at: nowIso,
+      };
+      const writes = [
+        ['mc_patients', patientId, patch],
+        ['patients', patientId, patch],
+      ];
+      const opMeta = {
+        operationType: 'patient_medical_completion', module: 'patients',
+        groupId: `COMPLETE_${patientId}`, merge: true,
+        patientId, consultationId: cid, doctorUid, establishmentId,
+      };
+
+      const confirmLocally = () => {
+        const list = getPatients();
+        const idx = list.findIndex(p => p.id === patientId);
+        if (idx !== -1) { list[idx] = { ...list[idx], ...patch, id: patientId }; store('mc_patients', list); }
+      };
+
+      // Hors ligne / pas de batch : mise en file de la complétion PARTIELLE
+      // (merge:true — le rejeu ne touchera que les champs de complétion).
+      if (!firebaseReady || !firebaseDB || typeof firebaseDB.batch !== 'function') {
+        const operationId = _outboxAddBatch(writes, null, opMeta);
+        return { ok: false, queued: true, operationId };
+      }
+
+      // 1) Confirmer la consultation dans Firestore (idempotent : même cid).
+      //    La règle exige que la consultation existe côté serveur.
+      if (consultation && cid) {
+        const consultConfirm = await pushBatchAndReportDetailed(
+          [['mc_consultations', cid, consultation]], { label: 'Consultation' });
+        if (!consultConfirm.ok) {
+          // Consultation non confirmée : on met la complétion en file (elle
+          // sera rejouée quand la consultation aura abouti). Jamais de faux
+          // succès. La consultation elle-même reste gérée par addConsultation.
+          const operationId = _outboxAddBatch(writes, consultConfirm.error, opMeta);
+          return { ok: false, queued: true, operationId };
+        }
+      }
+
+      // 2) Lot LIMITÉ de complétion (écriture partielle, merge).
+      const batch = firebaseDB.batch();
+      writes.forEach(([col, id, data]) => batch.set(firebaseDB.collection(col).doc(String(id)), data, { merge: true }));
+      try {
+        await withTimeout(batch.commit(), 15000, 'Complétion fiche');
+      } catch (err) {
+        if (/délai dépassé/.test(err?.message || '')) {
+          // Réconciliation : la fiche a peut-être été complétée malgré le timeout.
+          try {
+            const doc = await firebaseDB.collection('mc_patients').doc(patientId).get();
+            if (doc.exists && (doc.data() || {}).medical_completion_status === 'completed') {
+              confirmLocally(); return { ok: true, confirmed: true, reconciled: true };
+            }
+          } catch (_) { /* relecture impossible : traité comme injoignable */ }
+          const operationId = _outboxAddBatch(writes, err, opMeta);
+          return { ok: false, queued: true, operationId };
+        }
+        const classification = classifyOutboxError(err);
+        if (classification === 'blocked') {
+          // Refus réel (permission…) : la CONSULTATION confirmée n'est jamais
+          // supprimée ; seule la complétion échoue et attend un rejeu manuel.
+          return { ok: false, failed: true, blocked: true, errorCode: err?.code || null, errorMessage: err?.message || null };
+        }
+        const operationId = _outboxAddBatch(writes, err, opMeta);
+        return { ok: false, queued: true, operationId };
+      }
+
+      // 3) Cache local UNIQUEMENT après confirmation réelle.
+      confirmLocally();
+      return { ok: true, confirmed: true };
+    } finally {
+      _completingPatient = false;
+    }
+  }
+
   function getPatientConsultations(pid) {
     return getConsultations().filter(c => c.patient_id === pid).sort((a,b) => b.date.localeCompare(a.date));
   }
@@ -1894,7 +2037,7 @@ const DB = (() => {
     getRegistrationRequests, saveRegistrationRequests, createRegistrationRequest,
     getPatients, savePatients, addPatient, addPatientAndConfirm, buildPatientRecord, buildPatientDirectoryEntry, addPatientAndConfirmAtomic, updatePatient, deletePatient, getPatientById, searchPatients, searchPatientDirectory,
     accountExistsForPatient, getPatientAccessCode,
-    getConsultations, addConsultation, getPatientConsultations, deleteConsultation,
+    getConsultations, addConsultation, completeNurseCreatedPatientAfterConsultation, getPatientConsultations, deleteConsultation,
     getPrescriptions, addPrescription, updatePrescription, updatePrescriptionAndConfirm, getPatientPrescriptions,
     getEstablishmentDocuments, addEstablishmentDocument, getPatientEstablishmentDocuments,
     getAppointments, addAppointment, updateAppointment, deleteAppointment, getPatientAppointments,
