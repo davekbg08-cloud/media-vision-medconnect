@@ -59,6 +59,15 @@ function setup({
   sandbox.DB = {
     getMessages: () => localMessages,
     saveMessages: (list) => { localMessages = list; },
+    saveMessagesLocal: (list) => { localMessages = list; },
+    // Chantier v2.9.34 : primitive ciblée de mise à jour de statut
+    // (lecture/suppression logique) — un seul message modifié.
+    updateMessageStatusAndConfirm: async (mid, patch) => {
+      const m = localMessages.find(x => x.mid === mid);
+      if (!m) return { ok: false, state: 'not_found' };
+      Object.assign(m, patch);
+      return { ok: true, state: 'confirmed', cloudConfirmed: true, message: m };
+    },
     getPatients: () => patients,
     getPrescriptions: () => prescriptions,
   };

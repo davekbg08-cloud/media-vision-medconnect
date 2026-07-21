@@ -213,6 +213,64 @@ test('HospitalAuth.isSessionConsistent() : refuse si l\'affiliation au staff a �
   assert.strictEqual(ok, false);
 });
 
+/* ── v2.9.34 (P0 session) points 39-41 : hospitalMembers = source de
+   vérité de l'affiliation, le miroir staff local n'est qu'un repli
+   hors ligne, et un rôle incohérent refuse la session. ──────────── */
+
+/* 39. hospitalMembers actif ouvre le desktop même si le miroir staff
+   local est en retard (vide / pas encore synchronisé). */
+test('HospitalAuth.isSessionConsistent() : hospitalMembers actif ouvre le desktop même si le miroir staff local est en retard (v2.9.34 P0 session)', async () => {
+  const hospitalsRegistryImpl = {
+    getHospitalById: () => ({
+      establishmentId: 'EST1', status: 'active',
+      staff: [], // miroir local vide / pas encore synchronisé
+    }),
+    resolveAgentAffiliation: async () => ({ status: 'active' }),
+  };
+  const { win } = setup({ firebaseAuthImpl: { currentUser: { uid: 'real-fb-uid' } }, hospitalsRegistryImpl });
+  win.sessionStorage.setItem('mc_user', JSON.stringify({ uid: 'real-fb-uid', role: 'doctor' }));
+  const session = { establishmentId: 'EST1', agentUid: 'real-fb-uid', role: 'doctor', loggedAt: new Date().toISOString() };
+  const ok = await win.HospitalAuth.isSessionConsistent(session);
+  assert.strictEqual(ok, true, 'la source de vérité hospitalMembers (active) prime sur un miroir staff local vide');
+});
+
+/* 40. hospitalMembers non actif (retiré / en attente / rejeté) invalide
+   la session — même quand le miroir staff local paraît encore actif. */
+for (const status of ['pending', 'rejected']) {
+  test(`HospitalAuth.isSessionConsistent() : hospitalMembers "${status}" invalide la session même si le miroir staff local paraît encore actif (v2.9.34 P0 session)`, async () => {
+    const hospitalsRegistryImpl = {
+      getHospitalById: () => ({
+        establishmentId: 'EST1', status: 'active',
+        staff: [{ uid: 'real-fb-uid', role: 'doctor', status: 'active' }], // miroir local en retard
+      }),
+      resolveAgentAffiliation: async () => ({ status }),
+    };
+    const { win } = setup({ firebaseAuthImpl: { currentUser: { uid: 'real-fb-uid' } }, hospitalsRegistryImpl });
+    win.sessionStorage.setItem('mc_user', JSON.stringify({ uid: 'real-fb-uid', role: 'doctor' }));
+    const session = { establishmentId: 'EST1', agentUid: 'real-fb-uid', role: 'doctor', loggedAt: new Date().toISOString() };
+    const ok = await win.HospitalAuth.isSessionConsistent(session);
+    assert.strictEqual(ok, false, 'hospitalMembers non actif (source de vérité) invalide la session malgré un miroir local obsolète');
+  });
+}
+
+/* 41. Un rôle de compte incohérent avec le rôle de session refuse la
+   session (compte rétrogradé côté serveur, session encore "doctor"). */
+test('HospitalAuth.isSessionConsistent() : un rôle de compte incohérent avec le rôle de session refuse la session (v2.9.34 P0 session)', async () => {
+  const hospitalsRegistryImpl = {
+    getHospitalById: () => ({
+      establishmentId: 'EST1', status: 'active',
+      staff: [{ uid: 'real-fb-uid', role: 'doctor', status: 'active' }],
+    }),
+    resolveAgentAffiliation: async () => ({ status: 'active' }),
+  };
+  const { win } = setup({ firebaseAuthImpl: { currentUser: { uid: 'real-fb-uid' } }, hospitalsRegistryImpl });
+  // Le compte a été rétrogradé "nurse" mais la session prétend encore "doctor".
+  win.sessionStorage.setItem('mc_user', JSON.stringify({ uid: 'real-fb-uid', role: 'nurse' }));
+  const session = { establishmentId: 'EST1', agentUid: 'real-fb-uid', role: 'doctor', loggedAt: new Date().toISOString() };
+  const ok = await win.HospitalAuth.isSessionConsistent(session);
+  assert.strictEqual(ok, false, 'un rôle de compte différent du rôle de session invalide la session');
+});
+
 test('HospitalAuth.isSessionExpired() : comparaison pure, testable indépendamment', () => {
   const { win } = setup();
   const now = Date.parse('2026-07-17T12:00:00.000Z');

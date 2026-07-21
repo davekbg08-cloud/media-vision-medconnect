@@ -47,40 +47,37 @@
       window.Network.markRead(mid);
       return;
     }
-    const messages = DB.getMessages();
-    const msg = messages.find(m => m.mid === mid);
-    if (!msg) return;
-    msg.read = true;
-    msg.readStatus = 'read';
-    msg.readAt = new Date().toISOString();
-    DB.saveMessages(messages);
+    // Repli sans Network (chantier v2.9.34) : même primitive ciblée —
+    // UNE mise à jour du seul message, jamais une réécriture de la boîte.
+    window.DB?.updateMessageStatusAndConfirm?.(mid, {
+      read: true, readStatus: 'read', readAt: new Date().toISOString(),
+    });
   }
 
-  // Correctif (audit "workflows mobile/desktop", section 10) : même bug
-  // que côté desktop (js/hospital-messages.js) — suppression écrite
-  // uniquement via DB.saveMessages() (fire-and-forget), jamais confirmée
-  // pour CE document ni suivie d'un rafraîchissement immédiat du badge
-  // de non-lus.
+  // Chantier v2.9.34 (P0 messagerie) : suppression logique = UNE mise à
+  // jour de statut du seul message concerné (primitive commune
+  // DB.updateMessageStatusAndConfirm) — plus jamais DB.saveMessages()
+  // (réécriture de toute la boîte + copie notifications) suivi d'un
+  // second push ciblé redondant.
   async function deleteMessage(mid) {
     const user = Auth.getUser();
     if (!user) return;
     if (!confirm('Supprimer ce message de votre boîte de réception ?')) return;
 
-    const messages = DB.getMessages();
-    const msg = messages.find(m => m.mid === mid);
+    const msg = DB.getMessages().find(m => m.mid === mid);
     if (!msg) return;
 
     const deletedFor = new Set(Array.isArray(msg.deletedFor) ? msg.deletedFor.map(String) : []);
     recipientKeys(user).forEach(key => deletedFor.add(String(key)));
-    msg.deletedFor = Array.from(deletedFor);
-    msg.deletedAt = new Date().toISOString();
-    msg.deletedByUid = user.uid || user.username || user.patient_id || '';
 
-    DB.saveMessages(messages);
-    const cloudConfirmed = await window.DB?.pushCloud?.('mc_messages', mid, msg);
+    const r = await window.DB?.updateMessageStatusAndConfirm?.(mid, {
+      deletedFor: Array.from(deletedFor),
+      deletedAt: new Date().toISOString(),
+      deletedByUid: user.uid || user.username || user.patient_id || '',
+    });
     window.Network?.refreshUnreadIndicators?.();
     App.closeModal?.();
-    App.toast?.(cloudConfirmed ? '🗑️ Message supprimé' : '🗑️ Message supprimé localement — synchronisation en attente.');
+    App.toast?.(r?.cloudConfirmed ? '🗑️ Message supprimé' : '🗑️ Message supprimé localement — synchronisation en attente.');
     App.navigateTo?.('inbox');
   }
 

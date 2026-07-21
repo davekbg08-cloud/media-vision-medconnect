@@ -86,9 +86,29 @@ const HospitalAuth = (() => {
      ou tout juste créée) correspond réellement à une identité Firebase
      Auth confirmée ET toujours affiliée à l'établissement — sans ce
      contrôle, un ancien tableau de bord pouvait se rouvrir sur la seule
-     foi du cache local (audit : "session fantôme"). Fonction PURE côté
-     nettoyage : ne modifie jamais l'état, c'est à l'appelant de décider
-     quoi faire du résultat (voir invalidateSession). */
+     foi du cache local (audit : "session fantôme").
+
+     Chantier v2.9.34 (P0 session) : bug confirmé — cette fonction
+     dépendait encore du tableau LOCAL establishments.staff (miroir
+     d'affichage, potentiellement en retard, et modifiable par le
+     propriétaire de l'établissement), alors que verifyAgent() s'appuie
+     déjà, elle, sur hospitalMembers (source de vérité des règles
+     serveur). Un staff local en retard invalidait à tort une session
+     pourtant valide. hospitalMembers/{estId}_{uid} devient la source de
+     vérité ici aussi (via HospitalsRegistry.resolveAgentAffiliation,
+     même primitive que verifyAgent) :
+     - status 'active'            → session cohérente.
+     - status 'pending'/'rejected' → hospitalMembers/affiliation lus
+       avec succès et NON actifs (membre retiré, non encore approuvé,
+       rejeté) → invalidation immédiate.
+     - status 'none'              → ambigu (hors ligne OU réellement non
+       affilié) : repli sur le miroir staff local (résilience hors
+       ligne, ne jamais invalider une session valide faute de réseau).
+     En plus : compte suspendu ou rôle changé (users/{uid} côté
+     Firestore, avec repli sur le compte local) → invalidation.
+     Effet de bord minime et sûr : resolveAgentAffiliation peut
+     réconcilier le miroir staff local depuis Firestore (jamais
+     l'inverse, jamais d'élévation de privilège). */
   async function isSessionConsistent(session) {
     if (!session?.establishmentId || !session?.agentUid) return false;
     if (isSessionExpired(session)) return false;
@@ -103,6 +123,42 @@ const HospitalAuth = (() => {
     if (!est) return false;
     if (!['active', 'approved'].includes(String(est.status || '').toLowerCase())) return false;
 
+    // Compte suspendu / rôle changé : lecture directe users/{uid} quand
+    // Firestore est joignable (source de vérité), repli sur le compte
+    // local sinon (hors ligne). Un statut explicitement suspendu, ou un
+    // rôle qui ne correspond plus à la session, invalide immédiatement.
+    let accountRole = user.role;
+    let accountStatus = user.status;
+    if (typeof firebaseDB !== 'undefined' && firebaseDB) {
+      try {
+        const uDoc = await firebaseDB.collection('users').doc(fbUser.uid).get();
+        if (uDoc.exists) {
+          const u = uDoc.data() || {};
+          accountRole = u.role || accountRole;
+          accountStatus = u.status || accountStatus;
+        }
+      } catch (e) { console.warn('[HospitalAuth] Lecture users/{uid} (session) :', e?.message || e); }
+    }
+    if (accountStatus && ['suspended', 'rejected', 'disabled'].includes(String(accountStatus).toLowerCase())) return false;
+    if (accountRole && accountRole !== session.role) return false;
+
+    // hospitalMembers = source de vérité de l'affiliation.
+    let resolution = null;
+    try {
+      resolution = await window.HospitalsRegistry?.resolveAgentAffiliation?.(
+        session.establishmentId, fbUser.uid, session.role);
+    } catch (e) { console.warn('[HospitalAuth] resolveAgentAffiliation (session) :', e?.message || e); }
+
+    if (resolution) {
+      if (resolution.status === 'active') return true;
+      // pending/rejected ne sont renvoyés QUE si Firestore a répondu et
+      // que le membre n'est pas actif → session non valide.
+      if (resolution.status === 'pending' || resolution.status === 'rejected') return false;
+      // 'none' : ambigu (hors ligne OU réellement non affilié) → repli.
+    }
+
+    // Repli hors ligne : miroir staff local (ne jamais invalider une
+    // session valide uniquement parce que le réseau est indisponible).
     const staff = Array.isArray(est.staff) ? est.staff : [];
     const activeOk = s => s.status === 'active' || s.status === 'approved';
     const member = staff.find(s => s.uid === fbUser.uid && s.role === session.role && activeOk(s));

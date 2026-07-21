@@ -376,11 +376,11 @@ const DB = (() => {
                        doit savoir si le cloud a réellement confirmé
                        (inscription, approbation admin...).
   ──────────────────────────────────────────────────── */
-  async function _push(collection, docId, data) {
+  async function _push(collection, docId, data, meta = {}) {
     if (!firebaseReady || !firebaseDB) {
       // Firestore pas prêt : on ne perd PAS l'écriture, on la met en
       // file pour rejeu automatique dès que le cloud répond.
-      _outboxAdd(collection, docId, data);
+      _outboxAdd(collection, docId, data, null, meta);
       return false;
     }
     try {
@@ -388,7 +388,7 @@ const DB = (() => {
       return true;
     } catch (e) {
       console.warn(`[MedConnect] Échec écriture Firestore ${collection}/${docId} — mise en file :`, e?.message || e);
-      _outboxAdd(collection, docId, data, e);
+      _outboxAdd(collection, docId, data, e, meta);
       return false;
     }
   }
@@ -755,6 +755,14 @@ const DB = (() => {
                 const section = { mc_prescriptions: 'prescriptions', mc_messages: 'messages' }[key];
                 if (section && window.App?.refreshIfCurrent) window.App.refreshIfCurrent(section);
               } catch (_) {}
+              // Chantier v2.9.34 (P0 messagerie) : badges de non-lus
+              // (mobile ET desktop) rafraîchis dès qu'un snapshot
+              // messages arrive — réception d'un nouveau message,
+              // reconnexion, resynchronisation, lecture faite sur un
+              // autre appareil.
+              if (key === 'mc_messages') {
+                try { window.Network?.refreshUnreadIndicators?.(); } catch (_) {}
+              }
             }
           },
           err => console.warn(`[MedConnect] Listener ${key} (scoped) rejeté :`, err?.message || err)
@@ -765,9 +773,15 @@ const DB = (() => {
       }
     };
 
-    // Messagerie : la règle exige to_id == uid — c'est la seule
-    // écoute des messages qui fonctionne réellement.
+    // Messagerie — champs CANONIQUES (chantier v2.9.34) : toUid est la
+    // référence, to_id/recipientUid restent écoutés pour la
+    // compatibilité des messages historiques. mergeStore() fusionne par
+    // mid : trois écoutes ne créent jamais de doublon local.
+    scoped(firebaseDB.collection('mc_messages').where('toUid', '==', user.uid),
+      'mc_messages', 'mid');
     scoped(firebaseDB.collection('mc_messages').where('to_id', '==', user.uid),
+      'mc_messages', 'mid');
+    scoped(firebaseDB.collection('mc_messages').where('recipientUid', '==', user.uid),
       'mc_messages', 'mid');
 
     // Pharmacien : ses ordonnances reçues (pharmacyCanReadPrescription).
@@ -1539,13 +1553,59 @@ const DB = (() => {
      MESSAGES
   ══════════════════════════════════════════════════ */
   function getMessages()    { return load('mc_messages'); }
-  function saveMessages(l)  {
-    store('mc_messages', l);
-    l.forEach(m => {
-      _push('mc_messages', m.mid, m);
-      _push('notifications', m.mid, m);
-    });
+
+  /* Chantier v2.9.34 (P0 messagerie) : bug confirmé — saveMessages()
+     réécrivait TOUTE la liste des messages dans mc_messages ET la
+     recopiait intégralement dans notifications à CHAQUE appel (envoi,
+     lecture, suppression…) : N×2 écritures cloud pour une seule action,
+     doublons de notifications, et mélange de deux objets métier
+     différents (un message utilisateur n'est PAS une notification
+     métier). Architecture remplacée par trois primitives explicites :
+     - saveMessagesLocal(messages)              : cache local UNIQUEMENT.
+     - pushMessageAndConfirm(message)           : écrit LE nouveau
+       message (un seul document, mc_messages uniquement — plus jamais
+       de copie automatique vers notifications).
+     - updateMessageStatusAndConfirm(mid,patch) : met à jour LE message
+       concerné, champs de STATUT uniquement (lu/non-lu/suppression
+       logique) — le contenu reste immuable, comme côté règles. */
+  function saveMessagesLocal(l) { store('mc_messages', l); }
+
+  async function pushMessageAndConfirm(message) {
+    if (!message || !message.mid) return false;
+    const msgs = getMessages();
+    const idx = msgs.findIndex(m => m.mid === message.mid);
+    if (idx === -1) msgs.push(message); else msgs[idx] = message;
+    saveMessagesLocal(msgs);
+    return _push('mc_messages', message.mid, message,
+      { operationType: 'message_send', module: 'messagerie' });
   }
+
+  // Miroir client de la règle serveur (mc_messages.update) : seuls les
+  // champs de statut du destinataire sont modifiables — tout autre
+  // champ du patch est ignoré (jamais envoyé), le contenu/l'expéditeur/
+  // le destinataire/la pièce jointe restent immuables.
+  const MESSAGE_STATUS_FIELDS = new Set([
+    'read', 'readStatus', 'readAt', 'deletedFor', 'deletedAt', 'deletedByUid', 'updatedAt',
+  ]);
+  async function updateMessageStatusAndConfirm(mid, patch) {
+    const msgs = getMessages();
+    const m = msgs.find(x => x.mid === mid);
+    if (!m) return { ok: false, state: 'not_found' };
+    for (const [k, v] of Object.entries(patch || {})) {
+      if (MESSAGE_STATUS_FIELDS.has(k)) m[k] = v;
+    }
+    m.updatedAt = new Date().toISOString();
+    saveMessagesLocal(msgs);
+    const cloudConfirmed = await _push('mc_messages', mid, m,
+      { operationType: 'message_status', module: 'messagerie' });
+    return { ok: true, state: cloudConfirmed ? 'confirmed' : 'queued', cloudConfirmed, message: m };
+  }
+
+  /* ⚠️ OBSOLÈTE (chantier v2.9.34) : conservée pour compatibilité de
+     signature, mais n'écrit plus QUE le cache local — plus jamais la
+     réécriture cloud de toute la liste ni la copie vers notifications.
+     Utiliser pushMessageAndConfirm()/updateMessageStatusAndConfirm(). */
+  function saveMessages(l)  { saveMessagesLocal(l); }
 
   /* ══════════════════════════════════════════════════
      PARAMÈTRES
@@ -1623,6 +1683,10 @@ const DB = (() => {
     getMedicines, addMedicine, updateMedicine, deleteMedicine,
     getSales, addSale,
     getMessages, saveMessages,
+    // Chantier v2.9.34 (P0 messagerie) : primitives ciblées — un seul
+    // document écrit par action, plus jamais de réécriture de toute la
+    // boîte ni de copie automatique vers notifications.
+    saveMessagesLocal, pushMessageAndConfirm, updateMessageStatusAndConfirm,
     getSettings, saveSettings,
     getStats,
   };
