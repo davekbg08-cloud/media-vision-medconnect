@@ -326,6 +326,30 @@ service cloud.firestore {
              data.get('establishmentId', null) != null;
     }
 
+    /* Audit v2.9.34 (P1) : destinataire utilisateur PRÉCIS d'une
+       notification (l'une des 5 clés d'adressage individuel) — utilisé
+       pour la lecture ET pour restreindre la mise à jour au seul
+       destinataire réel. */
+    function isNotificationRecipient(data) {
+      return data.get('to_id', null) == request.auth.uid ||
+             data.get('recipientUid', null) == request.auth.uid ||
+             data.get('userUid', null) == request.auth.uid ||
+             data.get('toUid', null) == request.auth.uid ||
+             data.get('recipientUserId', null) == request.auth.uid;
+    }
+
+    /* Audit v2.9.34 (P1) : le destinataire d'une notification ne peut
+       modifier QUE des champs de statut (marquer lue/vue/rejetée) —
+       jamais le contenu (title/message/type), ni l'adressage
+       (toUid/…/fromUid). Même principe que MESSAGE_STATUS_FIELDS pour
+       mc_messages. */
+    function notificationStatusFieldsOk(before, after) {
+      return after.diff(before).affectedKeys().hasOnly([
+        'read', 'readStatus', 'readAt', 'seen', 'seenAt',
+        'status', 'dismissedAt', 'archivedAt', 'updatedAt'
+      ]);
+    }
+
     /* ── LECTURE mobile du dossier médical par le personnel clinique ──
        Demande client : un contenu (consultation/ordonnance/résultat de
        labo) créé côté DESKTOP hôpital ne doit être visible au médecin/
@@ -979,17 +1003,20 @@ service cloud.firestore {
       // partout (au lieu de l'accès pointé direct) : un document qui ne
       // porte qu'UN sous-ensemble de ces 5 clés optionnelles levait
       // sinon une erreur d'évaluation sur les clés absentes.
-      allow read, update: if isAdmin() ||
-        (
-          signedIn() &&
-          (
-            resource.data.get('to_id', null) == request.auth.uid ||
-            resource.data.get('recipientUid', null) == request.auth.uid ||
-            resource.data.get('userUid', null) == request.auth.uid ||
-            resource.data.get('toUid', null) == request.auth.uid ||
-            resource.data.get('recipientUserId', null) == request.auth.uid
-          )
-        );
+      allow read: if isAdmin() ||
+        (signedIn() && isNotificationRecipient(resource.data));
+      // Audit v2.9.34 (P1) : "read, update" partageaient la MÊME clause —
+      // le destinataire pouvait donc RÉÉCRIRE le contenu de la notification
+      // reçue (titre, message, type), voire réattribuer son auteur/
+      // destinataire, pas seulement la marquer lue. Même faille que celle
+      // corrigée pour mc_messages. La mise à jour par le destinataire est
+      // désormais restreinte aux SEULS champs de statut
+      // (notificationStatusFieldsOk) — le contenu et l'adressage sont
+      // immuables (seul l'admin plateforme garde un accès complet).
+      allow update: if isAdmin() ||
+        (signedIn() &&
+         isNotificationRecipient(resource.data) &&
+         notificationStatusFieldsOk(resource.data, request.resource.data));
       // Chantier v2.9.34 (P0/sécurité) : "create: if signedIn()" laissait
       // N'IMPORTE QUEL utilisateur connecté créer une notification pour
       // n'importe qui, sous n'importe quelle identité. Resserré :

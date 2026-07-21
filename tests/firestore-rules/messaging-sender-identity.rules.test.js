@@ -190,3 +190,64 @@ test("notifications : une alerte inter-hôpitaux (recipientHospitalId, sans uid 
     title: '🚑 Transfert', message: 'Patient en route',
   }));
 });
+
+/* ── Audit v2.9.34 (P1) : notifications — le destinataire ne modifie
+   QUE le statut, jamais le contenu ni l'adressage ── */
+
+test("notifications : le destinataire peut marquer une notification lue (read/readStatus)", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'notifications', 'NOTIF-U1'), {
+      notificationId: 'NOTIF-U1', toUid: 'notif-dest-1', fromUid: 'notif-src-1',
+      title: 'Info', message: 'Bonjour', readStatus: 'unread', read: false,
+    });
+  });
+  const dest = env.authenticatedContext('notif-dest-1').firestore();
+  await assertSucceeds(updateDoc(doc(dest, 'notifications', 'NOTIF-U1'), {
+    read: true, readStatus: 'read', readAt: '2026-07-21T00:00:00.000Z',
+  }));
+});
+
+test("notifications : le destinataire NE PEUT PAS réécrire le contenu (title/message)", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'notifications', 'NOTIF-U2'), {
+      notificationId: 'NOTIF-U2', toUid: 'notif-dest-2', fromUid: 'notif-src-2',
+      title: 'Original', message: 'Contenu original', readStatus: 'unread',
+    });
+  });
+  const dest = env.authenticatedContext('notif-dest-2').firestore();
+  await assertFails(updateDoc(doc(dest, 'notifications', 'NOTIF-U2'), {
+    message: 'Contenu falsifié par le destinataire',
+  }));
+});
+
+test("notifications : le destinataire NE PEUT PAS réattribuer l'expéditeur (fromUid)", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'notifications', 'NOTIF-U3'), {
+      notificationId: 'NOTIF-U3', toUid: 'notif-dest-3', fromUid: 'notif-src-3', readStatus: 'unread',
+    });
+  });
+  const dest = env.authenticatedContext('notif-dest-3').firestore();
+  await assertFails(updateDoc(doc(dest, 'notifications', 'NOTIF-U3'), {
+    fromUid: 'notif-dest-3',
+  }));
+});
+
+test("notifications : un tiers (non destinataire) NE PEUT PAS marquer la notification lue", async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'notifications', 'NOTIF-U4'), {
+      notificationId: 'NOTIF-U4', toUid: 'notif-dest-4', fromUid: 'notif-src-4', readStatus: 'unread',
+    });
+  });
+  const tiers = env.authenticatedContext('notif-tiers-1').firestore();
+  await assertFails(updateDoc(doc(tiers, 'notifications', 'NOTIF-U4'), {
+    read: true, readStatus: 'read',
+  }));
+});
