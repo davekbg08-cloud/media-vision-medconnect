@@ -400,10 +400,12 @@ const HospitalAuth = (() => {
   // connexion (verifyAgent), qui doit chercher un compte pharmacist
   // "interne" via mc_accounts/users (comme lab/reception), jamais via
   // le registre professionnel (réservé à la pharmacie indépendante).
-  // Pharmacist a deux parcours distincts à l'inscription (voir
-  // choosePharmacistRegisterType ci-dessous) : interne à CET
-  // établissement (flux strict, comme lab/reception) ou indépendante
-  // (parcours registre existant, inchangé — Auth._registerRole).
+  // v2.9.34 (règle IMPÉRATIVE pharmacie) : le desktop n'inscrit QUE des
+  // pharmacies INTERNES à CET établissement (flux strict comme
+  // lab/reception, compte tagué pharmacyType:'internal', affiliation
+  // hospitalMembers). La pharmacie indépendante (externe) reste
+  // exclusivement mobile (parcours registre inchangé) — voir
+  // choosePharmacistRegisterType ci-dessous.
   const AGENT_SELF_REGISTER_ROLES = ['lab', 'reception', 'pharmacist'];
 
   // Établissement complet conservé en mémoire dès le sélecteur de rôle
@@ -497,12 +499,15 @@ const HospitalAuth = (() => {
     const opening = wrap.style.display === 'none';
     wrap.style.display = opening ? 'block' : 'none';
     if (opening) {
-      // Correctif (section 8) : pour pharmacist, propose d'abord le
-      // choix interne/indépendante — la demande d'affiliation
-      // automatique n'a de sens QUE pour une pharmacie interne (voir
-      // choosePharmacistRegisterType ci-dessous).
+      // v2.9.34 (règle IMPÉRATIVE pharmacie) : sur le desktop hôpital, la
+      // pharmacie est TOUJOURS un service INTERNE de CET établissement
+      // (liée à hospitalMembers actif). Le choix « pharmacie
+      // indépendante » est retiré du desktop — la pharmacie indépendante
+      // (externe) s'inscrit exclusivement depuis la version mobile
+      // (parcours registre, inchangé). On ouvre donc directement le
+      // formulaire interne strict.
       if (role === 'pharmacist') {
-        _renderPharmacistRegisterChoice(establishmentId);
+        choosePharmacistRegisterType('internal', establishmentId);
         return;
       }
       // Correctif : utilise l'établissement COMPLET déjà en mémoire
@@ -523,46 +528,29 @@ const HospitalAuth = (() => {
     }
   }
 
-  // Correctif (audit "workflows mobile/desktop", section 8) : choix
-  // explicite avant l'inscription pharmacie — jamais de création
-  // automatique de hospitalMembers/affiliation pour une pharmacie
-  // indépendante (spec point 5).
-  function _renderPharmacistRegisterChoice(establishmentId) {
-    const rf = document.getElementById('register-form');
-    if (!rf) return;
-    rf.innerHTML = `
-      <p style="font-size:.85rem;margin-bottom:.6rem">Quel type de pharmacie souhaitez-vous inscrire ?</p>
-      <button type="button" class="btn btn-primary btn-full" style="margin-bottom:.5rem"
-        onclick="HospitalAuth.choosePharmacistRegisterType('internal', '${esc(establishmentId || '')}')">
-        🏥 Service pharmacie de cet établissement
-      </button>
-      <button type="button" class="btn btn-ghost btn-full"
-        onclick="HospitalAuth.choosePharmacistRegisterType('independent', '${esc(establishmentId || '')}')">
-        🏪 Pharmacie indépendante
-      </button>`;
-  }
-
+  // v2.9.34 (règle IMPÉRATIVE pharmacie) : le desktop hôpital n'inscrit
+  // QUE des pharmacies INTERNES (service de l'établissement, liées à
+  // hospitalMembers). Le paramètre `type` est conservé pour la
+  // compatibilité d'appel (anciens gestionnaires onclick en cache),
+  // mais l'option « indépendante » n'est plus proposée NI honorée ici —
+  // la pharmacie indépendante (externe) reste exclusivement mobile
+  // (parcours registre inchangé, jamais d'establishmentId/hospitalId).
   function choosePharmacistRegisterType(type, establishmentId) {
-    if (type === 'internal') {
-      // Pharmacie interne : même flux strict que lab/reception —
-      // establishmentId obligatoire, affiliation créée dès l'inscription.
-      const est = _activeEstablishment ||
-        (establishmentId ? window.HospitalsRegistry?.getHospitalById?.(establishmentId) : null);
-      window.Auth?._setRegistrationContext?.(establishmentId ? {
-        establishmentId,
-        establishmentName: est?.name || '',
-        officialId: est?.officialId || '',
-        establishment: est || null,
-      } : null);
-      window.Auth?._showAgentStrictRegisterForm?.('pharmacist');
-    } else {
-      // Pharmacie indépendante : parcours registre existant, inchangé —
-      // jamais de contexte d'établissement (pas de hospitalMembers créé
-      // automatiquement, conformément au parcours pharmacie indépendant
-      // déjà en place).
-      window.Auth?._setRegistrationContext?.(null);
-      window.Auth?._registerRole?.('pharmacist');
-    }
+    // Pharmacie interne uniquement : même flux strict que lab/reception —
+    // establishmentId obligatoire, affiliation créée dès l'inscription,
+    // compte tagué pharmacyType:'internal' (voir js/auth.js
+    // _regAgentStrict). On force donc le type interne quel que soit
+    // l'argument reçu.
+    const est = _activeEstablishment ||
+      (establishmentId ? window.HospitalsRegistry?.getHospitalById?.(establishmentId) : null);
+    window.Auth?._setRegistrationContext?.(establishmentId ? {
+      establishmentId,
+      establishmentName: est?.name || '',
+      officialId: est?.officialId || '',
+      establishment: est || null,
+      pharmacyType: 'internal',
+    } : null);
+    window.Auth?._showAgentStrictRegisterForm?.('pharmacist');
   }
 
   function _normNum(s) { return String(s || '').trim().toUpperCase().replace(/\s+/g, ' '); }

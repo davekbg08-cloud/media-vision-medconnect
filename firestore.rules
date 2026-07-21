@@ -574,6 +574,26 @@ service cloud.firestore {
       );
     }
 
+    /* ── v2.9.34 (règle IMPÉRATIVE pharmacie) — split interne/externe ──
+       Desktop hôpital = pharmacie INTERNE uniquement (service de
+       l'établissement, liée à un hospitalMembers actif) ; mobile =
+       pharmacie EXTERNE indépendante (jamais affiliée, jamais
+       d'establishmentId/hospitalId). L'affiliation (affiliation_requests
+       puis hospitalMembers) est donc RÉSERVÉE aux pharmacies internes :
+       une pharmacie explicitement taguée pharmacyType:'external' ne peut
+       jamais s'affilier à un établissement.
+       Périmètre : ne concerne QUE le rôle pharmacist (les autres rôles
+       renvoient true). Rétro-compatibilité : un pharmacien SANS
+       pharmacyType (compte antérieur à ce chantier, ou dont le document
+       users n'est pas lisible) reste autorisé — seule la valeur
+       'external' EXPLICITE bloque ; la migration
+       scripts/migrate-pharmacy-type.mjs backfill le type sur l'existant. */
+    function pharmacistAffiliationAllowed() {
+      return !currentRoleIs('pharmacist') ||
+        !hasCurrentUserDoc() ||
+        get(currentUserDoc()).data.get('pharmacyType', 'internal') != 'external';
+    }
+
     /* ── Chantier "reception/affiliation sans régression" — section 11 ──
        Bug confirmé : mc_medicines/mc_sales n'avaient jamais de champ
        pharmacyUid, et leur règle write/read se limitait à
@@ -699,6 +719,12 @@ service cloud.firestore {
         request.resource.data.uid == uid &&
         request.resource.data.role == resource.data.role &&
         request.resource.data.status == resource.data.status &&
+        // v2.9.34 : pharmacyType (interne/externe) est IMMUABLE après
+        // création — seul l'admin plateforme (isAdmin, branche séparée)
+        // peut le modifier. Une pharmacie ne peut donc pas se
+        // requalifier elle-même d'externe en interne pour contourner le
+        // split et s'affilier.
+        request.resource.data.get('pharmacyType', null) == resource.data.get('pharmacyType', null) &&
         hasNoSecretFields(request.resource.data);
     }
 
@@ -827,6 +853,9 @@ service cloud.firestore {
           ownsUid(uid) &&
           request.resource.data.role == resource.data.role &&
           request.resource.data.status == resource.data.status &&
+          // v2.9.34 : pharmacyType immuable après création (seul l'admin
+          // plateforme peut le changer — branche isAdmin ci-dessus).
+          request.resource.data.get('pharmacyType', null) == resource.data.get('pharmacyType', null) &&
           hasNoSecretFields(request.resource.data)
         );
       allow delete: if isAdmin() || ownsUid(uid);
@@ -1004,9 +1033,14 @@ service cloud.firestore {
     }
 
     match /affiliation_requests/{requestId} {
+      // v2.9.34 : une pharmacie EXTERNE (indépendante/mobile) ne peut
+      // jamais demander d'affiliation à un établissement — seule une
+      // pharmacie interne le peut (pharmacistAffiliationAllowed). Ajout
+      // ADDITIF : les autres rôles conservent exactement leur droit.
       allow create: if signedIn() &&
         request.resource.data.requesterUid == request.auth.uid &&
-        request.resource.data.status == 'pending';
+        request.resource.data.status == 'pending' &&
+        pharmacistAffiliationAllowed();
       // Correctif (audit sécurité, section 9) : admin_hospital peut
       // désormais lire les demandes de SON établissement (nécessaire
       // pour afficher la file "Demandes d'affiliation en attente" du
@@ -1160,6 +1194,10 @@ service cloud.firestore {
       // professionalNumber/matricule n'étaient pas encore figés — un
       // propriétaire pouvait en théorie réécrire ces champs d'identité
       // après création. Ajout ADDITIF, même principe.
+      // v2.9.34 : pharmacyType (interne/externe) rejoint les champs
+      // d'identité IMMUABLES — une pharmacie ne peut pas se requalifier
+      // elle-même pour contourner le split ; seul l'admin plateforme
+      // (isAdmin, branche séparée) peut le modifier.
       function mcAccountImmutableFieldsOk(before, after) {
         return after.get('status', null) == before.get('status', null) &&
           after.get('role', null) == before.get('role', null) &&
@@ -1167,7 +1205,8 @@ service cloud.firestore {
           after.get('uid', null) == before.get('uid', null) &&
           after.get('patient_id', null) == before.get('patient_id', null) &&
           after.get('professionalNumber', null) == before.get('professionalNumber', null) &&
-          after.get('matricule', null) == before.get('matricule', null);
+          after.get('matricule', null) == before.get('matricule', null) &&
+          after.get('pharmacyType', null) == before.get('pharmacyType', null);
       }
       allow update: if hasNoSecretFields(request.resource.data) && (
         isAdmin() ||
@@ -1732,6 +1771,9 @@ service cloud.firestore {
          docId == (resolveHospitalId(request.resource.data) + '_' + request.auth.uid) &&
          request.resource.data.uid == request.auth.uid &&
          request.resource.data.status == 'active' &&
+         // v2.9.34 : une pharmacie externe ne peut jamais s'auto-écrire
+         // une affiliation active, même en présence d'une demande.
+         pharmacistAffiliationAllowed() &&
          hasApprovedAffiliation(resolveHospitalId(request.resource.data))) ||
         // Correctif (audit sécurité, section 9) : sans cette clause,
         // même une fois affiliation_requests.update autorisé pour

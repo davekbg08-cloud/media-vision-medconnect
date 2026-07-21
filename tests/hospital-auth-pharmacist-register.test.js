@@ -9,11 +9,14 @@
    compte existant.
 
    Corrigé : pharmacist rejoint AGENT_SELF_REGISTER_ROLES (lien
-   d'inscription affiché + pré-contrôle de connexion cohérent), avec un
-   choix explicite avant l'inscription (interne à cet établissement —
-   flux strict, comme lab/reception — ou indépendante — parcours
-   registre existant, JAMAIS de hospitalMembers/affiliation créés
-   automatiquement pour ce second cas).
+   d'inscription affiché + pré-contrôle de connexion cohérent).
+
+   v2.9.34 (règle IMPÉRATIVE pharmacie) : sur le desktop hôpital, la
+   pharmacie est TOUJOURS INTERNE (service de l'établissement, tagué
+   pharmacyType:'internal', affiliation hospitalMembers). Le choix
+   « pharmacie indépendante » est retiré du desktop — la pharmacie
+   indépendante (externe) reste exclusivement mobile. toggleAgentRegister
+   ouvre donc directement le formulaire interne strict.
    ===================================================== */
 const { test } = require('node:test');
 const assert = require('node:assert');
@@ -73,33 +76,51 @@ test("onAgentRoleChange() affiche le lien d'inscription pour pharmacist", () => 
   assert.match(getEl('ha-agent-register-hint').textContent, /pharmacie/);
 });
 
-test("toggleAgentRegister() pour pharmacist affiche le choix interne/indépendante, jamais directement _registerRole", () => {
-  const { win, getEl, registerRoleCalls, showAgentStrictCalls } = setup();
+// v2.9.34 (règle IMPÉRATIVE pharmacie) : sur desktop, la pharmacie est
+// TOUJOURS interne — plus aucun choix « indépendante ». toggleAgentRegister
+// ouvre donc directement le formulaire strict interne (via
+// choosePharmacistRegisterType('internal')), sans jamais passer par le
+// parcours registre mobile (_registerRole).
+test("toggleAgentRegister() pour pharmacist ouvre directement le formulaire interne strict (plus de choix indépendante)", () => {
+  const { win, getEl, registerRoleCalls, showAgentStrictCalls, registrationContextCalls } = setup();
   getEl('ha-agent-role').value = 'pharmacist';
   getEl('ha-agent-register-wrap').style.display = 'none';
   win.HospitalAuth.toggleAgentRegister(null, 'EST-1');
-  assert.match(getEl('register-form').innerHTML, /Service pharmacie de cet établissement/);
-  assert.match(getEl('register-form').innerHTML, /Pharmacie indépendante/);
-  assert.strictEqual(registerRoleCalls.length, 0, "_registerRole ne doit pas être appelé avant le choix explicite");
-  assert.strictEqual(showAgentStrictCalls.length, 0);
+  assert.strictEqual(showAgentStrictCalls.length, 1, 'le formulaire interne strict doit s\'ouvrir directement');
+  assert.strictEqual(showAgentStrictCalls[0], 'pharmacist');
+  assert.strictEqual(registerRoleCalls.length, 0, "_registerRole (parcours mobile indépendant) ne doit jamais être appelé sur desktop");
+  // Le contexte d'établissement est posé, avec pharmacyType:'internal'.
+  assert.strictEqual(registrationContextCalls.length, 1);
+  assert.strictEqual(registrationContextCalls[0].establishmentId, 'EST-1');
+  assert.strictEqual(registrationContextCalls[0].pharmacyType, 'internal');
+  // Plus aucune trace du choix « indépendante » dans l'écran.
+  assert.doesNotMatch(getEl('register-form').innerHTML || '', /indépendante/i);
 });
 
-test("choosePharmacistRegisterType('internal') définit le contexte d'établissement ET affiche le formulaire strict", () => {
+test("choosePharmacistRegisterType('internal') définit le contexte d'établissement (pharmacyType:'internal') ET affiche le formulaire strict", () => {
   const { win, registrationContextCalls, showAgentStrictCalls } = setup();
   win.HospitalAuth.choosePharmacistRegisterType('internal', 'EST-1');
   assert.strictEqual(showAgentStrictCalls.length, 1);
   assert.strictEqual(showAgentStrictCalls[0], 'pharmacist');
   assert.strictEqual(registrationContextCalls.length, 1);
   assert.strictEqual(registrationContextCalls[0].establishmentId, 'EST-1');
+  assert.strictEqual(registrationContextCalls[0].pharmacyType, 'internal');
 });
 
-test("choosePharmacistRegisterType('independent') N'ENVOIE AUCUN contexte d'établissement (pas d'affiliation automatique)", () => {
-  const { win, registrationContextCalls, registerRoleCalls } = setup();
+// v2.9.34 : l'option « indépendante » est retirée du desktop. Même si un
+// gestionnaire onclick en cache appelait encore choosePharmacistRegisterType
+// avec 'independent', la fonction force désormais le parcours INTERNE —
+// jamais le parcours registre mobile, toujours avec un contexte
+// d'établissement tagué internal.
+test("choosePharmacistRegisterType('independent') est ignoré : force le parcours interne (jamais le registre mobile)", () => {
+  const { win, registrationContextCalls, registerRoleCalls, showAgentStrictCalls } = setup();
   win.HospitalAuth.choosePharmacistRegisterType('independent', 'EST-1');
-  assert.strictEqual(registerRoleCalls.length, 1);
-  assert.strictEqual(registerRoleCalls[0], 'pharmacist');
+  assert.strictEqual(registerRoleCalls.length, 0, "le parcours registre mobile ne doit jamais être déclenché depuis le desktop");
+  assert.strictEqual(showAgentStrictCalls.length, 1, 'le formulaire interne strict est ouvert quel que soit l\'argument');
+  assert.strictEqual(showAgentStrictCalls[0], 'pharmacist');
   assert.strictEqual(registrationContextCalls.length, 1);
-  assert.strictEqual(registrationContextCalls[0], null, "la pharmacie indépendante ne doit jamais recevoir de contexte d'établissement");
+  assert.strictEqual(registrationContextCalls[0].establishmentId, 'EST-1');
+  assert.strictEqual(registrationContextCalls[0].pharmacyType, 'internal');
 });
 
 test("toggleAgentRegister() pour lab/reception continue d'appeler _registerRole directement (non-régression)", () => {
@@ -126,4 +147,12 @@ test("js/auth.js : _showAgentStrictRegisterForm et _regPharmacistInternal sont e
   const src = fs.readFileSync(path.resolve(__dirname, '..', 'js/auth.js'), 'utf8');
   assert.match(src, /_regPharmacistInternal/);
   assert.match(src, /_showAgentStrictRegisterForm/);
+});
+
+// v2.9.34 : une pharmacie inscrite depuis le desktop est taguée
+// pharmacyType:'internal' et exige un établissement (source).
+test("js/auth.js : _regAgentStrict tague pharmacyType:'internal' et exige un établissement pour pharmacist", () => {
+  const src = fs.readFileSync(path.resolve(__dirname, '..', 'js/auth.js'), 'utf8');
+  assert.match(src, /account\.pharmacyType = 'internal';/);
+  assert.match(src, /role === 'pharmacist' && !ctx\?\.establishmentId/);
 });

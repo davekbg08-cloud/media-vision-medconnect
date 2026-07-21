@@ -1058,6 +1058,17 @@ const Auth = (() => {
       if (!EMAIL_RE.test(email)) { _err('reg-err', '❌ Adresse email invalide.'); return; }
       if (pass !== pass2) { _err('reg-err', '❌ Les mots de passe ne correspondent pas.'); return; }
       if (pass.length < 8) { _err('reg-err', '❌ Mot de passe trop court (min. 8 caractères).'); return; }
+      // v2.9.34 (règle IMPÉRATIVE pharmacie) : une pharmacie INTERNE doit
+      // obligatoirement être rattachée à un établissement actif. Ce flux
+      // strict n'est ouvert pour pharmacist que depuis l'espace d'un
+      // établissement (HospitalAuth.choosePharmacistRegisterType), donc
+      // ctx.establishmentId est toujours présent en usage normal — on le
+      // vérifie explicitement pour interdire toute pharmacie « interne »
+      // orpheline (sans établissement) créée par un chemin détourné.
+      if (role === 'pharmacist' && !ctx?.establishmentId) {
+        _err('reg-err', "❌ Une pharmacie interne doit être inscrite depuis l'espace d'un établissement (desktop hôpital).");
+        return;
+      }
       if (!_isOnline()) { _err('reg-err', '❌ Connexion internet requise pour créer ce compte.'); return; }
       if (!_hasFirebaseAuth() || !_hasFirebaseDB()) {
         _err('reg-err', '❌ Firebase indisponible. Vérifiez la connexion internet puis réessayez.');
@@ -1120,6 +1131,20 @@ const Auth = (() => {
         phone: phone || '', service: service || '',
         createdAt: ts, updatedAt: ts,
       };
+      // v2.9.34 (règle IMPÉRATIVE pharmacie) : une pharmacie inscrite
+      // depuis le desktop hôpital est TOUJOURS interne — rattachée à CET
+      // établissement, activable seulement via hospitalMembers. On tague
+      // le compte (pharmacyType:'internal' + establishmentId/hospitalId).
+      // Les règles Firestore rendent ce type IMMUABLE ensuite (seul
+      // l'admin plateforme peut le modifier) et réservent l'affiliation
+      // hospitalMembers aux pharmacies internes (pharmacistAffiliationAllowed).
+      if (role === 'pharmacist') {
+        account.pharmacyType = 'internal';
+        if (ctx?.establishmentId) {
+          account.establishmentId = ctx.establishmentId;
+          account.hospitalId = ctx.establishmentId;
+        }
+      }
       const regRequest = {
         requestId: DB.makeId('REG'),
         requesterUid: authUid, requesterName: fullName, requesterRole: role,
