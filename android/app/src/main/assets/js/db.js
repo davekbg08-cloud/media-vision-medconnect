@@ -1104,6 +1104,77 @@ const DB = (() => {
       (p.phone||'').includes(ql));
   }
 
+  /* Chantier v2.9.34 (P1) : recherche dans l'ANNUAIRE non clinique
+     (patient_directory) pour la réception et le laboratoire. Une fiche
+     patient créée sur un autre poste/établissement n'est PAS dans le
+     cache local ; l'ancienne recherche réception (js/hospital-reception.js
+     lookupPatient) ne savait résoudre qu'un numéro MC EXACT (lecture d'un
+     seul document mc_patients/{mc}), jamais un nom ou un téléphone. Cette
+     fonction interroge patient_directory — l'index non clinique alimenté
+     dans le même batch atomique que la fiche (buildPatientDirectoryEntry)
+     — et ne renvoie JAMAIS de contenu clinique (seulement identité +
+     rattachement administratif).
+
+     Isolation : la requête est TOUJOURS bornée à establishmentId (égalité)
+     — c'est la seule forme qu'autorise firestore.rules (lecture
+     patient_directory = belongsToSameEstablishment, qui résout d'abord
+     establishmentId). Le filtrage nom/téléphone se fait ensuite côté
+     client (Firestore n'a pas de recherche plein texte ; pas d'index
+     composite requis avec une seule égalité). Repli hors ligne : cache
+     local (searchPatients). */
+  async function searchPatientDirectory(q, establishmentId) {
+    const ql = String(q || '').trim().toLowerCase();
+    if (!ql) return [];
+
+    const matchesLocal = searchPatients(ql).map(p => ({
+      id: p.id, firstname: p.firstname || '', lastname: p.lastname || '',
+      phone: p.phone || '', dob: p.dob || p.birthdate || '', gender: p.gender || '',
+      establishmentId: p.establishmentId || p.hospital_id || '',
+      administrativeStatus: p.administrativeStatus || 'active', _source: 'local',
+    }));
+
+    if (!establishmentId || typeof firebaseDB === 'undefined' || !firebaseDB) {
+      return matchesLocal;
+    }
+
+    try {
+      const snap = await firebaseDB.collection('patient_directory')
+        .where('establishmentId', '==', establishmentId).get();
+      const cloud = [];
+      snap.forEach(doc => {
+        const d = doc.data() || {};
+        const hay = [
+          d.patientId || doc.id, d.firstname, d.lastname, d.phone,
+        ].map(v => String(v || '').toLowerCase());
+        // Correspondance sur l'un des champs identité (nom, prénom,
+        // téléphone, numéro MC). Le téléphone se compare sans casse mais
+        // le motif reste inclusif comme pour searchPatients.
+        if (hay.some(h => h.includes(ql))) {
+          cloud.push({
+            id: d.patientId || doc.id,
+            firstname: d.firstname || '', lastname: d.lastname || '',
+            phone: d.phone || '', dob: d.dob || '', gender: d.gender || '',
+            establishmentId: d.establishmentId || d.hospital_id || '',
+            administrativeStatus: d.administrativeStatus || 'active', _source: 'directory',
+          });
+        }
+      });
+      // Fusion : l'entrée locale (potentiellement plus fraîche) prime sur
+      // le doublon annuaire pour un même id.
+      const byId = new Map();
+      for (const c of cloud) byId.set(c.id, c);
+      for (const l of matchesLocal) byId.set(l.id, l); // le local écrase
+      return Array.from(byId.values());
+    } catch (e) {
+      if (e?.code === 'permission-denied') {
+        console.warn('[MedConnect] Recherche annuaire refusée (établissement) :', e?.message || e);
+        return matchesLocal;
+      }
+      console.warn('[MedConnect] Recherche annuaire patient :', e?.message || e);
+      return matchesLocal;
+    }
+  }
+
   /* ══════════════════════════════════════════════════
      COMPTES
   ══════════════════════════════════════════════════ */
@@ -1669,7 +1740,7 @@ const DB = (() => {
     pushCloud: _push, deleteCloud: _delete, roleCollection,
     getAccounts, saveAccounts, getUsers, saveUsers, upsertUserProfile,
     getRegistrationRequests, saveRegistrationRequests, createRegistrationRequest,
-    getPatients, savePatients, addPatient, addPatientAndConfirm, buildPatientRecord, buildPatientDirectoryEntry, addPatientAndConfirmAtomic, updatePatient, deletePatient, getPatientById, searchPatients,
+    getPatients, savePatients, addPatient, addPatientAndConfirm, buildPatientRecord, buildPatientDirectoryEntry, addPatientAndConfirmAtomic, updatePatient, deletePatient, getPatientById, searchPatients, searchPatientDirectory,
     accountExistsForPatient, getPatientAccessCode,
     getConsultations, addConsultation, getPatientConsultations, deleteConsultation,
     getPrescriptions, addPrescription, updatePrescription, updatePrescriptionAndConfirm, getPatientPrescriptions,
