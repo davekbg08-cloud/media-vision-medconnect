@@ -7,6 +7,16 @@ jour) et l'écran **Paramètres → À propos**.
 La source unique de la version en cours est `config/app-version.json` —
 ce fichier doit rester cohérent avec elle.
 
+## 2.9.36 — 2026-07-21
+
+Correctif ciblé : complétion médicale d'une fiche patient créée par une infirmière. Aucune nouvelle fonctionnalité, aucune nouvelle collection ; Pharmacie et Réception inchangées.
+
+### Correctif
+- **Complétion d'une fiche créée par une infirmière** : bug confirmé — quand un médecin réalisait la première consultation, l'ancien code appelait `DB.updatePatient()`, qui modifiait le cache local immédiatement (affichant « fiche complétée ») **puis** tentait de réécrire toute la fiche dans Firestore, alors que les règles interdisent au médecin de modifier `mc_patients`. Résultat : le médecin voyait « complétée » mais le serveur refusait l'écriture, les autres appareils affichaient encore « À compléter par le médecin », et des écritures `permission-denied` pouvaient s'accumuler dans la file de synchronisation. Corrigé par :
+  - une **fonction dédiée** `DB.completeNurseCreatedPatientAfterConsultation` qui effectue **uniquement** la transition `awaiting_doctor`/`pending` → `active`/`completed` par une **écriture partielle** (merge) confinée à `mc_patients`/`patients`, **après confirmation Firestore de la consultation**, et ne renseigne le cache local qu'après confirmation réelle — jamais de faux succès ;
+  - un **helper de règles** `doctorCanCompleteNurseCreatedPatient` : la seule exception au verrou `update` de `mc_patients`, strictement limitée aux champs de complétion, exigeant une consultation **réelle vérifiée** (existence, même patient, même établissement, appartenant au médecin) et une affiliation active — l'identité du patient, la traçabilité de l'infirmière (`created_by`/`nurse_uid`/`nurse_name`) et l'historique sont préservés ;
+  - une opération de complétion dédiée dans la file de synchronisation (`patient_medical_completion`) rejouée en écriture **partielle** ; un refus serveur est classé « bloqué » (jamais rejoué automatiquement).
+
 ## 2.9.35 — 2026-07-21
 
 Audit post-déploiement (intégrité des stocks, confidentialité, isolation, fiabilité, sécurité Android). Deux vrais problèmes corrigés ; les autres axes se sont révélés conformes ou relèvent de limites structurelles documentées (lecture publique de `mc_accounts` nécessaire au login pré-authentification, sans backend).

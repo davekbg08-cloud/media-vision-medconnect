@@ -1,8 +1,15 @@
 {
-  "version": "2.9.35",
-  "build": "2026.07.21.2",
+  "version": "2.9.36",
+  "build": "2026.07.21.3",
   "buildDate": "2026-07-21",
   "changelog": [
+    {
+      "version": "2.9.36",
+      "date": "2026-07-21",
+      "notes": [
+        "Fiche patient créée par une infirmière : lorsqu'un médecin réalise et confirme la première consultation, la fiche passe désormais correctement de « À compléter par le médecin » à « complétée » sur tous les appareils. Le médecin voyait auparavant « fiche complétée » alors que le serveur refusait la mise à jour et que les autres postes affichaient encore « À compléter » — corrigé par une transition dédiée, confirmée côté serveur avant tout affichage de succès, qui ne touche que le statut de complétion et préserve intégralement l'identité du patient, la traçabilité de l'infirmière et l'historique médical"
+      ]
+    },
     {
       "version": "2.9.35",
       "date": "2026-07-21",
