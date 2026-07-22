@@ -61,5 +61,11 @@ node_modules/
 .netlify/
 .vscode/
 npm-debug.log*
+
+# Tests E2E Playwright + cache ESLint (chantier D) — artefacts locaux/CI
+playwright-report/
+blob-report/
+test-results/
+.eslintcache
 firebase-debug.log*
 firestore-debug.log*

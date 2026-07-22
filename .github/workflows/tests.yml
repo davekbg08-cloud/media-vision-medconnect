@@ -38,13 +38,34 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # PARTIE O — ordre imposé : secrets → tests unitaires → règles
-      # Firestore, avant tout build.
+      # PARTIE O — ordre imposé : secrets → lint → tests unitaires →
+      # E2E navigateur → règles Firestore, avant tout build.
       - name: Scan de secrets
         run: npm run security:scan
 
+      # Filet statique (chantier D) : échoue uniquement sur les ERREURS
+      # ESLint (les warnings du code existant restent informatifs).
+      - name: Lint (ESLint)
+        run: npm run lint
+
       - name: Run tests
         run: npm test
+
+      # E2E « shell » (chantier D) : socle UI dans un vrai Chromium.
+      # Le navigateur n'est pas préinstallé sur le runner → on l'installe.
+      - name: Installer le navigateur Playwright
+        run: npx playwright install --with-deps chromium
+
+      - name: Tests E2E (Playwright)
+        run: npm run e2e
+
+      - name: Archiver le rapport E2E en cas d'échec
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
 
       - name: Set up JDK (émulateur Firestore)
         uses: actions/setup-java@v4

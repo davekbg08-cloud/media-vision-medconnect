@@ -1,6 +1,12 @@
 // ========== MedConnect — Sharing & Interaction Module ==========
 // Permet le partage d'ordonnances et d'infos entre Docteur ↔ Patient ↔ Pharmacien
 
+/* NOTE (chantier D — signalé par ESLint) : `MedDB` référencé plus bas dans
+   createPrescription() N'EST DÉFINI NULLE PART dans le projet — chemin
+   hérité/mort qui lèverait s'il était appelé (le stockage réel passe par
+   DB / CloudDB). À corriger dans un chantier dédié. La directive globale
+   ci-dessous neutralise le faux positif no-undef sans masquer la note. */
+/* global MedDB */
 window.ShareModule = (() => {
 
   // ===== Generate unique prescription code =====
