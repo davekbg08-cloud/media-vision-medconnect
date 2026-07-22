@@ -248,7 +248,7 @@ const HospitalPortal = (() => {
         </div>
         <div class="patient-row-actions">
           ${window.HospitalCapabilities?.can?.(Auth.getUser()?.role, 'create_consultation')
-            ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();HospitalPortal.openConsult('${p.id}')">🩺</button>` : ''}
+            ? `<button class="btn btn-ghost btn-sm" aria-label="Nouvelle consultation" title="Nouvelle consultation" onclick="event.stopPropagation();HospitalPortal.openConsult('${p.id}')">🩺</button>` : ''}
           <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();HospitalPortal.viewAccessCode('${p.id}')">🔑</button>
           <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();HospitalPortal.deletePatient('${p.id}')">🗑️</button>
         </div>
@@ -892,7 +892,7 @@ const HospitalPortal = (() => {
               <span class="record-doctor">👨‍⚕️ ${esc(rx.doctor)||'—'}</span>
               ${window.HospitalCapabilities?.can?.(Auth.getUser()?.role, 'prescribe')
                 ? `<button class="btn btn-ghost btn-xs" onclick="HospitalPortal.openPrescriptionTarget('${rx.pid}')">📤 Pharmacie</button>` : ''}
-              <button class="btn btn-ghost btn-xs" onclick="PatientPortal.printRx('${rx.pid}')">🖨️</button>
+              <button class="btn btn-ghost btn-xs" aria-label="Imprimer l'ordonnance" title="Imprimer l'ordonnance" onclick="PatientPortal.printRx('${rx.pid}')">🖨️</button>
             </div>
             <p><strong>Diagnostic :</strong> ${esc(rx.diagnosis || rx.diagnostic || '—')}</p>
             ${rx.establishmentName ? `<p>🏥 ${esc(rx.establishmentName)} · Matricule ${esc(rx.establishmentId || rx.hospital_id || '—')}</p>` : ''}

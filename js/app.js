@@ -390,21 +390,98 @@ const App = (() => {
     document.body.classList.remove('modal-open');
   }
 
-  function toast(msg, type = 'success') {
-    const c  = document.getElementById('toast-container');
+  /* ── TOASTS accessibles & priorisés (chantier A) ──
+     Rétrocompatible : la signature historique toast(msg, type) continue
+     de fonctionner à l'identique côté appelants. Ajouts :
+     - aria-live (assertive pour error/urgence, polite sinon) : le lecteur
+       d'écran annonce enfin le résultat d'une action médicale ;
+     - icône + durée selon la GRAVITÉ (une erreur reste plus longtemps ;
+       une « urgence » ne disparaît pas seule et exige un clic) ;
+     - empilement borné (au-delà de 4, le plus ancien est retiré) ;
+     - action rapide optionnelle (ex. « Accepter » un transfert) et bouton
+       de fermeture (indispensable pour les toasts persistants).
+     opts = { action:{label,run}, persist:bool, duration:ms } (tous facultatifs). */
+  const TOAST_MS   = { success: 3500, info: 4500, error: 6000, urgence: 0, warning: 5000 };
+  const TOAST_ICON = { success: '✅', info: 'ℹ️', error: '⛔', urgence: '🚨', warning: '⚠️' };
+
+  function dismissToast(el) {
+    if (!el || !el.isConnected) return;
+    el.classList.remove('show');
+    setTimeout(() => el.remove(), 320);
+  }
+
+  function toast(msg, type = 'success', opts = {}) {
+    const c = document.getElementById('toast-container');
+    if (!c) return;
+    // Empilement borné : on ne noie jamais l'écran (retire les plus anciens).
+    while (c.children.length >= 4) c.firstElementChild?.remove();
+
+    const isCritical = (type === 'error' || type === 'urgence');
     const el = document.createElement('div');
     el.className = `toast toast-${type}`;
-    el.textContent = msg;
+    el.setAttribute('role', isCritical ? 'alert' : 'status');
+    el.setAttribute('aria-live', isCritical ? 'assertive' : 'polite');
+
+    // Structure sûre : le message est posé via textContent (jamais d'HTML).
+    const ico = document.createElement('span');
+    ico.className = 'toast-ico'; ico.setAttribute('aria-hidden', 'true');
+    ico.textContent = TOAST_ICON[type] || '';
+    const body = document.createElement('span');
+    body.className = 'toast-msg'; body.textContent = msg;
+    el.appendChild(ico); el.appendChild(body);
+
+    // Action rapide optionnelle : { label:'Voir le patient', run:fn }.
+    if (opts.action && typeof opts.action.run === 'function') {
+      const a = document.createElement('button');
+      a.type = 'button'; a.className = 'toast-action'; a.textContent = opts.action.label || 'Ouvrir';
+      a.addEventListener('click', () => { try { opts.action.run(); } finally { dismissToast(el); } });
+      el.appendChild(a);
+    }
+    // Fermeture manuelle (obligatoire pour les toasts persistants).
+    const close = document.createElement('button');
+    close.type = 'button'; close.className = 'toast-close';
+    close.setAttribute('aria-label', 'Fermer la notification'); close.textContent = '✕';
+    close.addEventListener('click', () => dismissToast(el));
+    el.appendChild(close);
+
     c.appendChild(el);
     requestAnimationFrame(() => el.classList.add('show'));
-    setTimeout(() => { el.classList.remove('show'); setTimeout(() => el.remove(), 320); }, 3500);
+
+    // Durée : override explicite > persistance demandée > barème par gravité.
+    const ms = (typeof opts.duration === 'number') ? opts.duration
+             : (opts.persist ? 0 : (TOAST_MS[type] ?? 3500));
+    if (ms > 0) setTimeout(() => dismissToast(el), ms);
+    return el;
+  }
+
+  /* Bascule l'état « chargement » d'un bouton pour une écriture critique
+     (spinner + désactivation), sans casser button-feedback.js. Rétabli le
+     libellé et l'état à la fin. Usage : App.setBtnLoading(btn, true) … false. */
+  function setBtnLoading(btn, loading) {
+    if (!btn) return;
+    if (loading) {
+      if (btn.dataset.loading === '1') return;
+      btn.dataset.loading = '1';
+      btn.classList.add('btn-loading');
+      btn.setAttribute('aria-busy', 'true');
+      btn.disabled = true;
+    } else {
+      delete btn.dataset.loading;
+      btn.classList.remove('btn-loading');
+      btn.removeAttribute('aria-busy');
+      btn.disabled = false;
+    }
   }
 
   function closeMobileSidebar() { document.getElementById('sidebar')?.classList.remove('open'); }
 
   async function init() {
     I18n.init();
-    if (localStorage.getItem('mc_theme') === 'light') document.body.classList.add('light-theme');
+    // Thème : un choix explicite (mc_theme) prime ; sinon on suit la
+    // préférence système (prefers-color-scheme). Sombre reste le défaut.
+    const savedTheme = localStorage.getItem('mc_theme');
+    const prefersLight = window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches;
+    if (savedTheme === 'light' || (!savedTheme && prefersLight)) document.body.classList.add('light-theme');
 
     const lc = document.getElementById('lang-selector-container');
     if (lc) lc.innerHTML = I18n.renderSelector();
@@ -473,7 +550,7 @@ const App = (() => {
 
   return {
     afterLogin, buildNav, navigateTo, goHome, refresh, startExchangeSync,
-    toggleTheme, openModal, closeModal, toast, init,
+    toggleTheme, openModal, closeModal, toast, setBtnLoading, init,
     closeMobileSidebar, refreshIfCurrent,
   };
 })();

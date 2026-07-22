@@ -1,8 +1,18 @@
 {
-  "version": "2.9.37",
-  "build": "2026.07.22.1",
+  "version": "2.9.38",
+  "build": "2026.07.22.2",
   "buildDate": "2026-07-22",
   "changelog": [
+    {
+      "version": "2.9.38",
+      "date": "2026-07-22",
+      "notes": [
+        "Notifications (toasts) plus claires et plus sûres : une erreur reste affichée plus longtemps, une alerte urgente (ex. transfert entrant) reste visible jusqu'à ce que vous la fermiez et peut porter une action rapide (« Accepter »), les notifications sont désormais annoncées aux lecteurs d'écran, et l'écran n'est jamais noyé (au-delà de 4, la plus ancienne s'efface)",
+        "Boutons plus accessibles : cible tactile agrandie (plus faciles à toucher sur mobile), contour visible au clavier, état « chargement » pendant une écriture, et libellés lus à voix haute pour les boutons en icône seule (consultation, impression)",
+        "Confort visuel : l'application suit maintenant le thème clair/sombre de votre appareil par défaut (votre choix manuel reste prioritaire)",
+        "Renforcement interne : clarification que le type d'appareil (mobile/desktop) n'est jamais une garantie de sécurité à lui seul — l'autorisation repose toujours sur le rôle vérifié et l'abonnement (comportement inchangé, garde-fou de test ajouté)"
+      ]
+    },
     {
       "version": "2.9.37",
       "date": "2026-07-22",
