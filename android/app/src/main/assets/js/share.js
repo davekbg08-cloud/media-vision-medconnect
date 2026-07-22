@@ -1,12 +1,6 @@
 // ========== MedConnect — Sharing & Interaction Module ==========
 // Permet le partage d'ordonnances et d'infos entre Docteur ↔ Patient ↔ Pharmacien
 
-/* NOTE (chantier D — signalé par ESLint) : `MedDB` référencé plus bas dans
-   createPrescription() N'EST DÉFINI NULLE PART dans le projet — chemin
-   hérité/mort qui lèverait s'il était appelé (le stockage réel passe par
-   DB / CloudDB). À corriger dans un chantier dédié. La directive globale
-   ci-dessous neutralise le faux positif no-undef sans masquer la note. */
-/* global MedDB */
 window.ShareModule = (() => {
 
   // ===== Generate unique prescription code =====
@@ -17,36 +11,13 @@ window.ShareModule = (() => {
     return code;
   }
 
-  // ===== Doctor: Create shared prescription =====
-  async function createPrescription(patientId, consultationData) {
-    const patient = await MedDB.dbGet('patients', patientId);
-    if (!patient) return null;
-
-    const prescription = {
-      code: generateCode(),
-      patientId: patientId,
-      patientNom: `${patient.prenom} ${patient.nom}`,
-      patientTel: patient.telephone || '',
-      docteur: consultationData.docteur,
-      date: consultationData.date,
-      diagnostic: consultationData.diagnostic,
-      traitement: consultationData.traitement,
-      notes: consultationData.notes || '',
-      statut: 'active', // active, dispensée, expirée
-      dispensedAt: null,
-      dispensedBy: null,
-    };
-
-    // Store in consultations with code
-    consultationData.prescriptionCode = prescription.code;
-
-    // Store prescription in a dedicated area in localStorage (lightweight sharing)
-    const prescriptions = JSON.parse(localStorage.getItem('medconnect_prescriptions') || '[]');
-    prescriptions.push(prescription);
-    localStorage.setItem('medconnect_prescriptions', JSON.stringify(prescriptions));
-
-    return prescription;
-  }
+  // Correctif (chantier E, signalé par ESLint) : l'ancienne fonction
+  // createPrescription() a été RETIRÉE — code mort jamais appelé, qui
+  // référençait un objet `MedDB` inexistant (modèle de données hérité,
+  // champs prenom/nom/telephone d'une version antérieure). Le partage
+  // d'ordonnance réel passe par DB.addPrescription + Network.send-
+  // PrescriptionToPharmacy ; le sous-système « code d'ordonnance » qui
+  // suit ne lit qu'un store localStorage désormais jamais alimenté.
 
   // ===== Get all prescriptions =====
   function getAllPrescriptions() {
@@ -416,5 +387,5 @@ window.ShareModule = (() => {
     }
   }
 
-  return { createPrescription, getAllPrescriptions, findByCode, getPatientPrescriptions, dispensePrescription, printPrescription, getPharmacistLookupHTML, lookupPrescription, dispenseFromLookup, getPatientSharedHTML, sharePatient, copyCode, generateCode, toggleQRCodeDisplay, startQRScanner, stopQRScanner };
+  return { getAllPrescriptions, findByCode, getPatientPrescriptions, dispensePrescription, printPrescription, getPharmacistLookupHTML, lookupPrescription, dispenseFromLookup, getPatientSharedHTML, sharePatient, copyCode, generateCode, toggleQRCodeDisplay, startQRScanner, stopQRScanner };
 })();
