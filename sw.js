@@ -2,7 +2,7 @@
    MedConnect 2.0 — Service Worker
    Optimisation chargement / PWA
    ===================================================== */
-const CACHE = 'medconnect-v4.40';
+const CACHE = 'medconnect-v4.41';
 
 const ASSETS = [
   './', './index.html', './css/style.css', './css/establishments-balance.css',
@@ -34,6 +34,7 @@ const ASSETS = [
   // (chargés par index.html) manquaient aussi à cette liste.
   './js/cloud-db.js', './js/hospital-permissions.js', './js/hospital-capabilities.js', './js/hospital-auth.js', './js/hospital-i18n.js', './js/hospital-subscription.js',
   './js/medical-ai.js', './js/hospital-beds.js', './js/hospital-lab.js', './js/hospital-messages.js',
+  './js/hospital-reporting.js',
   './js/hospital-desktop-ui.js', './js/hospital-reception.js',
   './js/hospital-emergency.js', './js/hospital-maternity.js',
   './js/medical-record-desktop.js',

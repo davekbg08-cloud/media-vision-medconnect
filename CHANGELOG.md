@@ -7,6 +7,15 @@ jour) et l'écran **Paramètres → À propos**.
 La source unique de la version en cours est `config/app-version.json` —
 ce fichier doit rester cohérent avec elle.
 
+## 2.9.40 — 2026-07-22
+
+Chantier E — Reporting d'établissement. Nouvelle fonctionnalité additive, 100 % côté client, aucune nouvelle collection Firestore, aucun serveur.
+
+- **Page « Reporting »** (`js/hospital-reporting.js`, nouveau) sur le poste hôpital, **réservée à l'administration** (`admin` / `admin_hospital` — jamais aux rôles cliniques ou d'accueil ; garde revérifiée au rendu). Vue d'ensemble chiffrée de l'activité de l'établissement : **taux d'occupation des lits**, lits occupés/libres/maintenance, **patients hospitalisés**, files d'attente et **pré-admissions**, **urgences en cours**, **analyses de laboratoire** (en attente/terminées), **consultations du jour**, arrivées du jour.
+- Calculé **localement** à partir des données déjà lues (`CloudDB.listByHospital` — beds, admissions, labRequests, mc_consultations, emergencyCases), avec dégradation propre à 0 si une collection est absente.
+- **Export CSV** (téléchargement local, séparateur `;` + BOM UTF-8) et **impression / PDF** (fenêtre navigateur). N'expose que des **agrégats** — aucune donnée patient nominative. Les pharmacies (isolées) ne sont pas incluses.
+- Câblage : route `reporting` (`HospitalPermissions`), entrée de menu, renderer natif desktop, précache service worker.
+
 ## 2.9.39 — 2026-07-22
 
 Chantier B — performance : chargement à la demande. Additif, aucune rupture, mode hors ligne préservé.

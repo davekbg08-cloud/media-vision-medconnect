@@ -42,6 +42,9 @@ const HospitalPermissions = (() => {
     // ordonnances (lecture), urgences, maternité, messagerie.
     reception:     ['admin', 'admin_hospital', 'reception'],
     ai:            ['admin', 'admin_hospital', 'doctor'],
+    // Reporting d'établissement (chantier E) : agrégats d'activité,
+    // réservés à l'administration (jamais aux rôles cliniques/accueil).
+    reporting:     ['admin', 'admin_hospital'],
     subscription:  ['admin', 'admin_hospital'],
     // Messagerie interne à l'établissement (retour utilisateur : absente
     // du desktop hôpital, contrairement au mobile) — ouverte à tout le
@@ -86,6 +89,7 @@ const HospitalPermissions = (() => {
     if (canAccess(role, 'pharmacy'))      menu.push({ key:'pharmacy',      label:L('hd_pharmacy')      || 'Pharmacie',                icon:'💊' });
     if (canAccess(role, 'doctors'))       menu.push({ key:'doctors',       label:L('hd_doctors')       || 'Médecins affiliés',       icon:'👨‍⚕️' });
     if (canAccess(role, 'ai'))            menu.push({ key:'ai',            label:L('hd_ai')            || 'IA médicale',             icon:'🤖' });
+    if (canAccess(role, 'reporting'))     menu.push({ key:'reporting',     label:L('hd_reporting')     || 'Reporting',                icon:'📊' });
     if (canAccess(role, 'messages'))      menu.push({ key:'messages',      label:L('hd_messages')      || 'Messagerie',              icon:'📨' });
     if (canAccess(role, 'subscription'))  menu.push({ key:'subscription',  label:L('hd_subscription')  || 'Abonnement',              icon:'💳' });
     if (canAccess(role, 'settings'))      menu.push({ key:'settings',      label:L('hd_settings')      || 'Paramètres',              icon:'⚙️' });

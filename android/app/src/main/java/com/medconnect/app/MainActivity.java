@@ -28,7 +28,7 @@ import java.util.Arrays;
 
 public class MainActivity extends AppCompatActivity {
 
-    private static final String MEDCONNECT_PWA_URL = "https://davekbg08-cloud.github.io/media-vision-medconnect/?apk=v2.9.39";
+    private static final String MEDCONNECT_PWA_URL = "https://davekbg08-cloud.github.io/media-vision-medconnect/?apk=v2.9.40";
     private static final String TRUSTED_APK_URL_PREFIX = "https://davekbg08-cloud.github.io/media-vision-medconnect/downloads/";
     // v2.9.35 (audit sécurité Android) : seules les pages de CET origine
     // restent chargées dans le WebView de l'application (celui qui expose
