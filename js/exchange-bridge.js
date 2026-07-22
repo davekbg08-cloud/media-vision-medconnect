@@ -32,7 +32,25 @@ const ExchangeBridge = (() => {
 
   function hasFirebaseDB() { return typeof firebaseDB !== 'undefined' && !!firebaseDB; }
 
-  /* ── DÉTECTION DE LA PLATEFORME COURANTE ──────────── */
+  /* ── DÉTECTION DE LA PLATEFORME COURANTE ──────────────
+     CONTRAT DE SÉCURITÉ (chantier A) : sourceDevice est une valeur
+     DÉRIVÉE DU CLIENT (userAgent), donc falsifiable par nature. Rôles :
+       1. aiguillage d'UI (desktop hôpital vs mobile) et traçabilité ;
+       2. dans firestore.rules, UNIQUEMENT un signal de défense en
+          profondeur qui ASSOUPLIT la garde d'abonnement pour le mobile
+          (hospitalCanWriteFromDevice = abonnementOk || device != desktop
+          — la continuité des soins mobile ne doit jamais être coupée
+          pour une facture desktop impayée).
+     Ce que sourceDevice ne fait JAMAIS : accorder un accès que le rôle
+     ne donnerait pas déjà, ni servir de garde unique. Toute autorisation
+     réelle repose sur l'authentification + le rôle vérifié + l'abonnement
+     (jamais sur ce seul champ). La seule faille résiduelle — un desktop
+     qui usurpe sourceDevice:'mobile' pour contourner le blocage
+     d'abonnement — est une LIMITE CONNUE et documentée dans
+     firestore.rules ; la fermer exigerait un custom claim serveur
+     (request.auth.token.deviceType), impossible sans Cloud Function.
+     Un test verrouille cette forme sûre (le champ ne peut qu'assouplir,
+     jamais accorder) — voir tests/source-device-defense-in-depth. */
   let _cachedDevice = null;
   function currentSourceDevice() {
     // Figé au premier appel : la plateforme ne change pas en cours de

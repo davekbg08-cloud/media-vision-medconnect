@@ -7,6 +7,15 @@ jour) et l'écran **Paramètres → À propos**.
 La source unique de la version en cours est `config/app-version.json` —
 ce fichier doit rester cohérent avec elle.
 
+## 2.9.38 — 2026-07-22
+
+Chantier A — socle UI/UX + accessibilité + sécurité. Additif, rétrocompatible, aucune rupture de logique ni de règles Firestore.
+
+- **Toasts accessibles & priorisés** (`js/app.js`, `css/style.css`). `App.toast(msg, type)` reste identique côté appelants ; ajout d'un 3ᵉ argument `opts` facultatif. Annonce lecteur d'écran (`aria-live` assertive pour erreur/urgence, polite sinon), icône par type, durée selon la gravité (erreur plus longue, `urgence` persistante jusqu'à fermeture), empilement borné (max 4), action rapide optionnelle (ex. « Accepter » un transfert) et bouton de fermeture. Message toujours posé via `textContent` (aucune injection).
+- **Boutons — accessibilité & états** (`css/style.css`, `js/app.js`, `js/hospital.js`). `.btn` : cible tactile ≥ 44px, `:focus-visible`, `:disabled`, `.btn-loading` (spinner, respect de `prefers-reduced-motion`), variantes de rôle `.btn-danger`/`.btn-medical`/`.btn-admin` réutilisant les couleurs existantes. Helper `App.setBtnLoading(btn, bool)` (spinner + `aria-busy` + désactivation) compatible avec `button-feedback.js`. `aria-label`/`title` sur les boutons en icône seule (🩺 consultation, 🖨️ impression).
+- **Thème automatique** (`js/app.js`). À défaut de choix explicite (`mc_theme`), l'app suit `prefers-color-scheme` ; le choix manuel reste prioritaire. Sombre demeure le défaut.
+- **`sourceDevice` — contrat de sécurité explicite** (`js/exchange-bridge.js`). Documentation du fait que ce champ, dérivé du client, ne sert qu'à l'aiguillage d'UI et, dans les règles, qu'à *assouplir* la garde d'abonnement pour le mobile (continuité des soins) — jamais à accorder un accès ni comme garde unique. Comportement des règles **inchangé** ; un test verrouille la forme sûre de `hospitalCanWriteFromDevice` et la présence de la limite connue documentée.
+
 ## 2.9.37 — 2026-07-22
 
 Retours utilisateur sur le poste hôpital (desktop). Correctifs additifs, aucune nouvelle collection, aucune modification de la logique Pharmacie/Réception ni des règles Firestore.
