@@ -1,8 +1,16 @@
 {
-  "version": "2.9.39",
-  "build": "2026.07.22.3",
+  "version": "2.9.40",
+  "build": "2026.07.22.4",
   "buildDate": "2026-07-22",
   "changelog": [
+    {
+      "version": "2.9.40",
+      "date": "2026-07-22",
+      "notes": [
+        "Nouveau — Reporting d'établissement (réservé à l'administration) : une page « Reporting » sur le poste hôpital donne une vue d'ensemble chiffrée de l'activité (taux d'occupation des lits, patients hospitalisés, files d'attente et pré-admissions, urgences en cours, analyses de laboratoire, consultations du jour), calculée directement sur l'appareil à partir des données de l'établissement",
+        "Le reporting peut être exporté en CSV (tableur) ou imprimé / enregistré en PDF. Il ne contient que des chiffres agrégés, aucune donnée patient nominative ; les pharmacies (isolées) n'y figurent pas"
+      ]
+    },
     {
       "version": "2.9.39",
       "date": "2026-07-22",
