@@ -208,6 +208,26 @@ service cloud.firestore {
     function isEmergencyIntake(data) {
       return data.get('emergencyIntake', false) == true;
     }
+    // Durcissement SÛR (chantier C, option retenue) — sans lookup
+    // d'appartenance (hospitalMembers), pour ne JAMAIS risquer de bloquer
+    // une urgence pour un compte légitime dont le miroir d'affiliation
+    // serait absent. Pour UTILISER le contournement d'abonnement de l'intake
+    // d'urgence (isEmergencyIntake), le document doit être TRAÇABLE :
+    //   created_by == auth.uid → le créateur déclaré EST l'agent authentifié
+    //   (empêche d'attribuer une fiche d'urgence, créée en contournant
+    //   l'abonnement, à un autre agent que soi).
+    // À défaut, la création n'est pas refusée en bloc : elle retombe sur le
+    // chemin normal gaté par l'abonnement (hospitalCanWrite) — c'est le
+    // CONTOURNEMENT d'urgence, lui, qui exige cette traçabilité.
+    // Le payload légitime (js/hospital.js currentEstablishmentFields, posé
+    // par js/hospital-emergency.js saveIntake) satisfait déjà created_by.
+    // NB : bloquer les fiches SANS établissement (orphelines) n'est PAS
+    // faisable ici sans casser le cas légitime « médecin solo hors contexte
+    // hôpital » (voir mc-patients-create : création acceptée sans
+    // establishmentId) — volontairement laissé permissif.
+    function emergencyCreatorOk(data) {
+      return data.get('created_by', null) == request.auth.uid;
+    }
     // Utilisée pour consultations/prescriptions/labRequests/
     // labResults/appointments/messages/hospitalMembers : le mobile/PWA
     // reste autorisé à écrire même hôpital expiré (le soin courant ne
@@ -865,7 +885,7 @@ service cloud.firestore {
       // hospitalCanWrite, sans distinction de plateforme ici).
       allow create: if isAdmin() ||
         ((currentRoleIs('doctor') || currentRoleIs('nurse')) &&
-         (isEmergencyIntake(request.resource.data) ||
+         ((isEmergencyIntake(request.resource.data) && emergencyCreatorOk(request.resource.data)) ||
           hospitalCanWrite(resolveHospitalId(request.resource.data)))) ||
         // Correctif (section 4) : miroir exact de la clause ajoutée
         // ci-dessous sur /mc_patients (collection réellement lue) —
@@ -1548,7 +1568,7 @@ service cloud.firestore {
       // collection sœur /patients (ligne ~389).
       allow create: if isAdmin() ||
         ((currentRoleIs('doctor') || currentRoleIs('nurse')) &&
-         (isEmergencyIntake(request.resource.data) ||
+         ((isEmergencyIntake(request.resource.data) && emergencyCreatorOk(request.resource.data)) ||
           hospitalCanWrite(resolveHospitalId(request.resource.data)))) ||
         // Correctif (chantier sécurité, section 4) : bug confirmé — la
         // matrice client autorise déjà la réception à créer un patient
