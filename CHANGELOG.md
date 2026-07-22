@@ -7,6 +7,13 @@ jour) et l'écran **Paramètres → À propos**.
 La source unique de la version en cours est `config/app-version.json` —
 ce fichier doit rester cohérent avec elle.
 
+## 2.9.39 — 2026-07-22
+
+Chantier B — performance : chargement à la demande. Additif, aucune rupture, mode hors ligne préservé.
+
+- **Leaflet différé** (`js/lazy-loader.js` *(nouveau)*, `index.html`, `js/map.js`, `sw.js`). La bibliothèque de cartes (~150 Ko de JS + son CSS) n'est plus chargée au démarrage de l'application : elle l'est **à la première ouverture d'une carte**, via un petit chargeur `LazyLoader` (idempotent, cache de promesses, aucune conversion en modules ES). Les écrans sans carte se chargent donc plus vite (surtout mobile / réseau lent). Le **service worker précache toujours Leaflet** → la carte reste disponible hors ligne. Message honnête si la carte ne peut pas être chargée (tout premier accès hors ligne).
+- **Infrastructure réutilisable.** `LazyLoader.load(src, globalName)` / `loadCss(href)` servira aux prochains différés (modules desktop, IA…) dans un chantier ultérieur, avec la même prudence.
+
 ## 2.9.38 — 2026-07-22
 
 Chantier A — socle UI/UX + accessibilité + sécurité. Additif, rétrocompatible, aucune rupture de logique ni de règles Firestore.

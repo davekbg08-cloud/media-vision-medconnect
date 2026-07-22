@@ -14,8 +14,9 @@
   <meta name="apple-mobile-web-app-title" content="MedConnect">
   <link rel="apple-touch-icon" href="assets/icon.png">
 
-  <!-- Leaflet CSS -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <!-- Leaflet (CSS + JS) : chargé À LA DEMANDE par js/map.js via
+       LazyLoader (chantier B, perf) — plus au démarrage. Le service
+       worker le précache toujours → carte hors ligne préservée. -->
 
   <!-- App CSS -->
   <link rel="stylesheet" href="css/style.css">
@@ -98,7 +99,11 @@
   <div class="toast-container" id="toast-container" aria-live="polite"></div>
 
   <!-- ══════════════ SCRIPTS (ordre crucial) ══════════════ -->
-  <script defer src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- Leaflet n'est plus chargé ici : js/map.js le charge à la demande
+       via LazyLoader quand la carte est ouverte (chantier B, perf). -->
+
+  <!-- 0. Chargeur à la demande (doit précéder les modules qui l'utilisent) -->
+  <script defer src="js/lazy-loader.js"></script>
 
   <!-- 1. Config Firebase (remplir les valeurs dans ce fichier) -->
   <script defer src="js/firebase-config.js"></script>
