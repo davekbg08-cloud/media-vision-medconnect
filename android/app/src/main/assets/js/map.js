@@ -6,6 +6,37 @@ window.MapModule = (() => {
   let markers = [];
   const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
+  /* ── Chargement de Leaflet À LA DEMANDE (chantier B, perf) ──
+     Leaflet (JS + CSS, ~150 Ko) n'est plus chargé au démarrage de
+     l'app : il ne l'est qu'à la PREMIÈRE ouverture d'une carte, via
+     LazyLoader. Idempotent (une seule injection, promesse partagée).
+     Le service worker précache toujours ces URLs → carte hors ligne OK.
+     Toutes les fonctions qui utilisent `L` passent d'abord par
+     ensureLeaflet(). */
+  const LEAFLET_JS  = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+  const LEAFLET_CSS = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+  let _leafletPromise = null;
+  function ensureLeaflet() {
+    if (window.L) return Promise.resolve(window.L);
+    if (!_leafletPromise) {
+      const loader = window.LazyLoader;
+      if (!loader) return Promise.reject(new Error('LazyLoader indisponible'));
+      _leafletPromise = Promise.all([
+        loader.loadCss(LEAFLET_CSS),
+        loader.load(LEAFLET_JS, 'L'),
+      ]).then(() => window.L).catch(err => { _leafletPromise = null; throw err; });
+    }
+    return _leafletPromise;
+  }
+
+  /* Message honnête si Leaflet ne peut pas être chargé (ex. tout premier
+     accès à la carte en étant hors ligne, avant que le SW ne l'ait mis
+     en cache) — au lieu d'une carte vide silencieuse. */
+  function showMapLoadError() {
+    const c = document.getElementById('map-container');
+    if (c) c.innerHTML = '<p class="muted" style="padding:1rem;text-align:center">🗺️ Carte indisponible pour le moment — une connexion est requise au premier chargement.</p>';
+  }
+
   function initMap(options = {}) {
     const container = document.getElementById('map-container');
     if (!container) return;
@@ -55,6 +86,7 @@ window.MapModule = (() => {
   }
 
   async function searchNearby(type) {
+    try { await ensureLeaflet(); } catch { return showMapLoadError(); }
     if (!map) initMap();
     await new Promise(r => setTimeout(r, 300));
 
@@ -136,6 +168,7 @@ window.MapModule = (() => {
   }
 
   async function showRegisteredEstablishments() {
+    try { await ensureLeaflet(); } catch { return showMapLoadError(); }
     if (!map) initMap();
     await new Promise(r => setTimeout(r, 300));
     clearMarkers();
@@ -243,6 +276,7 @@ window.MapModule = (() => {
   }
 
   async function showVisiblePharmacies() {
+    try { await ensureLeaflet(); } catch { return showMapLoadError(); }
     if (!map) initMap({ locate: false });
     await new Promise(r => setTimeout(r, 300));
     clearMarkers();
@@ -337,7 +371,7 @@ window.MapModule = (() => {
         <div id="map-container" style="height:420px;border-radius:var(--radius-sm);overflow:hidden"></div>
       </div>
       <div id="map-results" style="margin-top:1rem"></div>`;
-    setTimeout(initMap, 50);
+    setTimeout(() => { ensureLeaflet().then(() => initMap()).catch(showMapLoadError); }, 50);
   }
 
   function renderPharmacyMap(main) {
@@ -355,8 +389,10 @@ window.MapModule = (() => {
       </div>
       <div id="map-results" style="margin-top:1rem"></div>`;
     setTimeout(() => {
-      initMap({ locate: false });
-      showVisiblePharmacies();
+      ensureLeaflet().then(() => {
+        initMap({ locate: false });
+        showVisiblePharmacies();
+      }).catch(showMapLoadError);
     }, 50);
   }
 

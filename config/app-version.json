@@ -1,8 +1,16 @@
 {
-  "version": "2.9.38",
-  "build": "2026.07.22.2",
+  "version": "2.9.39",
+  "build": "2026.07.22.3",
   "buildDate": "2026-07-22",
   "changelog": [
+    {
+      "version": "2.9.39",
+      "date": "2026-07-22",
+      "notes": [
+        "Démarrage plus rapide : la bibliothèque de cartes (~150 Ko) n'est plus chargée à l'ouverture de l'application, mais seulement au moment où vous ouvrez réellement une carte. Les écrans qui n'utilisent pas la carte se chargent donc plus vite, en particulier sur mobile et connexion lente",
+        "La carte reste disponible hors ligne : elle est toujours mise en cache en arrière-plan par l'application"
+      ]
+    },
     {
       "version": "2.9.38",
       "date": "2026-07-22",
