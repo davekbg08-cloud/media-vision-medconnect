@@ -640,6 +640,27 @@ service cloud.firestore {
       );
     }
 
+    /* Chantier v2.9.41 — un patient authentifié peut lire SA PROPRE fiche.
+       Cause corrigée : la fiche patient (mc_patients/{id}) est créée par le
+       personnel de l'hôpital et ne porte AUCUN champ liant le patient (ni
+       uid, ni patientAuthUid — cf. ownsPatientData, jamais renseignés par
+       le client). Après une déconnexion (qui purge le cache local) le
+       patient ne pouvait donc plus jamais relire ses données depuis son
+       téléphone : ownsPatientData restait faux et aucune lecture cloud
+       n'était possible. Le compte patient, lui, vit à
+       mc_accounts/PAT_{ficheId} (lecture publique) et porte authUid = l'uid
+       Firebase réel du patient (posé à la création du PIN, js/auth.js
+       _createPatientFirebaseAuth). On autorise donc la lecture de la fiche
+       au titulaire authentifié de CE compte précis — le ficheId (clé du
+       document) détermine de façon déterministe le compte à vérifier :
+       aucune autre fiche, aucune exposition publique (la fiche reste
+       illisible sans authentification correspondant à ce compte). */
+    function patientOwnsOwnFicheAccount(ficheId) {
+      return signedIn() &&
+        exists(/databases/$(database)/documents/mc_accounts/$('PAT_' + ficheId)) &&
+        get(/databases/$(database)/documents/mc_accounts/$('PAT_' + ficheId)).data.get('authUid', null) == request.auth.uid;
+    }
+
     function doctorCanRead(data) {
       return currentRoleIs('doctor') && (
         data.get('created_by', null) == request.auth.uid ||
@@ -1555,7 +1576,11 @@ service cloud.firestore {
       // membre de l'établissement CRÉATEUR de la fiche y accède SANS
       // consentement (mc_consents ne sert qu'aux accès externes).
       allow read: if canReadMedicalData(resource.data) ||
-        belongsToSameEstablishment(resource.data);
+        belongsToSameEstablishment(resource.data) ||
+        // Chantier v2.9.41 : le patient authentifié lit SA propre fiche
+        // (titulaire du compte mc_accounts/PAT_{docId}). Branche AJOUTÉE en
+        // OR — n'élargit jamais l'accès du personnel, ne retire rien.
+        patientOwnsOwnFicheAccount(docId);
       // Correctif (trouvé en répondant à une question client, jamais
       // testé à la création jusqu'ici) : cette collection, pourtant
       // canonique (lue par _doPatient/_createPatientPin pour retrouver

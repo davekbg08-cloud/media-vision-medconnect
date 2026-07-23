@@ -36,9 +36,25 @@ const Auth = (() => {
         'mc_admissions', 'mc_appointments', 'mc_lab_results',
         'mc_vaccinations', 'mc_messages', 'mc_medicines', 'mc_sales',
         'mc_emergency_cases', 'mc_maternity_cases',
-        'mc_cloud_outbox',
       ];
       MEDICAL_KEYS.forEach(k => { try { localStorage.removeItem(k); } catch (_) {} });
+
+      // Outbox — chantier v2.9.41 : NE JAMAIS la détruire tant qu'elle
+      // contient des opérations NON CONFIRMÉES. Avant ce correctif,
+      // 'mc_cloud_outbox' faisait partie des clés purgées ci-dessus : si le
+      // flushOutbox() en tête de logout() échouait (hors-ligne), une fiche
+      // patient encore en file était PERDUE définitivement — une des causes
+      // possibles du symptôme « la fiche disparaît » signalé. On ne vide
+      // donc l'outbox QUE lorsqu'elle est vide (tout a été confirmé au
+      // flush). Compromis assumé sur un poste partagé : des écritures en
+      // attente (données médicales) peuvent subsister jusqu'à leur envoi —
+      // mais leur rejeu exige de toute façon une ré-authentification, et
+      // perdre une fiche est pire que retarder sa synchronisation. En cas
+      // de doute (lecture du compteur impossible), on PRÉSERVE l'outbox.
+      try {
+        const pending = window.DB?.outboxCount?.() ?? 1;
+        if (pending === 0) localStorage.removeItem('mc_cloud_outbox');
+      } catch (_) { /* on préserve l'outbox par sécurité */ }
     } catch (e) { console.warn('[MedConnect] purge cache :', e?.message || e); }
 
     sessionStorage.clear();
@@ -614,6 +630,31 @@ const Auth = (() => {
     }
   }
 
+  /* ── Rehydratation de la fiche patient après authentification ──
+     Chantier v2.9.41 — relit mc_patients/{id} UNE FOIS le patient
+     authentifié (il est alors reconnu propriétaire par les règles, cf.
+     la branche « patient propriétaire » de firestore.rules) et fusionne
+     la fiche dans le cache local vidé au logout, pour que le patient
+     revoie ses données. Best-effort : renvoie la fiche si lue, sinon null
+     — jamais bloquant (une lecture refusée/hors-ligne n'empêche pas la
+     connexion, déjà validée par le PIN). */
+  async function _hydratePatientRecordAfterAuth(id) {
+    if (!_hasFirebaseDB()) return null;
+    try {
+      const snap = await firebaseDB.collection('mc_patients').doc(id).get();
+      if (!snap.exists) return null;
+      const data = snap.data();
+      const patients = DB.getPatients();
+      const idx = patients.findIndex(p => p.id === id);
+      if (idx === -1) patients.push(data); else patients[idx] = { ...patients[idx], ...data };
+      DB.savePatients(patients);
+      return data;
+    } catch (e) {
+      console.warn('[MedConnect] Relecture fiche patient après authentification impossible :', e);
+      return null;
+    }
+  }
+
   /* ── ACTIONS CONNEXION ────────────────────────────── */
   async function _doPatient() {
     const id  = (document.getElementById('lp-id')?.value  || '').trim().toUpperCase();
@@ -623,20 +664,15 @@ const Auth = (() => {
     if (pin.length < 4) { _err('auth-err', '❌ PIN trop court — minimum 4 chiffres.'); return; }
     await _syncBeforeAuth('connexion patient');
 
-    let patient = DB.getPatientById(id);
-    if (!patient) {
-      const cloudPatient = _hasFirebaseDB() ? await (async () => {
-        try { const doc = await firebaseDB.collection('mc_patients').doc(id).get(); return doc.exists ? doc.data() : null; }
-        catch (e) { console.warn('[MedConnect] Recherche fiche patient cloud impossible :', e); return null; }
-      })() : null;
-      if (cloudPatient) {
-        const patients = DB.getPatients();
-        if (!patients.find(p => p.id === id)) { patients.push(cloudPatient); DB.savePatients(patients); }
-        patient = cloudPatient;
-      }
-    }
-    if (!patient) { _err('auth-err', '❌ Numéro de fiche introuvable. Contactez votre médecin.'); return; }
-
+    // Chantier v2.9.41 — la connexion patient ne dépend PLUS de la présence
+    // de la fiche dans le cache local, ni d'une lecture cloud PRÉ-auth : les
+    // règles par-document de mc_patients refusent toute lecture tant que le
+    // patient n'est pas authentifié. C'était la cause du blocage « Numéro
+    // de fiche introuvable » depuis le téléphone du patient (fiche créée
+    // sur le poste de l'hôpital, jamais en cache ici) et après une
+    // déconnexion (qui purge le cache). On authentifie via le COMPTE
+    // (mc_accounts, lecture publique) + le PIN (Firebase Auth), PUIS on
+    // relit la fiche en tant que propriétaire (_hydratePatientRecordAfterAuth).
     let existing = _findPatientAccount(id) || _mergeAccountLocally(await _fetchAccountByDocId(`PAT_${id}`));
     if (!existing) {
       _err('auth-err', '⚠️ Aucun compte trouvé pour cette fiche, ni localement ni dans le cloud.<br>Si c’est votre tout premier accès, utilisez “Premier accès : créer mon PIN”.');
@@ -682,6 +718,10 @@ const Auth = (() => {
       return;
     }
 
+    // Fiche relue en tant que propriétaire authentifié — repeuple le cache
+    // local (vidé au logout) pour que le patient revoie ses données.
+    await _hydratePatientRecordAfterAuth(id);
+
     localStorage.setItem('mc_my_patient_id', id);
     _save(existing); _launch(existing);
   }
@@ -695,8 +735,16 @@ const Auth = (() => {
     if (pin.length < 6) { _err('auth-err', '❌ PIN trop court — minimum 6 chiffres.'); return; }
     if (!accessCode) { _err('auth-err', "❌ Code d'accès requis — donné par l'hôpital à la création de votre fiche. Contactez votre médecin si vous ne l'avez pas."); return; }
     await _syncBeforeAuth('premier accès patient');
+    // Chantier v2.9.41 — plus de blocage sur le cache local : la fiche est
+    // créée sur le poste de l'hôpital et n'est jamais en cache sur le
+    // téléphone du patient (d'où l'ancien « Numéro de fiche introuvable »
+    // systématique). La VALIDITÉ du numéro de fiche ET du code d'accès est
+    // vérifiée CÔTÉ SERVEUR par la règle patientFirstAccessOk
+    // (mc_accounts.create, firestore.rules) : une fiche inexistante ou un
+    // code faux fait rejeter la création plus bas (criticalOk == false). On
+    // lit la fiche localement UNIQUEMENT pour préremplir le nom si elle est
+    // déjà là ; sinon on la relira après authentification.
     const patient = DB.getPatientById(id);
-    if (!patient) { _err('auth-err', '❌ Numéro de fiche introuvable. Contactez votre médecin.'); return; }
     const accounts = DB.getAccounts();
     const existing = _findPatientAccount(id);
     if (existing) {
@@ -716,7 +764,7 @@ const Auth = (() => {
     // toute façon bloquée pour cette fiche une fois le compte créé
     // (!exists sur mc_accounts), donc le code redevient inutilisable.
     const email = _syntheticPatientEmail(id);
-    const baseAcc = { uid:`PAT_${id}`, username:id, role:'patient', status:'approved', name:`${patient.firstname} ${patient.lastname}`, patient_id:id, email, firstAccessCode: accessCode, created_at:new Date().toISOString() };
+    const baseAcc = { uid:`PAT_${id}`, username:id, role:'patient', status:'approved', name: patient ? `${patient.firstname} ${patient.lastname}` : id, patient_id:id, email, firstAccessCode: accessCode, created_at:new Date().toISOString() };
     const acc = await _createPatientFirebaseAuth(email, _toFirebasePassword(pin), baseAcc);
     if (!acc.authUid) {
       // Correctif (revue de sécurité) : sans authUid, ce compte n'a
@@ -749,9 +797,19 @@ const Auth = (() => {
       return;
     }
     accounts.push(acc); DB.saveAccounts(accounts);
+    // Fiche relue en tant que propriétaire (le compte vient d'être créé et
+    // authentifié) : repeuple le cache local et corrige le nom du compte si
+    // on ne l'avait pas avant la création (fiche absente du cache local).
+    const fiche = await _hydratePatientRecordAfterAuth(id);
+    if (fiche && !patient && (fiche.firstname || fiche.lastname)) {
+      acc.name = `${fiche.firstname || ''} ${fiche.lastname || ''}`.trim() || acc.name;
+      const i = accounts.findIndex(a => a.uid === acc.uid);
+      if (i !== -1) { accounts[i] = acc; DB.saveAccounts(accounts); }
+    }
     localStorage.setItem('mc_my_patient_id', id);
     _save(acc); _launch(acc);
-    App.toast(`✅ Bienvenue ${patient.firstname} ! PIN créé.`);
+    const welcomeName = patient?.firstname || fiche?.firstname || '';
+    App.toast(`✅ Bienvenue${welcomeName ? ' ' + welcomeName : ''} ! PIN créé.`);
   }
 
   async function _doProfessional(role, numId, passId, launcher = _launch) {

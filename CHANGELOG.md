@@ -7,6 +7,19 @@ jour) et l'écran **Paramètres → À propos**.
 La source unique de la version en cours est `config/app-version.json` —
 ce fichier doit rester cohérent avec elle.
 
+## 2.9.41 — 2026-07-23
+
+Correctif majeur — les fiches patient qui « disparaissaient ». Chantier de récupération cloud des fiches, additif, sans régression (isolation par établissement vérifiée à l'émulateur).
+
+**Cause racine (confirmée à l'émulateur).** Le seul chemin de lecture cloud des patients était un listener sur la collection `mc_patients` **entière**, que les règles par-document rejettent en bloc pour tout rôle clinique — jamais pour l'admin (dont la condition est constante). Le cache local n'était donc **jamais rechargé** depuis Firestore ; après la purge du cache médical à la déconnexion (`js/auth.js`), la liste des patients restait vide alors que les fiches étaient bien enregistrées dans le cloud. Côté patient, la fiche ne porte aucun champ le liant (ni `uid`, ni `patientAuthUid`) : après déconnexion, il ne pouvait plus relire ses données ni se connecter depuis son propre téléphone (« Numéro de fiche introuvable »).
+
+- **`js/db.js` — rechargement par requêtes filtrées.** `setupUserScopedListeners` monte désormais, pour les rôles membres (`doctor`, `nurse`, `reception`, `lab`, `admin_hospital`), des listeners `mc_patients` **filtrés** : `where('establishmentId','==', <chaque établissement du membre>)` **et** `where('created_by','==', uid)` — seules formes acceptées par les règles (mesuré à l'émulateur : la requête établissement passe, la collection entière et l'autre-établissement restent refusées). Le listener global est **conservé** pour l'admin (accepté) et documenté. La liste patients se recharge donc après chaque connexion et changement d'établissement.
+- **`js/auth.js` — outbox préservée à la déconnexion.** `mc_cloud_outbox` n'est plus purgé avec les caches médicaux : une fiche créée hors ligne, encore en file, n'est plus détruite au logout — elle n'est retirée que lorsque l'outbox est **vide** (tout confirmé).
+- **`js/auth.js` — connexion patient sans dépendance au cache local.** `_doPatient` et `_createPatientPin` authentifient d'abord via le compte (`mc_accounts`, lecture publique) + le PIN (Firebase Auth), sans exiger la fiche en cache local ; la validité du numéro et du code d'accès reste vérifiée côté serveur. La fiche est **relue en tant que propriétaire** après authentification (`_hydratePatientRecordAfterAuth`) pour repeupler le cache.
+- **`firestore.rules` — branche additive « patient propriétaire ».** Un patient authentifié titulaire du compte `mc_accounts/PAT_{id}` (authUid correspondant) peut lire **sa propre** fiche `mc_patients/{id}`. Ajout en OR — n'élargit rien pour le personnel, isolation inchangée. Validé à l'émulateur (propriétaire accepté ; autre patient, compte absent et usurpation refusés ; non-régression des requêtes médecin et de l'isolation inter-établissements).
+
+Tests : `tests/patient-cloud-recovery-v2941.test.js` (10 points) + `tests/firestore-rules/patient-own-fiche-read.rules.test.js` (règles, dont non-régression). Version **2.9.41** (build 2026.07.23.1, versionCode 42, cache `medconnect-v4.42`). Miroirs Android resynchronisés octet pour octet. **Déploiement : règles Firestore + Hosting.**
+
 ## 2.9.40 — 2026-07-22
 
 Chantier E — Reporting d'établissement. Nouvelle fonctionnalité additive, 100 % côté client, aucune nouvelle collection Firestore, aucun serveur.
