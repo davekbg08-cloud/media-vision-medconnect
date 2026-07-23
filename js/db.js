@@ -674,8 +674,15 @@ const DB = (() => {
   /* ── LISTENERS TEMPS RÉEL ────────────────────────── */
   function setupRealtimeListeners() {
     if (!firebaseReady || !firebaseDB) return;
-    // Patients — FUSION : un dossier créé localement dont la montée
-    // cloud a échoué ne doit pas disparaître au snapshot suivant.
+    // Patients — listener GLOBAL : ACCEPTÉ uniquement pour l'admin
+    // plateforme (isAdmin() est constant, indépendant du document, donc la
+    // requête collection-entière passe). Pour tout rôle clinique il est
+    // REJETÉ en bloc par les règles par-document (mesuré à l'émulateur,
+    // v2.9.41) et n'a donc AUCUN effet — ces rôles rechargent désormais
+    // leurs patients via des requêtes FILTRÉES dans setupUserScopedListeners
+    // (établissement + created_by). On le conserve tel quel pour ne rien
+    // régresser côté admin. FUSION : un dossier créé localement dont la
+    // montée cloud a échoué ne disparaît pas au snapshot suivant.
     listen(firebaseDB.collection('mc_patients'), snap => {
       if (!snap.empty) mergeStore('mc_patients', 'id', snap.docs.map(d => d.data()));
     });
@@ -759,7 +766,7 @@ const DB = (() => {
               // (ex. l'écran Ordonnances quand mc_prescriptions arrive),
               // pour un affichage immédiat sans rechargement manuel.
               try {
-                const section = { mc_prescriptions: 'prescriptions', mc_messages: 'messages' }[key];
+                const section = { mc_prescriptions: 'prescriptions', mc_messages: 'messages', mc_patients: 'patients' }[key];
                 if (section && window.App?.refreshIfCurrent) window.App.refreshIfCurrent(section);
               } catch (_) {}
               // Chantier v2.9.34 (P0 messagerie) : badges de non-lus
@@ -807,6 +814,53 @@ const DB = (() => {
     if (user.role === 'doctor' || user.role === 'nurse') {
       scoped(firebaseDB.collection('mc_prescriptions'),
         'mc_prescriptions', 'pid');
+    }
+
+    // ── Patients — rechargement après connexion (chantier v2.9.41) ──
+    // Bug confirmé (photos utilisateur : une fiche visible côté médecin
+    // « disparaît » après déconnexion/reconnexion, et « numéro de fiche
+    // introuvable » côté patient) : le SEUL chemin cloud pour les patients
+    // était le listener GLOBAL collection-entière de setupRealtimeListeners
+    // — que les règles PAR-DOCUMENT de mc_patients (canReadMedicalData ||
+    // belongsToSameEstablishment) REJETTENT en bloc pour tout rôle clinique
+    // (jamais pour l'admin, dont isAdmin() est constant : ce listener
+    // global lui reste utile et n'est pas retiré). Conséquence : le cache
+    // mc_patients n'était JAMAIS rechargé depuis Firestore ; après la purge
+    // du cache médical au logout (js/auth.js), la liste patients restait
+    // vide alors que les fiches étaient bien dans le cloud.
+    //
+    // Correctif = requêtes FILTRÉES, seule forme que les règles acceptent
+    // (mesuré à l'émulateur, spike v2.9.41) :
+    //   • where('establishmentId','==', <chaque établissement du membre>)
+    //     ACCEPTÉE : le filtre garantit resolveHospitalId(resource.data)==id,
+    //     donc isHospitalMember(id) (belongsToSameEstablishment) est évalué
+    //     une seule fois sur un document fixe → toutes les fiches renvoyées
+    //     sont lisibles. L'isolation reste intacte (autre établissement =
+    //     REJETÉ, vérifié).
+    //   • where('created_by','==', uid) ACCEPTÉE (doctorCanRead) : filet
+    //     pour une fiche sans establishmentId (ex. praticien solo).
+    //   (where('doctorUids','array-contains',uid) est REJETÉ → non utilisé.)
+    //
+    // Rôles concernés : ceux qui lisent mc_patients par appartenance
+    // (clinique + accueil/labo + admin_hospital). Le pharmacien est isolé ;
+    // le patient lit sa propre fiche par un autre chemin (login, v2.9.41).
+    // mergeStore fusionne par 'id' sans doublon et ne retire jamais une
+    // entrée locale absente du snapshot (une fiche créée hors-ligne encore
+    // en file n'est pas effacée).
+    if (['doctor', 'nurse', 'reception', 'lab', 'admin_hospital'].includes(user.role)) {
+      scoped(firebaseDB.collection('mc_patients').where('created_by', '==', user.uid),
+        'mc_patients', 'id');
+      const estIds = new Set();
+      try {
+        const cur = window.HospitalsRegistry?.getCurrentHospital?.();
+        if (cur?.establishmentId) estIds.add(cur.establishmentId);
+        (window.HospitalsRegistry?.getDoctorHospitals?.(user.uid) || [])
+          .forEach(h => { if (h?.establishmentId) estIds.add(h.establishmentId); });
+      } catch (_) { /* registre indisponible : le filet created_by suffit */ }
+      estIds.forEach(estId => {
+        scoped(firebaseDB.collection('mc_patients').where('establishmentId', '==', estId),
+          'mc_patients', 'id');
+      });
     }
   }
 

@@ -1,8 +1,17 @@
 {
-  "version": "2.9.40",
-  "build": "2026.07.22.4",
-  "buildDate": "2026-07-22",
+  "version": "2.9.41",
+  "build": "2026.07.23.1",
+  "buildDate": "2026-07-23",
   "changelog": [
+    {
+      "version": "2.9.41",
+      "date": "2026-07-23",
+      "notes": [
+        "Correctif important — dossiers patients qui semblaient « disparaître » : une fiche patient créée à l'hôpital restait bien enregistrée dans le cloud, mais n'était plus rechargée après une déconnexion — elle paraissait disparaître côté médecin, et le patient obtenait « Numéro de fiche introuvable » depuis son téléphone. Les fiches se rechargent désormais correctement après chaque connexion (celles de l'établissement et celles créées par le professionnel), et un patient connecté peut de nouveau relire sa propre fiche",
+        "Connexion patient : un patient peut désormais se connecter et créer son PIN depuis son propre téléphone même si sa fiche a été créée sur le poste de l'hôpital — la validité du numéro de fiche et du code d'accès est vérifiée côté serveur, sans dépendre de ce qui est déjà présent sur l'appareil. Ses données réapparaissent après reconnexion",
+        "Fiabilité : une fiche créée hors ligne, encore en attente d'envoi au serveur, n'est plus effacée à la déconnexion — elle est conservée jusqu'à sa synchronisation"
+      ]
+    },
     {
       "version": "2.9.40",
       "date": "2026-07-22",
