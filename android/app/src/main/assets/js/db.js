@@ -66,7 +66,7 @@ const DB = (() => {
      décider d'un droit d'accès (les règles Firestore restent la seule
      barrière). */
   function _opContext(meta = {}) {
-    let userUid = null, userRole = null, hospitalId = null;
+    let userUid = null, userRole = null, hospitalId = null, ownerAuthUid = null;
     try {
       const u = window.Auth?.getUser?.();
       userUid = u?.uid || null; userRole = u?.role || null;
@@ -74,10 +74,20 @@ const DB = (() => {
     try {
       hospitalId = window.HospitalsRegistry?.getCurrentHospital?.()?.establishmentId || null;
     } catch (_) {}
+    // Chantier 5 (v2.9.42) — identité PROPRIÉTAIRE réelle (uid Firebase Auth)
+    // au moment de la mise en file, pour un rejeu multi-utilisateur sûr :
+    // sur un poste partagé, une opération n'est rejouée que par SON auteur
+    // (voir flushOutbox), jamais sous le compte d'un agent suivant.
+    try {
+      ownerAuthUid = (typeof firebaseAuth !== 'undefined' && firebaseAuth && firebaseAuth.currentUser)
+        ? firebaseAuth.currentUser.uid : null;
+    } catch (_) {}
     return {
       module: meta.module || null,
       operationType: meta.operationType || null,
       userUid, userRole, hospitalId,
+      ownerAuthUid,        // uid Firebase réel (rejeu sûr)
+      accountUid: userUid, // uid applicatif (PAT_{id} pour un patient)
       groupId: meta.groupId || null,
     };
   }
@@ -226,8 +236,28 @@ const DB = (() => {
     if (!q.length) return;
     _flushing = true;
     const now = Date.now();
+    // Chantier 5 (v2.9.42) — identité Firebase courante, pour ne rejouer que
+    // les opérations DE l'utilisateur connecté.
+    let currentAuthUid = null;
+    try {
+      currentAuthUid = (typeof firebaseAuth !== 'undefined' && firebaseAuth && firebaseAuth.currentUser)
+        ? firebaseAuth.currentUser.uid : null;
+    } catch (_) {}
     const remaining = [];
     for (const e of q) {
+      // QUARANTAINE multi-utilisateur : une entrée dont l'ownerAuthUid est
+      // connu mais ne correspond PAS à l'utilisateur Firebase courant n'est
+      // JAMAIS rejouée sous son compte, ni supprimée — elle est conservée
+      // telle quelle et repartira quand SON auteur se reconnectera (poste
+      // partagé). Sans utilisateur connecté, on ne peut prouver aucune
+      // identité : les entrées à propriétaire connu attendent aussi. Les
+      // entrées legacy (sans ownerAuthUid, créées avant ce correctif) ne
+      // sont pas quarantainées ici — leur rejeu reste gardé côté serveur par
+      // les règles Firestore (un rejeu sous le mauvais compte est rejeté).
+      if (e.ownerAuthUid && e.ownerAuthUid !== currentAuthUid) {
+        remaining.push(e);
+        continue;
+      }
       if (e.classification === 'blocked') {
         remaining.push(e); // jamais rejouée automatiquement — action manuelle requise
         continue;
@@ -307,28 +337,37 @@ const DB = (() => {
     return true;
   }
 
-  /* Export JSON de diagnostic — les valeurs dont la clé évoque un
-     secret (mot de passe, PIN, jeton…) sont expurgées récursivement :
-     le fichier peut être partagé pour diagnostic sans fuiter un
-     identifiant. */
-  const SENSITIVE_KEY_RE = /(password|passwd|pwd|pin|secret|token|apikey|api_key|credential|authkey|auth_key|privatekey|private_key)/i;
-  function _redactSecrets(value) {
-    if (Array.isArray(value)) return value.map(_redactSecrets);
-    if (value && typeof value === 'object') {
-      const out = {};
-      for (const [k, v] of Object.entries(value)) {
-        out[k] = SENSITIVE_KEY_RE.test(k) ? '[expurgé]' : _redactSecrets(v);
-      }
-      return out;
-    }
-    return value;
+  /* Chantier 5 (v2.9.42) — l'export de diagnostic ne contient QUE des
+     métadonnées non médicales : jamais le payload (data/writes), donc jamais
+     de nom, numéro MC, téléphone, diagnostic, médicaments, résultat, message,
+     PIN ni code d'accès. Le nom des collections concernées est conservé (ex.
+     mc_consultations) — utile au diagnostic, jamais sensible. */
+  function _outboxEntryMeta(e) {
+    const collections = e.type === 'batch'
+      ? [...new Set((e.writes || []).map(w => w[0]))]
+      : (e.collection ? [e.collection] : []);
+    return {
+      operationId: e.operationId || null,
+      type: e.type || null,
+      operationType: e.operationType || null,
+      module: e.module || null,
+      collections,
+      docCount: e.type === 'batch' ? (e.writes || []).length : 1,
+      classification: e.classification || null,
+      attempts: e.attempts || 0,
+      queuedAt: e.queuedAt || null,
+      updatedAt: e.updatedAt || null,
+      nextRetryAt: e.nextRetryAt || null,
+      lastErrorCode: e.lastErrorCode || null,
+      // JAMAIS : data, writes, ownerAuthUid, noms, MC, téléphone, contenu clinique.
+    };
   }
   function exportOutboxDiagnostic() {
     return JSON.stringify({
       exportedAt: new Date().toISOString(),
       appVersion: (typeof window !== 'undefined' && window.VersionManager?.getCurrent?.()?.version) || null,
       summary: getOutboxSummary(),
-      entries: _redactSecrets(_outboxLoad()),
+      entries: _outboxLoad().map(_outboxEntryMeta),
     }, null, 2);
   }
 
