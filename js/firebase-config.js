@@ -39,6 +39,11 @@ function resolveAppCheckSiteKey() {
 let firebaseDB   = null;
 let firebaseAuth = null;
 let firebaseReady = false;
+// Chantiers 6/7 (v2.9.42) : client Cloud Functions. Reste null tant que le SDK
+// firebase-functions n'est pas chargé OU que les fonctions ne sont pas
+// déployées — le code appelant (js/auth.js) détecte cette absence et conserve
+// son chemin actuel en repli (aucune casse avant déploiement).
+let firebaseFunctions = null;
 
 // Séparée de initFirebase() pour rester testable isolément et pour que
 // l'absence du SDK App Check (firebase.appCheck) — normale tant que le
@@ -83,6 +88,12 @@ function initFirebase() {
     activateAppCheck();
     firebaseDB    = firebase.firestore();
     firebaseAuth  = firebase.auth ? firebase.auth() : null;
+    // Client Cloud Functions dans la MÊME région que les fonctions déployées
+    // (voir functions/index.js REGION). Inerte si le SDK n'est pas chargé.
+    try {
+      firebaseFunctions = firebase.functions ? firebase.functions('europe-west1') : null;
+      if (firebaseFunctions) window.firebaseFunctions = firebaseFunctions;
+    } catch (_) { firebaseFunctions = null; }
     firebaseReady = true;
 
     // Activer la persistance hors-ligne

@@ -29,6 +29,11 @@
   <script defer src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
   <script defer src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
   <script defer src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+  <!-- Cloud Functions (chantiers 6/7, v2.9.42) : authLookup /
+       claimPatientAccount / setVerifiedClientType. Le client détecte
+       l'absence de firebase.functions et conserve son chemin actuel en repli
+       tant que les fonctions ne sont pas déployées (voir js/auth.js). -->
+  <script defer src="https://www.gstatic.com/firebasejs/9.22.0/firebase-functions-compat.js"></script>
   <!-- App Check : chargé même sans clé configurée, activation inerte tant
        que APP_CHECK_SITE_KEY (js/firebase-config.js) est vide — voir
        docs/FIREBASE_APP_CHECK_SETUP.md -->

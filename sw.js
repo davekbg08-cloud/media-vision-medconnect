@@ -15,6 +15,7 @@ const ASSETS = [
   'https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js',
   'https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js',
   'https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js',
+  'https://www.gstatic.com/firebasejs/9.22.0/firebase-functions-compat.js',
   'https://www.gstatic.com/firebasejs/9.22.0/firebase-app-check-compat.js',
   './js/firebase-config.js',
   './js/lazy-loader.js',
