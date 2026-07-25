@@ -45,6 +45,12 @@ const DB = (() => {
   const BLOCKED_ERROR_CODES = new Set([
     'permission-denied', 'invalid-argument', 'failed-precondition',
     'not-found', 'already-exists', 'unauthenticated', 'out-of-range',
+    // Chantier 10 (v2.9.42) : une vente hors ligne rejouée à la
+    // reconnexion dont le stock RÉEL relu est insuffisant ne peut pas être
+    // honorée telle quelle — elle est QUARANTAINÉE (jamais un écrasement
+    // silencieux du stock, jamais un rejeu en boucle) pour décision manuelle
+    // du pharmacien (réappro, annulation, remboursement).
+    'insufficient_stock',
   ]);
   function classifyOutboxError(err) {
     const code = err?.code || null;
@@ -147,6 +153,10 @@ const DB = (() => {
       type: 'batch',
       writes: writes.map(([col, id, data]) => [col, String(id), data]),
       merge: meta.merge === true, // v2.9.36 : rejeu en écriture partielle (complétion médicale)
+      // Chantier 10 (v2.9.42) : plan de réconciliation transactionnelle d'une
+      // vente pharmacie hors ligne (rejeu par relecture + décrément relatif du
+      // stock réel, idempotent) — absent pour tout autre lot.
+      ...(meta.saleReconcile ? { saleReconcile: meta.saleReconcile } : {}),
       ..._opContext(meta),
       groupId,
       operationType: meta.operationType || 'batch',
@@ -184,7 +194,44 @@ const DB = (() => {
 
   /** Rejoue UNE entrée (set ou batch). Retourne true si l'écriture a
       abouti. Ne modifie pas la file — l'appelant s'en charge. */
+  /* Chantier 10 (v2.9.42) — rejeu RÉCONCILIÉ d'une vente pharmacie mise en
+     file hors ligne. Au lieu d'écraser le stock avec la valeur absolue
+     calculée sur un cache périmé (survente possible), on relit le stock RÉEL
+     dans une transaction et on le décrémente relativement (mid, qty). La
+     vente est refusée ENTIÈREMENT (throw insufficient_stock → entrée
+     quarantainée « blocked ») si un article n'a plus assez de stock au moment
+     du rejeu. Idempotent : si la vente est déjà posée (sid présent), on ne
+     re-décrémente rien. */
+  async function _replaySaleReconcile(rec) {
+    await firebaseDB.runTransaction(async (tx) => {
+      const saleRef = firebaseDB.collection('mc_sales').doc(String(rec.saleId));
+      const saleSnap = await tx.get(saleRef); // lecture AVANT toute écriture
+      const medRefs = (rec.decrements || []).map(d => firebaseDB.collection('mc_medicines').doc(String(d.mid)));
+      const medSnaps = [];
+      for (const r of medRefs) medSnaps.push(await tx.get(r));
+      if (saleSnap.exists) return; // déjà appliquée : rejeu idempotent, aucun re-décrément
+      const updates = [];
+      medSnaps.forEach((snap, i) => {
+        const d = rec.decrements[i];
+        const available = snap.exists ? (parseInt(snap.data().stock) || 0) : 0;
+        if (!snap.exists || d.qty <= 0 || d.qty > available) {
+          const err = new Error('insufficient_stock'); err.code = 'insufficient_stock';
+          throw err;
+        }
+        updates.push({ ref: medRefs[i], newStock: available - d.qty });
+      });
+      updates.forEach(u => tx.update(u.ref, { stock: String(u.newStock), updatedAt: new Date().toISOString() }));
+      tx.set(saleRef, rec.saleDoc);
+    });
+    return true;
+  }
+
   async function _replayEntry(e) {
+    // Vente pharmacie hors ligne : réconciliation transactionnelle du stock
+    // réel (jamais un écrasement absolu) quand une transaction est disponible.
+    if (e.saleReconcile && typeof firebaseDB.runTransaction === 'function') {
+      return _replaySaleReconcile(e.saleReconcile);
+    }
     if (e.type === 'batch') {
       if (typeof firebaseDB.batch !== 'function') throw new Error('batch non supporté');
       const batch = firebaseDB.batch();
@@ -1937,13 +1984,22 @@ const DB = (() => {
          errorCode }                                           → rejet réel.
        { ok:false, confirmed:false, failed:true, busy:true }   → double appel.
 
-     LIMITE HONNÊTE : la garantie stricte anti-survente concurrente ne
-     s'applique qu'aux ventes réalisées EN LIGNE. Hors ligne, le SDK ne
-     permet pas de transaction : le lot optimiste (basé sur le stock
-     local) est mis en file et rejoué à la reconnexion — une survente
-     concurrente ne peut alors être totalement exclue. En pharmacie, le
-     poste de caisse est normalement connecté ; ce repli reste préférable
-     à un blocage de la vente. */
+     Chantier 10 (v2.9.42) — RÉCONCILIATION du rejeu hors ligne : la vente
+     hors ligne est mise en file avec un plan de réconciliation (mid, qty).
+     À la reconnexion, elle n'est PLUS rejouée par un lot qui écrase le stock
+     avec une valeur absolue périmée : _replaySaleReconcile relit le stock
+     RÉEL dans une transaction et le décrémente relativement, refuse
+     entièrement (quarantaine « blocked » pour décision manuelle) si le stock
+     est devenu insuffisant, et est idempotente (aucun re-décrément si la
+     vente est déjà posée). La survente ne peut donc plus survenir même au
+     rejeu d'une vente hors ligne — au prix d'un refus explicite plutôt que
+     d'un stock faux. Le pré-contrôle local reste un simple feedback rapide.
+
+     LIMITE HONNÊTE RÉSIDUELLE : hors ligne, l'interface confirme « en file »
+     (jamais « vendu »), et la vente ne devient réelle qu'après ce rejeu
+     réconcilié — une vente hors ligne peut donc être refusée A POSTERIORI si
+     le stock a été épuisé entre-temps par un autre poste. C'est le
+     comportement correct (pas de survente), signalé au pharmacien. */
   let _sellingPharmacy = false;
   async function addSaleAtomic(items, total, patientId) {
     if (_sellingPharmacy) return { ok: false, confirmed: false, failed: true, busy: true };
@@ -1981,7 +2037,18 @@ const DB = (() => {
         ['mc_sales', s.sid, s],
         ...updatedMeds.map(m => ['mc_medicines', m.mid, m]),
       ];
-      const opMeta = { operationType: 'pharmacy_sale', module: 'pharmacy', groupId: s.sid };
+      // Chantier 10 (v2.9.42) — plan de RÉCONCILIATION porté par l'entrée
+      // outbox : à la reconnexion, la vente hors ligne n'est PLUS rejouée
+      // comme un batch qui écrase le stock avec une valeur absolue périmée
+      // (survente possible). _replayEntry rejoue à la place une TRANSACTION
+      // qui relit le stock réel et le décrémente relativement (mid, qty),
+      // refuse si insuffisant, et est idempotente (ne re-décrémente pas si la
+      // vente est déjà posée). Voir _replaySaleReconcile.
+      const decrements = list.map(it => ({ mid: String(it.mid), qty: parseInt(it.qty) || 0 }));
+      const opMeta = {
+        operationType: 'pharmacy_sale', module: 'pharmacy', groupId: s.sid,
+        saleReconcile: { saleId: s.sid, saleDoc: s, decrements },
+      };
 
       const confirmLocally = () => {
         const salesList = getSales();
