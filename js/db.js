@@ -897,7 +897,10 @@ const DB = (() => {
     const p = { ...data, id: generatePatientId(data.country_code), firstAccessCode: generateFirstAccessCode(), created_at: new Date().toISOString() };
     list.push(p); store('mc_patients', list);
     _push('mc_patients', p.id, p);
-    _push('patients', p.id, p);
+    // Chantier 1 (v2.9.42) — collections canoniques : la collection miroir
+    // 'patients' n'est plus alimentée (jamais relue nulle part ; mc_patients
+    // est l'unique source). Réduit de moitié les écritures patient et
+    // supprime tout risque de seconde source contradictoire.
     _push('medical_records', p.id, {
       recordId: p.id,
       patientId: p.id,
@@ -1066,9 +1069,10 @@ const DB = (() => {
         createdAt: p.created_at,
         updatedAt: p.created_at,
       };
+      // Chantier 1 (v2.9.42) — miroir 'patients' retiré du batch (source
+      // canonique unique = mc_patients ; jamais relue).
       const writes = [
         ['mc_patients', p.id, p],
-        ['patients', p.id, p],
         ['medical_records', p.id, medicalRecord],
         ['patient_directory', p.id, buildPatientDirectoryEntry(p)],
       ];
@@ -1133,7 +1137,7 @@ const DB = (() => {
       list[idx] = { ...list[idx], ...data, id, updated_at: new Date().toISOString() };
       store('mc_patients', list);
       _push('mc_patients', id, list[idx]);
-      _push('patients', id, list[idx]);
+      // Chantier 1 (v2.9.42) — miroir 'patients' retiré (canonique unique).
       _push('medical_records', id, {
         recordId: id,
         patientId: id,
@@ -1395,9 +1399,9 @@ const DB = (() => {
         completed_by_consultation_id: cid || '',
         updated_at: nowIso,
       };
+      // Chantier 1 (v2.9.42) — miroir 'patients' retiré (canonique unique).
       const writes = [
         ['mc_patients', patientId, patch],
-        ['patients', patientId, patch],
       ];
       const opMeta = {
         operationType: 'patient_medical_completion', module: 'patients',
@@ -1487,7 +1491,8 @@ const DB = (() => {
       sourceDevice: data.sourceDevice || window.ExchangeBridge?.currentSourceDevice?.() || 'mobile' };
     list.push(p); store('mc_prescriptions', list);
     _push('mc_prescriptions', p.pid, p);
-    _push('prescriptions', p.pid, p);
+    // Chantier 1 (v2.9.42) — miroir 'prescriptions' retiré (mc_prescriptions
+    // est l'unique source ; jamais relue).
     return p;
   }
 
@@ -1506,7 +1511,6 @@ const DB = (() => {
     const updated = _updatePrescriptionLocal(pid, data);
     if (!updated) return null;
     _push('mc_prescriptions', pid, updated);
-    _push('prescriptions', pid, updated);
     return updated;
   }
 
@@ -1525,7 +1529,6 @@ const DB = (() => {
     const wasOffline = !firebaseReady || !firebaseDB;
     const ok = await pushAndReport([
       ['mc_prescriptions', pid, updated],
-      ['prescriptions', pid, updated],
     ]);
     return { ok, reason: ok ? null : (wasOffline ? 'offline' : 'denied') };
   }
@@ -1577,7 +1580,7 @@ const DB = (() => {
       sourceDevice: data.sourceDevice || window.ExchangeBridge?.currentSourceDevice?.() || 'mobile' };
     list.push(a); store('mc_appointments', list);
     _push('mc_appointments', a.aid, a);
-    _push('appointments', a.aid, a);
+    // Chantier 1 (v2.9.42) — miroir 'appointments' retiré (canonique unique).
     return a;
   }
 
@@ -1588,7 +1591,6 @@ const DB = (() => {
       list[idx] = { ...list[idx], ...data, aid };
       store('mc_appointments', list);
       _push('mc_appointments', aid, list[idx]);
-      _push('appointments', aid, list[idx]);
     }
   }
 
