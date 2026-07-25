@@ -1263,9 +1263,22 @@ const DB = (() => {
      COMPTES
   ══════════════════════════════════════════════════ */
   function getAccounts()    { return load('mc_accounts'); }
+  // Chantier 8 (v2.9.42) — écritures CIBLÉES : ne republier vers Firestore
+  // que les documents réellement NOUVEAUX ou MODIFIÉS depuis le dernier état
+  // local, jamais toute la liste. Avant, saveAccounts(liste) poussait CHAQUE
+  // compte à chaque appel — écritures ×N (coût) et tentatives d'écriture sur
+  // les documents d'AUTRES utilisateurs simplement présents dans le cache,
+  // systématiquement rejetées puis rejouées en boucle par l'outbox. Le diff
+  // par uid supprime les deux problèmes sans changer aucun appelant.
+  function _changedByKey(prevList, nextList, keyField) {
+    const prev = new Map((prevList || []).map(x => [x[keyField], JSON.stringify(x)]));
+    return (nextList || []).filter(x => x && x[keyField] != null && prev.get(x[keyField]) !== JSON.stringify(x));
+  }
+
   function saveAccounts(l)  {
+    const changed = _changedByKey(load('mc_accounts'), l, 'uid');
     store('mc_accounts', l);
-    l.forEach(a => {
+    changed.forEach(a => {
       _push('mc_accounts', a.uid, a);
       mirrorAccountProfile(a);
     });
@@ -1273,8 +1286,11 @@ const DB = (() => {
 
   function getUsers()       { return load('users'); }
   function saveUsers(l)     {
+    // Chantier 8 (v2.9.42) — écritures ciblées (voir saveAccounts) :
+    // seuls les profils nouveaux/modifiés sont republiés.
+    const changed = _changedByKey(load('users'), l, 'uid');
     store('users', l);
-    l.forEach(u => {
+    changed.forEach(u => {
       _push('users', u.uid, u);
       const collection = roleCollection(u.role);
       if (collection) _push(collection, u.uid, u);
@@ -1283,8 +1299,11 @@ const DB = (() => {
 
   function getRegistrationRequests() { return load('registration_requests'); }
   function saveRegistrationRequests(l) {
+    // Chantier 8 (v2.9.42) — écritures ciblées : seules les demandes
+    // nouvelles/modifiées sont republiées.
+    const changed = _changedByKey(load('registration_requests'), l, 'requestId');
     store('registration_requests', l);
-    l.forEach(r => _push('registration_requests', r.requestId, r));
+    changed.forEach(r => _push('registration_requests', r.requestId, r));
   }
 
   function createRegistrationRequest(account) {
