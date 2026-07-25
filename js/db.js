@@ -1217,14 +1217,26 @@ const DB = (() => {
 
   function getPatientById(id) { return getPatients().find(p => p.id === id) || null; }
 
-  function searchPatients(q) {
-    if (!q) return getPatients();
+  /* Chantier 9 (v2.9.42) — borne d'établissement OPTIONNELLE. Le cache
+     local ne supprime jamais une fiche (mergeStore fusionne sans effacer) :
+     une fiche d'un établissement quitté peut donc y subsister. Un appelant
+     clinique qui passe un ou plusieurs establishmentId garantit qu'aucune
+     fiche hors de SES établissements ne remonte à la recherche, même si elle
+     traîne encore en cache. Sans ce paramètre : comportement inchangé (les
+     appelants existants filtrent déjà par created_by/établissement à leur
+     niveau, et les règles Firestore bornent toujours la lecture cloud). */
+  function searchPatients(q, establishmentIds = null) {
+    const scope = Array.isArray(establishmentIds)
+      ? new Set(establishmentIds.filter(Boolean))
+      : (establishmentIds ? new Set([establishmentIds]) : null);
+    const inScope = (p) => !scope || scope.has(p.establishmentId) || scope.has(p.hospital_id);
+    if (!q) return getPatients().filter(inScope);
     const ql = q.toLowerCase();
-    return getPatients().filter(p =>
+    return getPatients().filter(p => inScope(p) && (
       (p.id||'').toLowerCase().includes(ql) ||
       (p.firstname||'').toLowerCase().includes(ql) ||
       (p.lastname||'').toLowerCase().includes(ql) ||
-      (p.phone||'').includes(ql));
+      (p.phone||'').includes(ql)));
   }
 
   /* Chantier v2.9.34 (P1) : recherche dans l'ANNUAIRE non clinique
