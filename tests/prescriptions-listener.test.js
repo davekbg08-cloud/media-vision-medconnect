@@ -20,14 +20,15 @@ function scopedBody() {
   return m[1];
 }
 
-test('un listener mc_prescriptions existe pour médecin et infirmier', () => {
+test('les ordonnances des médecins/infirmiers sont rechargées (scope établissement/created_by, chantier 1)', () => {
   const body = scopedBody();
-  assert.match(body, /user\.role === 'doctor' \|\| user\.role === 'nurse'/,
-    'la branche doctor/nurse doit être présente');
-  // La branche doctor/nurse doit écouter mc_prescriptions.
-  const nurseBranch = body.slice(body.indexOf("'doctor' || user.role === 'nurse'"));
-  assert.match(nurseBranch, /mc_prescriptions/,
-    'la branche doctor/nurse doit écouter mc_prescriptions');
+  // Chantier 1 (v2.9.42) : le listener mc_prescriptions collection-entière
+  // (rejeté par les règles) est remplacé par le rechargement query-safe des
+  // rôles membres, qui inclut mc_prescriptions dans CLINICAL_COLLECTIONS.
+  assert.match(body, /\['doctor', 'nurse', 'reception', 'lab', 'admin_hospital'\]\.includes\(user\.role\)/,
+    'la branche des rôles membres (dont doctor/nurse) doit être présente');
+  assert.match(body, /'mc_prescriptions'/,
+    'mc_prescriptions doit faire partie des collections rechargées');
 });
 
 test('le pharmacien garde son listener mc_prescriptions filtré par pharmacyUid', () => {

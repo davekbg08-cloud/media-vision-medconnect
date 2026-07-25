@@ -748,6 +748,20 @@ const DB = (() => {
       identifiant : un snapshot filtré ne doit jamais écraser le
       reste de la liste locale. */
   let _userListenersUnsubs = [];
+  // Chantier 1 (v2.9.42) — établissements ACTIFS dont l'utilisateur est
+  // membre, pour scoper les requêtes cliniques. Le filet created_by couvre
+  // le cas où le registre n'est pas encore chargé.
+  function _memberEstablishmentIds(uid) {
+    const estIds = new Set();
+    try {
+      const cur = window.HospitalsRegistry?.getCurrentHospital?.();
+      if (cur?.establishmentId) estIds.add(cur.establishmentId);
+      (window.HospitalsRegistry?.getDoctorHospitals?.(uid) || [])
+        .forEach(h => { if (h?.establishmentId) estIds.add(h.establishmentId); });
+    } catch (_) { /* registre indisponible : le filet created_by suffit */ }
+    return estIds;
+  }
+
   function setupUserScopedListeners() {
     if (!firebaseReady || !firebaseDB) return;
     const user = window.Auth?.getUser?.();
@@ -804,63 +818,57 @@ const DB = (() => {
         'mc_prescriptions', 'pid');
     }
 
-    // Médecin / infirmier : la règle Firestore les autorise à LIRE la
-    // collection mc_prescriptions (currentRoleIs doctor/nurse). Sans ce
-    // listener, leurs ordonnances n'étaient jamais rechargées après la
-    // connexion — cause du bug « ordonnances qui n'apparaissent pas ».
-    // Le filtrage métier (contexte établissement, consentement patient)
-    // reste appliqué à l'affichage par prescriptionsForContext ; ici on
-    // se contente de ramener les données en local par fusion.
-    if (user.role === 'doctor' || user.role === 'nurse') {
-      scoped(firebaseDB.collection('mc_prescriptions'),
-        'mc_prescriptions', 'pid');
+    /* ── Rechargement query-safe de TOUT l'historique clinique ──
+       Chantier 1 (v2.9.42) — généralise le correctif patients de v2.9.41 à
+       l'ensemble des collections cliniques. Le SEUL chemin cloud était des
+       listeners collection-entière (setupRealtimeListeners) que les règles
+       PAR-DOCUMENT rejettent en bloc pour tout rôle non-admin : l'historique
+       (consultations, ordonnances, analyses, rendez-vous, admissions,
+       urgences, maternité, vaccinations) ne revenait donc jamais après une
+       reconnexion ou sur un appareil neuf. On remplace par des requêtes
+       FILTRÉES, seules formes acceptées par les règles (mesuré à
+       l'émulateur), en deux familles :
+         • MEMBRE d'établissement : where('establishmentId','==', <chaque
+           établissement actif>) + filet where('created_by','==', uid).
+           Le filtre garantit resolveHospitalId==id → l'appartenance est
+           évaluée une fois sur un doc fixe ; l'isolation inter-établissements
+           reste intacte. subscriptionReadGateOk s'applique (desktop
+           abonnement expiré → requête refusée, conforme au produit).
+         • PATIENT : where('patient_id','==', <son numéro de fiche>). La
+           règle canReadMedicalData reconnaît le titulaire du compte
+           PAT_{patient_id} (patientOwnsClinicalDoc) — jamais coupé par
+           l'abonnement (le patient n'est pas doctor/nurse). C'est ce qui
+           fait réapparaître SON historique complet sur un appareil neuf.
+       mergeStore fusionne par identifiant sans jamais écraser une écriture
+       locale non encore confirmée. Le pharmacien garde son écoute ciblée
+       (pharmacyUid ci-dessus) ; mc_messages reste par destinataire. */
+    const CLINICAL_COLLECTIONS = [
+      ['mc_consultations', 'cid'], ['mc_prescriptions', 'pid'],
+      ['mc_appointments', 'aid'],  ['mc_lab_results', 'lid'],
+      ['mc_admissions', 'aid'],    ['mc_emergency_cases', 'eid'],
+      ['mc_maternity_cases', 'mid'], ['mc_vaccinations', 'vid'],
+    ];
+
+    if (['doctor', 'nurse', 'reception', 'lab', 'admin_hospital'].includes(user.role)) {
+      const estIds = _memberEstablishmentIds(user.uid);
+      // Fiches patient (identifiant canonique 'id') — v2.9.41, conservé.
+      scoped(firebaseDB.collection('mc_patients').where('created_by', '==', user.uid), 'mc_patients', 'id');
+      estIds.forEach(id => scoped(firebaseDB.collection('mc_patients').where('establishmentId', '==', id), 'mc_patients', 'id'));
+      // Reste de l'historique clinique de l'établissement.
+      CLINICAL_COLLECTIONS.forEach(([coll, idField]) => {
+        scoped(firebaseDB.collection(coll).where('created_by', '==', user.uid), coll, idField);
+        estIds.forEach(id => scoped(firebaseDB.collection(coll).where('establishmentId', '==', id), coll, idField));
+      });
     }
 
-    // ── Patients — rechargement après connexion (chantier v2.9.41) ──
-    // Bug confirmé (photos utilisateur : une fiche visible côté médecin
-    // « disparaît » après déconnexion/reconnexion, et « numéro de fiche
-    // introuvable » côté patient) : le SEUL chemin cloud pour les patients
-    // était le listener GLOBAL collection-entière de setupRealtimeListeners
-    // — que les règles PAR-DOCUMENT de mc_patients (canReadMedicalData ||
-    // belongsToSameEstablishment) REJETTENT en bloc pour tout rôle clinique
-    // (jamais pour l'admin, dont isAdmin() est constant : ce listener
-    // global lui reste utile et n'est pas retiré). Conséquence : le cache
-    // mc_patients n'était JAMAIS rechargé depuis Firestore ; après la purge
-    // du cache médical au logout (js/auth.js), la liste patients restait
-    // vide alors que les fiches étaient bien dans le cloud.
-    //
-    // Correctif = requêtes FILTRÉES, seule forme que les règles acceptent
-    // (mesuré à l'émulateur, spike v2.9.41) :
-    //   • where('establishmentId','==', <chaque établissement du membre>)
-    //     ACCEPTÉE : le filtre garantit resolveHospitalId(resource.data)==id,
-    //     donc isHospitalMember(id) (belongsToSameEstablishment) est évalué
-    //     une seule fois sur un document fixe → toutes les fiches renvoyées
-    //     sont lisibles. L'isolation reste intacte (autre établissement =
-    //     REJETÉ, vérifié).
-    //   • where('created_by','==', uid) ACCEPTÉE (doctorCanRead) : filet
-    //     pour une fiche sans establishmentId (ex. praticien solo).
-    //   (where('doctorUids','array-contains',uid) est REJETÉ → non utilisé.)
-    //
-    // Rôles concernés : ceux qui lisent mc_patients par appartenance
-    // (clinique + accueil/labo + admin_hospital). Le pharmacien est isolé ;
-    // le patient lit sa propre fiche par un autre chemin (login, v2.9.41).
-    // mergeStore fusionne par 'id' sans doublon et ne retire jamais une
-    // entrée locale absente du snapshot (une fiche créée hors-ligne encore
-    // en file n'est pas effacée).
-    if (['doctor', 'nurse', 'reception', 'lab', 'admin_hospital'].includes(user.role)) {
-      scoped(firebaseDB.collection('mc_patients').where('created_by', '==', user.uid),
-        'mc_patients', 'id');
-      const estIds = new Set();
-      try {
-        const cur = window.HospitalsRegistry?.getCurrentHospital?.();
-        if (cur?.establishmentId) estIds.add(cur.establishmentId);
-        (window.HospitalsRegistry?.getDoctorHospitals?.(user.uid) || [])
-          .forEach(h => { if (h?.establishmentId) estIds.add(h.establishmentId); });
-      } catch (_) { /* registre indisponible : le filet created_by suffit */ }
-      estIds.forEach(estId => {
-        scoped(firebaseDB.collection('mc_patients').where('establishmentId', '==', estId),
-          'mc_patients', 'id');
-      });
+    if (user.role === 'patient') {
+      let ficheId = '';
+      try { ficheId = (localStorage.getItem('mc_my_patient_id') || user.patient_id || user.username || '').toUpperCase(); } catch (_) { ficheId = (user.patient_id || '').toUpperCase(); }
+      if (ficheId) {
+        CLINICAL_COLLECTIONS.forEach(([coll, idField]) => {
+          scoped(firebaseDB.collection(coll).where('patient_id', '==', ficheId), coll, idField);
+        });
+      }
     }
   }
 

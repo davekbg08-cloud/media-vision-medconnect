@@ -803,11 +803,29 @@ service cloud.firestore {
          get(/databases/$(database)/documents/mc_patients/$(patientMcId)).data.get('firstAccessCode', null) == submittedCode);
     }
 
+    // Chantier 1 (v2.9.42) — le patient authentifié lit les documents
+    // cliniques rattachés à SA fiche par le champ patient_id (consultations,
+    // ordonnances, analyses, rendez-vous, admissions, urgences, maternité,
+    // vaccinations, medical_records). Il est reconnu comme titulaire du
+    // compte mc_accounts/PAT_{patient_id} (authUid), même principe que
+    // patientOwnsOwnFicheAccount pour mc_patients. Query-safe : une requête
+    // where('patient_id','==', <fiche>) fixe le chemin du get, jamais coupée
+    // par l'abonnement (le patient n'est pas doctor/nurse → subscriptionReadGateOk
+    // vaut true). Placé en DERNIER dans le OR pour que les lectures du
+    // personnel court-circuitent avant ce get (budget get()).
+    function patientOwnsClinicalDoc(data) {
+      return signedIn() &&
+        data.get('patient_id', null) != null &&
+        exists(/databases/$(database)/documents/mc_accounts/$('PAT_' + data.get('patient_id', ''))) &&
+        get(/databases/$(database)/documents/mc_accounts/$('PAT_' + data.get('patient_id', ''))).data.get('authUid', null) == request.auth.uid;
+    }
+
     function canReadMedicalData(data) {
       return isAdmin() ||
         ownsPatientData(data) ||
         doctorCanRead(data) ||
-        nurseCanRead(data);
+        nurseCanRead(data) ||
+        patientOwnsClinicalDoc(data);
     }
 
     function publicUserRole(role) {

@@ -28,8 +28,8 @@ const auth = read('js/auth.js');
 /* ── db.js : listeners patients filtrés ─────────────── */
 
 test('setupUserScopedListeners recharge mc_patients par établissement ET par created_by', () => {
-  const block = db.slice(db.indexOf('function setupUserScopedListeners'));
-  assert.match(block, /collection\('mc_patients'\)\.where\('establishmentId', '==', estId\)/,
+  const block = db.slice(db.indexOf('_memberEstablishmentIds'));
+  assert.match(block, /collection\('mc_patients'\)\.where\('establishmentId', '==', \w+\)/,
     'listener filtré par establishmentId attendu');
   assert.match(block, /collection\('mc_patients'\)\.where\('created_by', '==', user\.uid\)/,
     'listener filet created_by attendu');
@@ -41,9 +41,10 @@ test('les listeners patients sont réservés aux rôles membres (pas patient/pha
 });
 
 test('les établissements du membre sont énumérés (courant + affiliations)', () => {
-  const block = db.slice(db.indexOf('function setupUserScopedListeners'));
+  // Chantier 1 (v2.9.42) : énumération extraite dans le helper _memberEstablishmentIds.
+  const block = db.slice(db.indexOf('_memberEstablishmentIds'));
   assert.match(block, /getCurrentHospital\?\.\(\)/);
-  assert.match(block, /getDoctorHospitals\?\.\(user\.uid\)/);
+  assert.match(block, /getDoctorHospitals\?\.\(uid\)/);
 });
 
 test('le listener GLOBAL mc_patients est conservé (admin) et documenté comme tel', () => {
