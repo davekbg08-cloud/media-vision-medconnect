@@ -1,8 +1,21 @@
 {
-  "version": "2.9.41",
-  "build": "2026.07.23.1",
+  "version": "2.9.42",
+  "build": "2026.07.23.2",
   "buildDate": "2026-07-23",
   "changelog": [
+    {
+      "version": "2.9.42",
+      "date": "2026-07-23",
+      "notes": [
+        "Préparation « prêt pour la production » : fiabilité et confidentialité renforcées pour un usage réel avec de vraies données médicales. Firestore reste la seule source de vérité ; aucune action n'est annoncée comme réussie tant que le serveur ne l'a pas confirmée",
+        "Poste partagé : une opération enregistrée hors ligne par un agent n'est plus jamais renvoyée au serveur sous le compte de l'agent suivant — elle attend le retour de son auteur",
+        "Pharmacie : une vente réalisée hors ligne est réconciliée à la reconnexion sur le stock réel (jamais de survente ni d'écrasement du stock) ; refus explicite et signalé si le stock est devenu insuffisant",
+        "Recherche patient bornée à l'établissement : aucune fiche d'un autre établissement ne peut apparaître, même si elle traînait encore en mémoire",
+        "Export de diagnostic de synchronisation : ne contient plus que des métadonnées techniques — jamais de nom, numéro de fiche, téléphone, diagnostic, médicament ni contenu de message",
+        "Sécurité serveur (préparation) : fonctions cloud d'authentification et de liaison de compte patient, pour ne plus exposer publiquement l'annuaire des comptes — activation lors du déploiement serveur",
+        "Outil de migration des données historiques (établissement) fourni pour rétablir la cohérence sans jamais supprimer ni écraser une donnée existante"
+      ]
+    },
     {
       "version": "2.9.41",
       "date": "2026-07-23",
