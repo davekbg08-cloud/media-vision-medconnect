@@ -1045,7 +1045,12 @@ service cloud.firestore {
       // seuls doctor/nurse/admin peuvent mettre à jour ce document
       // (doctorCanRead couvre déjà ces rôles cliniques ; reception n'y
       // figure jamais).
-      allow update, delete: if isAdmin() || doctorCanRead(resource.data);
+      // Chantier 3 (v2.9.42) — index append-only : le contenu peut être
+      // complété par le clinicien (update), mais la SUPPRESSION est réservée
+      // à l'admin plateforme — jamais de perte d'historique depuis le
+      // parcours normal (le cascade deletePatient ordinaire est retiré).
+      allow update: if isAdmin() || doctorCanRead(resource.data);
+      allow delete: if isAdmin();
     }
 
     match /prescriptions/{prescriptionId} {
@@ -1406,9 +1411,16 @@ service cloud.firestore {
       // desktop, abonnement expiré ou non.
       allow create: if canDecideMedical() &&
         hospitalCanWriteFromDevice(resolveHospitalId(request.resource.data), request.resource.data.sourceDevice);
-      allow update: if canDecideMedical() &&
-        hospitalCanWriteFromDevice(resolveHospitalId(resource.data), request.resource.data.sourceDevice);
-      allow delete: if canDecideMedical();
+      // Chantier 3 (v2.9.42) — historique médical APPEND-ONLY : une
+      // consultation signée n'est jamais réécrite ni supprimée par un rôle
+      // ordinaire. Aucun flux applicatif ne met à jour une consultation
+      // existante (js/db.js addConsultation = create sur un cid neuf ; une
+      // correction crée une NOUVELLE consultation entryType 'correction'/
+      // 'addendum' liée à l'originale via correctsConsultationId). update et
+      // delete sont réservés à l'admin plateforme (récupération
+      // exceptionnelle et journalisée, jamais depuis le parcours normal).
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
     }
 
     match /mc_vaccinations/{docId} {
@@ -1699,9 +1711,20 @@ service cloud.firestore {
       // pharmacie) est soumis au contrôle desktop/mobile — décision
       // produit : sur desktop expiré l'envoi est bloqué des deux côtés,
       // le mobile n'est jamais coupé.
+      // Chantier 3 (v2.9.42) — le CONTENU MÉDICAL d'une ordonnance signée est
+      // IMMUABLE. Le médecin auteur ne met à jour que le dispatch (envoi
+      // patient/pharmacie, statut, horodatage : js/network.js
+      // sendPrescriptionToPharmacy pose pharmacyUid/pharmacyName/status/
+      // sourceDevice/updatedAt), jamais le diagnostic, les médicaments, le
+      // patient, l'auteur, la date ou l'établissement — imposé par une
+      // deny-list de champs cliniques (robuste : tout champ non clinique
+      // reste modifiable, le contenu clinique jamais). Le pharmacien reste
+      // limité au statut de traitement (PARTIE H, inchangé).
       allow update: if isAdmin()
         || (doctorCanRead(resource.data) &&
-            hospitalCanWriteFromDevice(resolveHospitalId(resource.data), request.resource.data.get('sourceDevice', null)))
+            hospitalCanWriteFromDevice(resolveHospitalId(resource.data), request.resource.data.get('sourceDevice', null)) &&
+            !request.resource.data.diff(resource.data).affectedKeys()
+              .hasAny(['patient_id','patientId','doctor_uid','doctorUid','diagnosis','diagnostic','medicines','items','establishmentId','hospital_id','date','pid','created_by']))
         || (pharmacyCanReadPrescription(resource.data) &&
             request.resource.data.diff(resource.data).affectedKeys()
               .hasOnly(['status', 'updatedAt', 'updatedByUid', 'updatedByRole', 'cancelReason']));
