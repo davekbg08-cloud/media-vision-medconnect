@@ -25,8 +25,8 @@ test('les ordonnances des médecins/infirmiers sont rechargées (scope établiss
   // Chantier 1 (v2.9.42) : le listener mc_prescriptions collection-entière
   // (rejeté par les règles) est remplacé par le rechargement query-safe des
   // rôles membres, qui inclut mc_prescriptions dans CLINICAL_COLLECTIONS.
-  assert.match(body, /\['doctor', 'nurse', 'reception', 'lab', 'admin_hospital'\]\.includes\(user\.role\)/,
-    'la branche des rôles membres (dont doctor/nurse) doit être présente');
+  assert.match(body, /\['doctor', 'nurse', 'admin_hospital'\]\.includes\(user\.role\)/,
+    'la branche des rôles cliniques (dont doctor/nurse) doit être présente');
   assert.match(body, /'mc_prescriptions'/,
     'mc_prescriptions doit faire partie des collections rechargées');
 });

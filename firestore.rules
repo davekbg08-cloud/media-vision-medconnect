@@ -1605,8 +1605,17 @@ service cloud.firestore {
       // cas central de la clarification client : le médecin/infirmier
       // membre de l'établissement CRÉATEUR de la fiche y accède SANS
       // consentement (mc_consents ne sert qu'aux accès externes).
+      // Chantier 2 (v2.9.42) — CONFIDENTIALITÉ : la lecture de la fiche
+      // clinique passe de belongsToSameEstablishment (TOUT membre actif, y
+      // compris réception et laboratoire) à isClinicalHospitalMember
+      // (doctor/nurse/admin_hospital uniquement). La réception et le
+      // laboratoire n'ont plus AUCUN accès au contenu clinique de
+      // mc_patients ; ils identifient un patient via patient_directory
+      // (identité administrative minimale, collection dédiée). Même
+      // resserrement que celui déjà appliqué à mc_consultations/
+      // mc_prescriptions/mc_lab_results (sections 9/10).
       allow read: if canReadMedicalData(resource.data) ||
-        belongsToSameEstablishment(resource.data) ||
+        isClinicalHospitalMember(resource.data) ||
         // Chantier v2.9.41 : le patient authentifié lit SA propre fiche
         // (titulaire du compte mc_accounts/PAT_{docId}). Branche AJOUTÉE en
         // OR — n'élargit jamais l'accès du personnel, ne retire rien.

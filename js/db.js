@@ -849,7 +849,14 @@ const DB = (() => {
       ['mc_maternity_cases', 'mid'], ['mc_vaccinations', 'vid'],
     ];
 
-    if (['doctor', 'nurse', 'reception', 'lab', 'admin_hospital'].includes(user.role)) {
+    // Chantier 2 (v2.9.42) — RÔLES CLINIQUES uniquement (doctor/nurse/
+    // admin_hospital). La réception et le laboratoire ne lisent PLUS la fiche
+    // clinique mc_patients ni le contenu clinique (consultations, ordonnances,
+    // etc.) : ils identifient un patient via patient_directory (lecture
+    // directe, cf. hospital-reception.js/hospital-lab.js) et chargent leurs
+    // propres collections de workflow ailleurs. Confidentialité imposée aussi
+    // côté règles (mc_patients read = isClinicalHospitalMember).
+    if (['doctor', 'nurse', 'admin_hospital'].includes(user.role)) {
       const estIds = _memberEstablishmentIds(user.uid);
       // Fiches patient (identifiant canonique 'id') — v2.9.41, conservé.
       scoped(firebaseDB.collection('mc_patients').where('created_by', '==', user.uid), 'mc_patients', 'id');
@@ -1098,10 +1105,14 @@ const DB = (() => {
       }
 
       if (result.timedOut) {
-        // Réconciliation : le commit est peut-être passé malgré le
-        // timeout côté interface.
+        // Réconciliation : le commit est peut-être passé malgré le timeout
+        // côté interface. Chantier 2 (v2.9.42) — on relit patient_directory/
+        // {id} (écrit dans le MÊME batch atomique) plutôt que mc_patients :
+        // la réception, qui crée aussi des patients, ne lit plus jamais la
+        // fiche clinique mc_patients ; patient_directory lui est autorisé et
+        // son existence prouve tout autant que le batch a abouti.
         try {
-          const doc = await firebaseDB.collection('mc_patients').doc(p.id).get();
+          const doc = await firebaseDB.collection('patient_directory').doc(p.id).get();
           if (doc.exists) {
             confirmLocally();
             return { patient: p, confirmed: true, reconciled: true };
