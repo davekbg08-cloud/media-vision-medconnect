@@ -177,3 +177,16 @@ exports.setVerifiedClientType = onCall(CALL_OPTS, async (request) => {
   }
   return { ok: true, clientType: requested };
 });
+
+/* ═══════════════════════════════════════════════════════════
+   SYSTÈME DE NOTIFICATIONS (v2.9.42, Phase 2)
+   Le module ./notifications est requis APRÈS initializeApp() : ses fonctions
+   résolvent getFirestore()/getAuth() paresseusement (jamais au chargement).
+   Les callables sont re-exportées au niveau racine (requis par le déploiement).
+   ═══════════════════════════════════════════════════════════ */
+const notifications = require('./notifications');
+exports.registerPushDevice = notifications.registerPushDevice;
+exports.unregisterPushDevice = notifications.unregisterPushDevice;
+exports.updateNotificationPreferences = notifications.updateNotificationPreferences;
+exports.markNotificationRead = notifications.markNotificationRead;
+exports.sendTestNotification = notifications.sendTestNotification;
