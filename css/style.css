@@ -1634,3 +1634,6 @@ body.rtl .tl-connector { left: auto; right: -1.1rem; }
 @media (prefers-color-scheme: dark) {
   #mc-notif-bell, #mc-notif-panel, .mc-notif-head { background: var(--card, #1c2128); }
 }
+.mc-notif-foot { padding: 10px 14px; border-top: 1px solid var(--border, #eaecef); text-align: center; position: sticky; bottom: 0; background: var(--card, #fff); }
+#mc-notif-push:disabled { color: var(--text-muted, #8b949e); cursor: default; }
+@media (prefers-color-scheme: dark) { .mc-notif-foot { background: var(--card, #1c2128); } }

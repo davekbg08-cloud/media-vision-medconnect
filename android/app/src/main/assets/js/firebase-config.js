@@ -35,6 +35,14 @@ function resolveAppCheckSiteKey() {
   return APP_CHECK_SITE_KEYS[hostname] || '';
 }
 
+/* Clé VAPID PUBLIQUE pour le push web (Phase 5 notifications) — à renseigner
+   depuis Console Firebase → Cloud Messaging → « Certificats Web Push » (clé de
+   paire de clés). PUBLIQUE (sûre à exposer, comme la clé reCAPTCHA) ; la clé
+   PRIVÉE reste côté serveur (Secret Manager, functions). Tant qu'elle est vide,
+   l'opt-in notifications affiche « non configuré » (jamais un faux bouton
+   activé). */
+window.PUSH_VAPID_PUBLIC_KEY = window.PUSH_VAPID_PUBLIC_KEY || '';
+
 /* ── INITIALISATION ─────────────────────────────── */
 let firebaseDB   = null;
 let firebaseAuth = null;

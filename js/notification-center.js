@@ -199,6 +199,9 @@ const NotificationCenter = (() => {
           <button type="button" id="mc-notif-allread" class="mc-notif-linkbtn">${lang === 'en' ? 'Mark all read' : 'Tout marquer lu'}</button>
         </div>
         <div id="mc-notif-list" role="list"></div>
+        <div class="mc-notif-foot">
+          <button type="button" id="mc-notif-push" class="mc-notif-linkbtn"></button>
+        </div>
       </div>`;
     document.body.appendChild(wrap);
     document.getElementById('mc-notif-bell').addEventListener('click', _togglePanel);
@@ -207,6 +210,40 @@ const NotificationCenter = (() => {
       const card = e.target.closest && e.target.closest('.mc-notif-card');
       if (card) openNotification(card.getAttribute('data-id'));
     });
+    document.getElementById('mc-notif-push').addEventListener('click', _onPushClick);
+    _refreshPushButton();
+    // Clic sur une notification système (relayé par le service worker).
+    try {
+      if (navigator.serviceWorker) navigator.serviceWorker.addEventListener('message', (e) => {
+        if (e.data && e.data.type === 'MC_NOTIF_OPEN') {
+          if (e.data.notificationId) openNotification(e.data.notificationId);
+          else if (isAllowedRoute(e.data.path) && typeof window.navigateMedConnect === 'function') window.navigateMedConnect(e.data.path);
+        }
+      });
+    } catch (_) {}
+  }
+
+  // Bouton d'activation des notifications système (opt-in explicite).
+  const PUSH_LABELS = {
+    'unsupported':       { fr: 'Notifications non prises en charge', en: 'Notifications not supported' },
+    'ios-needs-install': { fr: 'Ajoutez l\'app à l\'écran d\'accueil pour activer', en: 'Add app to Home Screen to enable' },
+    'not-configured':    { fr: 'Notifications système bientôt disponibles', en: 'System notifications coming soon' },
+    'blocked':           { fr: 'Notifications bloquées (réglages du système)', en: 'Notifications blocked (system settings)' },
+    'default':           { fr: '🔔 Activer les notifications', en: '🔔 Enable notifications' },
+    'granted':           { fr: '✅ Notifications activées', en: '✅ Notifications enabled' },
+    'error':             { fr: 'Réessayer l\'activation', en: 'Retry enabling' },
+  };
+  function _pushState() { try { return window.PushRegistration ? window.PushRegistration.getState() : 'unsupported'; } catch (_) { return 'unsupported'; } }
+  function _refreshPushButton() {
+    const btn = document.getElementById('mc-notif-push'); if (!btn) return;
+    const st = _pushState(); const lang = currentLang();
+    btn.textContent = (PUSH_LABELS[st] && (PUSH_LABELS[st][lang] || PUSH_LABELS[st].fr)) || '';
+    btn.disabled = ['unsupported', 'not-configured', 'blocked', 'granted', 'ios-needs-install'].includes(st);
+  }
+  async function _onPushClick() {
+    if (!window.PushRegistration) return;
+    try { await window.PushRegistration.enable(); } catch (_) {}
+    _refreshPushButton();
   }
 
   function init() {
