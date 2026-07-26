@@ -105,8 +105,10 @@ async function enqueueNotification(input) {
       return true;
     });
 
-    // Journal de livraison à l'état `queued` (l'envoi réel est une phase
-    // ultérieure). On ne prétend JAMAIS `delivered`.
+    // Journal de livraison à l'état `queued` (jamais `delivered`) + mise en
+    // file des tâches d'envoi par appareil (Phase 5), en respectant les
+    // préférences externes. La notification INTERNE reste créée quoi qu'il
+    // arrive ; seul le push externe est conditionné.
     if (created) {
       const deliveryId = `del_${notificationId}`;
       await db.collection('notificationDeliveries').doc(deliveryId).set({
@@ -114,10 +116,34 @@ async function enqueueNotification(input) {
         provider: null, state: 'queued', attempts: 0,
         createdAt: FieldValue.serverTimestamp(), expiresAt: expiresAt || null,
       }, { merge: true });
+      try { await scheduleDelivery(db, notificationId, r.recipientUid, category, priority); }
+      catch (e) { console.warn('[notifications] scheduleDelivery :', e && e.message); }
     }
     results.push({ recipientUid: r.recipientUid, notificationId, created });
   }
   return results;
+}
+
+/* Met en file une tâche d'envoi par appareil ACTIF du destinataire, si les
+   préférences autorisent un push externe pour cette catégorie/priorité. Une
+   alerte de sécurité ou critique passe toujours. La notification interne, elle,
+   est déjà créée (source de vérité) — jamais bloquée par les préférences. */
+async function scheduleDelivery(db, notificationId, recipientUid, category, priority) {
+  const prefSnap = await db.collection('notificationPreferences').doc(recipientUid).get();
+  const prefs = prefSnap.exists ? prefSnap.data() : null;
+  if (!H.shouldSendExternal(prefs, category, priority, new Date())) return; // interne seulement
+  const devSnap = await db.collection('pushRegistrations').doc(recipientUid)
+    .collection('devices').where('enabled', '==', true).get();
+  if (devSnap.empty) return;
+  let queue = null;
+  try {
+    const { getFunctions } = require('firebase-admin/functions');
+    queue = getFunctions().taskQueue('deliverNotificationTask');
+  } catch (_) { queue = null; }
+  for (const doc of devSnap.docs) {
+    try { if (queue) await queue.enqueue({ notificationId, recipientUid, deviceId: doc.id }); }
+    catch (e) { console.warn('[notifications] enqueue livraison :', e && e.message); }
+  }
 }
 
 /* ── Callables ──────────────────────────────────────── */

@@ -71,8 +71,57 @@ function normalizePreferences(input) {
   return out;
 }
 
+/* Catégorie de notification → canal de préférence (Phase 5). */
+const CATEGORY_TO_CHANNEL = {
+  appointments: 'appointments', appointment: 'appointments',
+  prescriptions: 'prescriptions', prescription: 'prescriptions',
+  labResults: 'labResults', lab_result: 'labResults',
+  messages: 'messages', message: 'messages',
+  admissions: 'admissions', admission: 'admissions',
+  transfers: 'transfers', transfer: 'transfers',
+  pharmacy: 'pharmacy', account: 'account',
+  administrative: 'administrative', security: 'security',
+};
+
+// Une alerte de SÉCURITÉ ou une priorité CRITIQUE part toujours en push externe,
+// quelles que soient les préférences (mais reste aussi dans le centre).
+function isAlwaysExternal(category, priority) {
+  return category === 'security' || priority === 'critical';
+}
+
+/* Décide si un push EXTERNE est autorisé (la notification interne est TOUJOURS
+   créée par ailleurs). preferences peut être null (défaut : tout autorisé). */
+function shouldSendExternal(preferences, category, priority, nowDate) {
+  if (isAlwaysExternal(category, priority)) return true;
+  const p = preferences || {};
+  if (p.enabled === false) return false;
+  const channel = CATEGORY_TO_CHANNEL[category];
+  if (channel && p.channels && p.channels[channel] === false) return false;
+  if (isInQuietHours(nowDate || new Date(), p.quietHours)) return false;
+  return true;
+}
+
+// Heures silencieuses : {start:'22:00', end:'07:00'} (heure locale approximée).
+// Gère l'intervalle qui traverse minuit. Absence → jamais silencieux.
+function isInQuietHours(date, quietHours) {
+  if (!quietHours || !quietHours.start || !quietHours.end) return false;
+  const cur = date.getHours() * 60 + date.getMinutes();
+  const start = hm(quietHours.start), end = hm(quietHours.end);
+  if (start == null || end == null) return false;
+  return start <= end ? (cur >= start && cur < end) : (cur >= start || cur < end);
+}
+function hm(s) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(s));
+  if (!m) return null;
+  const h = +m[1], mi = +m[2];
+  if (h > 23 || mi > 59) return null;
+  return h * 60 + mi;
+}
+
 module.exports = {
   SCHEMA_VERSION, VALID_PROVIDERS, PREFERENCE_CHANNELS, NOTIFICATION_ROUTES,
+  CATEGORY_TO_CHANNEL,
   makeDeduplicationKey, notificationIdFromDedup, buildSafeDeepLink,
   sanitizePushPayload, normalizePreferences,
+  isAlwaysExternal, shouldSendExternal, isInQuietHours,
 };
