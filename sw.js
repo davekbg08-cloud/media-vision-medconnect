@@ -49,6 +49,7 @@ const ASSETS = [
   './js/patient.js', './js/hospital.js', './js/pharmacy.js',
   './js/share.js', './js/admin.js', './js/settings.js',
   './js/prescription-flow-fix.js',
+  './js/notification-center.js',
   './js/auth.js', './js/registration-submit-flow.js', './js/app.js',
   './js/global_back_button.js', './js/patient_edit_guard.js', './js/auth-ui-cleanup.js',
   './js/affiliation-cleanup.js',

@@ -18,6 +18,11 @@ const Auth = (() => {
     //    les vider ensuite ne perdrait aucune donnée médicale.
     try { await DB.flushOutbox?.(); } catch (_) {}
 
+    // Centre de notifications (Phase 6a v2.9.42) : couper l'écoute et vider le
+    // badge — l'agent suivant d'un poste partagé ne voit pas les notifications
+    // du précédent.
+    try { window.NotificationCenter?.teardown?.(); } catch (_) {}
+
     // 2) Vraie déconnexion Firebase (sinon la session serveur reste
     //    active pour le prochain utilisateur du poste).
     try {

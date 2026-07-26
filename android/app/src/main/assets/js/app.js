@@ -208,6 +208,10 @@ const App = (() => {
     } catch (e) {
       console.warn('[App] setupUserScopedListeners a échoué (ignoré) :', e);
     }
+    // Centre de notifications in-app (Phase 6a v2.9.42) : cloche flottante +
+    // écoute temps réel de notifications/ (source de vérité). Universel
+    // (mobile/desktop/PWA/Electron), sans toucher aux navigations existantes.
+    try { window.NotificationCenter?.init?.(); } catch (e) { console.warn('[App] NotificationCenter.init (ignoré) :', e); }
     if (!window.ExchangeBridge?.startRoleListeners) return;
     _exchangeSeen.clear();
     const LIVE_LABELS = {
