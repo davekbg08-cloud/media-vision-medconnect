@@ -200,3 +200,10 @@ exports.onLabResultWritten = notificationTriggers.onLabResultWritten;
 exports.onPrescriptionWritten = notificationTriggers.onPrescriptionWritten;
 exports.onAdmissionWritten = notificationTriggers.onAdmissionWritten;
 exports.onAffiliationWritten = notificationTriggers.onAffiliationWritten;
+
+// File d'envoi + nettoyage (Phase 4) : consommateur de tâches de livraison
+// (retry natif Task Queue) et cron quotidien de désactivation des
+// installations obsolètes. L'envoi réel aux fournisseurs arrive en Phase 5.
+const notificationDelivery = require('./notification-delivery');
+exports.deliverNotificationTask = notificationDelivery.deliverNotificationTask;
+exports.cleanupStalePushRegistrations = notificationDelivery.cleanupStalePushRegistrations;
