@@ -100,12 +100,46 @@ allergie, note, contenu de message, motif de consultation. Après clic : ouvrir 
 Auth → App Check → lire `notifications/{id}` → vérifier `recipientUid` → vérifier
 les droits sur le document source → afficher seulement ensuite.
 
-## Phases
+## Phases (toutes livrées)
 
-1. **Modèle + règles (4 collections)** — *livrée*.
-2. Cloud Functions cœur (`enqueueNotification` + callables).
-3. Déclencheurs métier (transitions réelles + idempotence `deduplicationKey`).
-4. File d'envoi/retry (Cloud Tasks) + `cleanupStalePushRegistrations` + 404/410.
-5. Fournisseurs push (FCM Web, Web Push iOS/Safari, FCM Android natif, Electron).
-6. SW push + centre de notifications UI + deep links (allowlist).
-7. Tests + miroirs Android + PR.
+1. **Modèle + règles (4 collections)** — ✅ (9 tests émulateur).
+2. **Cloud Functions cœur** (`enqueueNotification` + 5 callables) — ✅ **déployé**.
+3. **Déclencheurs métier** (transitions réelles + idempotence `deduplicationKey`) — ✅ **déployé**.
+4. **File d'envoi/retry** (Task Queue) + `cleanupStalePushRegistrations` + 404/410 — ✅ **déployé**.
+5. **Fournisseurs push** : FCM Web, Web Push iOS/Safari (VAPID), FCM Android natif, Electron/foreground — ✅ (serveur déployé ; clients livrés).
+6. **SW push** + centre de notifications in-app (cloche universelle, badge synchronisé, opt-in) + deep links (allowlist) — ✅.
+7. **Finalisation** (tests, miroirs Android, docs, PR) — ✅.
+
+Tests : `notifications-system` (règles) + `notification-helpers`,
+`notification-functions-wiring`, `notification-triggers`, `notification-delivery`,
+`notification-providers`, `notification-center`, `push-registration`,
+`notification-android-native`, `notification-native-running` (JS).
+
+## Activation (étapes de déploiement, côté propriétaire)
+
+Le code est complet ; l'activation nécessite des étapes serveur/config (comme
+`authLookup`). Tant qu'elles ne sont pas faites, tout dégrade proprement : les
+notifications internes s'affichent (centre in-app), sans push externe.
+
+1. **Cloud Functions** (déjà déployées) : `firebase deploy --only functions`
+   redéploie les callables/déclencheurs/livraison. Les tâches de livraison
+   requièrent la **Task Queue** (Cloud Tasks activé sur le projet Blaze).
+2. **VAPID (Web Push)** : Console → Cloud Messaging → *Certificats Web Push* →
+   copier la **clé publique** dans `window.PUSH_VAPID_PUBLIC_KEY`
+   (js/firebase-config.js) ; mettre la **clé privée** en variable
+   d'environnement des functions (`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`,
+   `VAPID_SUBJECT`) via Secret Manager. Sans elles → push web/iOS `deferred`.
+3. **FCM natif Android** : ajouter `android/app/google-services.json` (Console →
+   app Android) puis rebuild l'APK (le plugin google-services s'active
+   automatiquement s'il détecte le fichier).
+4. **Hosting** : `firebase deploy --only hosting` (SW push + centre in-app +
+   opt-in ; cache `medconnect-v4.43`).
+5. **Vérifier** : ouvrir la cloche → « Activer les notifications », accepter,
+   déclencher une transition de test → notification interne + push système.
+
+## Confidentialité (rappel — appliqué partout)
+
+Aucun canal (payload FCM data-only, Web Push, Intent Android, notification
+système) ne transporte de donnée médicale : seulement `notificationId, category,
+priority, deepLink`. Le client relit la notification autorisée depuis Firestore
+après Auth + App Check + droits sur le document source.
