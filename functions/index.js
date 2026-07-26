@@ -190,3 +190,13 @@ exports.unregisterPushDevice = notifications.unregisterPushDevice;
 exports.updateNotificationPreferences = notifications.updateNotificationPreferences;
 exports.markNotificationRead = notifications.markNotificationRead;
 exports.sendTestNotification = notifications.sendTestNotification;
+
+// Déclencheurs métier (Phase 3) : notifications sur transitions réelles des
+// collections canoniques (rendez-vous, résultats labo, ordonnances, admissions,
+// affiliations). Idempotents par deduplicationKey.
+const notificationTriggers = require('./notification-triggers');
+exports.onAppointmentWritten = notificationTriggers.onAppointmentWritten;
+exports.onLabResultWritten = notificationTriggers.onLabResultWritten;
+exports.onPrescriptionWritten = notificationTriggers.onPrescriptionWritten;
+exports.onAdmissionWritten = notificationTriggers.onAdmissionWritten;
+exports.onAffiliationWritten = notificationTriggers.onAffiliationWritten;
