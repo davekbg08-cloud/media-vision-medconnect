@@ -780,10 +780,17 @@ const DB = (() => {
     listen(firebaseDB.collection('mc_appointments'), snap => {
       if (!snap.empty) mergeStore('mc_appointments', 'aid', snap.docs.map(d => d.data()));
     });
-    // Comptes
-    listen(firebaseDB.collection('mc_accounts'), snap => {
-      storeSnapshot('mc_accounts', snap);
-    });
+    // Comptes — Chantiers 6/7 (v2.9.42) : une fois la lecture publique de
+    // mc_accounts fermée, seule une requête bornée est acceptée. L'écoute
+    // collection-entière n'est conservée que pour l'ADMIN plateforme (qui a un
+    // accès complet, isAdmin). Pour les autres rôles, la résolution de compte
+    // passe désormais par les Cloud Functions (authLookup) — pas par un cache
+    // cloud de tous les comptes.
+    if ((window.Auth?.getUser?.()?.role) === 'admin') {
+      listen(firebaseDB.collection('mc_accounts'), snap => {
+        storeSnapshot('mc_accounts', snap);
+      });
+    }
     // Profils pharmacies visibles publiquement — listener FILTRÉ :
     // fusion obligatoire, un remplacement intégral écraserait les
     // autres profils chargés par la sync initiale.
@@ -1020,6 +1027,18 @@ const DB = (() => {
     const uid = `PAT_${patientId}`;
     if (getAccounts().some(a => a.uid === uid)) return true;
     if (!firebaseReady || !firebaseDB) return false;
+    // Chantiers 6/7 (v2.9.42) — voie SERVEUR d'abord (authLookup) : une fois
+    // mc_accounts fermé, l'existence d'un compte patient se vérifie côté serveur
+    // (aucune lecture publique). Repli lecture directe tant que la règle
+    // publique existe / si la fonction est indisponible.
+    const fns = (typeof firebaseFunctions !== 'undefined' && firebaseFunctions) ? firebaseFunctions
+      : (typeof window !== 'undefined' ? window.firebaseFunctions : null);
+    if (fns && typeof fns.httpsCallable === 'function') {
+      try {
+        const res = await fns.httpsCallable('authLookup')({ patientId });
+        if (res && res.data) return res.data.exists === true;
+      } catch (e) { console.warn('[MedConnect] authLookup (compte patient) indisponible — repli :', e?.message || e); }
+    }
     try {
       const doc = await firebaseDB.collection('mc_accounts').doc(uid).get();
       return doc.exists;

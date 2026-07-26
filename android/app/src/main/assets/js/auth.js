@@ -1094,6 +1094,21 @@ const Auth = (() => {
     if (!_hasFirebaseDB()) return { conflict: 'offline' };
     const num = _normalizeMatricule(matricule);
     const mail = _normalizeEmail(email);
+    // Chantiers 6/7 (v2.9.42) — voie SERVEUR d'abord (checkAgentDuplicate) : la
+    // détection de doublon lit d'AUTRES comptes, impossible en lecture directe
+    // une fois mc_accounts fermé. La Cloud Function ne renvoie que l'existence
+    // d'un conflit, jamais les données du compte.
+    const fns = (typeof firebaseFunctions !== 'undefined' && firebaseFunctions) ? firebaseFunctions
+      : (typeof window !== 'undefined' ? window.firebaseFunctions : null);
+    if (fns && typeof fns.httpsCallable === 'function') {
+      try {
+        const res = await fns.httpsCallable('checkAgentDuplicate')({ role, matricule: num, professionalNumber: num, email: mail });
+        return (res && res.data && res.data.conflict) ? { conflict: 'account' } : { conflict: null };
+      } catch (e) {
+        console.warn('[MedConnect] checkAgentDuplicate (fonction) indisponible — repli lecture directe :', e?.message || e);
+        // repli ci-dessous (tant que la lecture publique de mc_accounts existe)
+      }
+    }
     try {
       for (const field of ['matricule', 'professionalNumber']) {
         const snap = await firebaseDB.collection('mc_accounts').where('role', '==', role).where(field, '==', num).limit(5).get();

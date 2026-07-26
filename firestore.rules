@@ -1318,7 +1318,22 @@ service cloud.firestore {
     // reception/patient) ni au mode dégradé déjà toléré et testé
     // (tests/firestore-rules/mc-accounts.rules.test.js).
     match /mc_accounts/{docId} {
-      allow read: if true;
+      // Chantiers 6/7 (v2.9.42) — FERMETURE de la lecture publique. Auparavant
+      // `allow read: if true` exposait l'annuaire des comptes (patient_id,
+      // authUid, rôle, e-mail technique) à quiconque. Désormais : seul l'ADMIN
+      // plateforme, ou le TITULAIRE du compte (docId == son uid, ou authUid ==
+      // son uid — cas patient PAT_{id}), peut lire son document. Les résolutions
+      // qui lisaient d'AUTRES comptes passent par des Cloud Functions
+      // (authLookup, checkAgentDuplicate, claimPatientAccount) — voir js/auth.js,
+      // js/db.js. Les get()/exists() INTERNES des règles sur mc_accounts
+      // continuent de fonctionner (ils ignorent cette règle de lecture).
+      // ⚠️ À déployer APRÈS que les Cloud Functions sont en ligne et validées
+      // (docs/DEPLOYMENT_v2.9.42.md) — sinon la connexion casse.
+      allow read: if isAdmin() ||
+        (signedIn() && (
+          docId == request.auth.uid ||
+          resource.data.get('authUid', null) == request.auth.uid
+        ));
       // 'hospital' inclus pour cohérence avec le reste du produit, même
       // si aucun code actuel n'écrit ce rôle dans mc_accounts (le compte
       // établissement vit dans users/{authUid}, pas ici) — inoffensif.

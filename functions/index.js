@@ -103,6 +103,36 @@ exports.authLookup = onCall(CALL_OPTS, async (request) => {
   return { exists: false };
 });
 
+/* checkAgentDuplicate — détecte, côté serveur, un compte professionnel EXISTANT
+   (avec authUid réel) portant le même matricule / numéro d'ordre / e-mail, sans
+   exposer la collection mc_accounts au client. Utilisé à l'inscription d'un
+   agent (lab/reception/pro) pour éviter les doublons. App Check exigé ; aucune
+   donnée de compte n'est renvoyée, seulement l'existence d'un conflit.
+
+   Entrée : { role, matricule?, professionalNumber?, email? }.
+   Sortie : { conflict: boolean }. */
+exports.checkAgentDuplicate = onCall(CALL_OPTS, async (request) => {
+  const db = getFirestore();
+  const d = request.data || {};
+  const role = String(d.role || '');
+  if (!role) throw new HttpsError('invalid-argument', 'role requis.');
+  const num = (d.matricule || d.professionalNumber) ? String(d.matricule || d.professionalNumber).toUpperCase() : null;
+  const email = d.email ? String(d.email).trim().toLowerCase() : null;
+  const hasReal = (snap) => snap.docs.some(doc => doc.data() && doc.data().authUid);
+
+  if (num) {
+    for (const field of ['matricule', 'professionalNumber']) {
+      const s = await db.collection('mc_accounts').where('role', '==', role).where(field, '==', num).limit(5).get();
+      if (hasReal(s)) return { conflict: true };
+    }
+  }
+  if (email) {
+    const s = await db.collection('mc_accounts').where('role', '==', role).where('email', '==', email).limit(5).get();
+    if (hasReal(s)) return { conflict: true };
+  }
+  return { conflict: false };
+});
+
 /* claimPatientAccount — lie le compte patient à l'appelant après vérification
    SERVEUR du code de premier accès. L'appelant doit être authentifié (il a
    déjà une session Firebase Auth, créée à partir du PIN). Le code de premier

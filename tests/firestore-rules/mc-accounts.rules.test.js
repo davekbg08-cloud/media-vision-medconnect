@@ -6,11 +6,40 @@ const { assertSucceeds, assertFails } = require('@firebase/rules-unit-testing');
 const { doc, getDoc, setDoc, updateDoc } = require('firebase/firestore');
 const { getTestEnv, clearAll } = require('./helpers');
 
-test('mc_accounts : lecture publique OK, y compris non authentifié', async () => {
+test('mc_accounts : lecture publique FERMÉE (chantiers 6/7 v2.9.42) — le non authentifié est refusé', async () => {
   const env = await getTestEnv();
   await clearAll(env);
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'mc_accounts', 'PAT_MC-TEST-1'), { uid: 'PAT_MC-TEST-1', role: 'patient', authUid: 'fb-owner-1' });
+    await setDoc(doc(ctx.firestore(), 'mc_accounts', 'doctor-own-1'), { uid: 'doctor-own-1', role: 'doctor', authUid: 'doctor-own-1' });
+  });
   const unauthed = env.unauthenticatedContext().firestore();
-  await assertSucceeds(getDoc(doc(unauthed, 'mc_accounts', 'PAT_MC-TEST-1')));
+  await assertFails(getDoc(doc(unauthed, 'mc_accounts', 'PAT_MC-TEST-1')));
+});
+
+test('mc_accounts : le TITULAIRE lit son propre compte (authUid ou docId == uid)', async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'mc_accounts', 'PAT_MC-OWN'), { uid: 'PAT_MC-OWN', role: 'patient', authUid: 'fb-owner' });
+    await setDoc(doc(ctx.firestore(), 'mc_accounts', 'doctor-uid-own'), { uid: 'doctor-uid-own', role: 'doctor', authUid: 'doctor-uid-own' });
+  });
+  // Patient : titulaire par authUid.
+  const owner = env.authenticatedContext('fb-owner', { role: 'patient' }).firestore();
+  await assertSucceeds(getDoc(doc(owner, 'mc_accounts', 'PAT_MC-OWN')));
+  // Professionnel : titulaire par docId == uid.
+  const pro = env.authenticatedContext('doctor-uid-own', { role: 'doctor' }).firestore();
+  await assertSucceeds(getDoc(doc(pro, 'mc_accounts', 'doctor-uid-own')));
+});
+
+test('mc_accounts : un utilisateur ne lit PAS le compte d\'autrui', async () => {
+  const env = await getTestEnv();
+  await clearAll(env);
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'mc_accounts', 'PAT_MC-OTHER'), { uid: 'PAT_MC-OTHER', role: 'patient', authUid: 'fb-other' });
+  });
+  const intruder = env.authenticatedContext('fb-intruder', { role: 'doctor' }).firestore();
+  await assertFails(getDoc(doc(intruder, 'mc_accounts', 'PAT_MC-OTHER')));
 });
 
 test('mc_accounts : création avec un champ password en clair est refusée', async () => {
