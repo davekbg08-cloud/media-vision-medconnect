@@ -246,8 +246,21 @@ const NotificationCenter = (() => {
     _refreshPushButton();
   }
 
+  // Pont ouvert par l'app native Android (MainActivity) à l'ouverture depuis
+  // une notification système : on route via le même chemin sûr que le clic web.
+  function _installNativeBridge() {
+    try {
+      window.MedConnectNativeNotification = {
+        open(notificationId, path) {
+          if (notificationId) openNotification(notificationId);
+          else if (isAllowedRoute(path) && typeof window.navigateMedConnect === 'function') window.navigateMedConnect(path);
+        },
+      };
+    } catch (_) {}
+  }
+
   function init() {
-    try { mountBell(); subscribe(); } catch (e) { console.warn('[NotificationCenter] init :', e && e.message); }
+    try { mountBell(); subscribe(); _installNativeBridge(); } catch (e) { console.warn('[NotificationCenter] init :', e && e.message); }
   }
   function teardown() {
     if (_unsub) { try { _unsub(); } catch (_) {} _unsub = null; }

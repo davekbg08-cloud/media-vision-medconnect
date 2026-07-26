@@ -2,4 +2,8 @@
 plugins {
     id 'com.android.application' version '8.2.0' apply false
     id 'com.android.library' version '8.2.0' apply false
+    // Phase 5 notifications (v2.9.42) : plugin Google Services pour FCM natif.
+    // Appliqué au module app UNIQUEMENT si google-services.json est présent
+    // (voir app/build.gradle) — le build reste fonctionnel sans ce fichier.
+    id 'com.google.gms.google-services' version '4.4.2' apply false
 }

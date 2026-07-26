@@ -2,6 +2,15 @@ plugins {
     id 'com.android.application'
 }
 
+// Phase 5 notifications (v2.9.42) : plugin Google Services appliqué UNIQUEMENT
+// si google-services.json est présent. Le build (et l'APK actuel) restent donc
+// fonctionnels tant que le fichier n'est pas ajouté — le push natif est alors
+// simplement inactif. Ajouter android/app/google-services.json (Console
+// Firebase → Paramètres du projet → app Android) pour activer FCM natif.
+if (rootProject.file('app/google-services.json').exists()) {
+    apply plugin: 'com.google.gms.google-services'
+}
+
 def keystorePropertiesFile = rootProject.file('keystore.properties')
 def keystoreProperties = new Properties()
 if (keystorePropertiesFile.exists()) {
@@ -52,4 +61,9 @@ dependencies {
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'com.google.android.material:material:1.11.0'
     implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+    // FCM natif (Phase 5 notifications v2.9.42). La BoM aligne les versions ;
+    // la bibliothèque compile sans google-services.json (seul le runtime FCM
+    // nécessite le fichier). Aucune autre dépendance Firebase (léger).
+    implementation platform('com.google.firebase:firebase-bom:33.1.2')
+    implementation 'com.google.firebase:firebase-messaging'
 }

@@ -23,23 +23,30 @@ const PushRegistration = (() => {
       (n.standalone === true);
     const isIOS = /iPad|iPhone|iPod/.test(n.userAgent || '') ||
       (n.platform === 'MacIntel' && (n.maxTouchPoints || 0) > 1);
+    const nativeAndroid = !!(w.MedConnectPush && typeof w.MedConnectPush.isNativeAndroid === 'function' && w.MedConnectPush.isNativeAndroid());
+    let nativeToken = '';
+    if (nativeAndroid) { try { nativeToken = w.MedConnectPush.getCachedToken() || ''; } catch (_) { nativeToken = ''; } }
     return {
       serviceWorker: 'serviceWorker' in n,
       pushManager: (typeof w.PushManager !== 'undefined'),
       notification: (typeof w.Notification !== 'undefined'),
-      standalone, isIOS,
+      standalone, isIOS, nativeAndroid, nativeToken,
       permission: (typeof w.Notification !== 'undefined') ? w.Notification.permission : 'unsupported',
     };
   }
 
   // Fournisseur selon la plateforme (détection de FONCTIONNALITÉ, pas UA seul).
   function pickProvider(c) {
+    if (c.nativeAndroid) return 'fcm_android_native';
     if (c.isIOS) return 'webpush_ios';
     return 'fcm_web';
   }
 
   // État affiché à l'utilisateur (aucun faux « activé »).
   function computeState(c, configured) {
+    // App native Android : le jeton FCM natif + la permission POST_NOTIFICATIONS
+    // sont gérés côté natif ; l'état reflète la présence du jeton.
+    if (c.nativeAndroid) return c.nativeToken ? 'granted' : 'default';
     if (!c.serviceWorker || !c.pushManager || !c.notification) return 'unsupported';
     if (c.isIOS && !c.standalone) return 'ios-needs-install'; // ajouter à l'écran d'accueil
     if (!configured) return 'not-configured'; // clé VAPID absente
@@ -84,6 +91,23 @@ const PushRegistration = (() => {
   // Opt-in : DOIT être appelé depuis un clic utilisateur (requestPermission).
   async function enable() {
     const c = caps();
+    // App native Android : enregistre le jeton FCM natif (provider dédié) — la
+    // permission POST_NOTIFICATIONS est demandée par MainActivity.
+    if (c.nativeAndroid) {
+      const token = c.nativeToken;
+      if (!token) return { ok: false, state: 'default' }; // jeton pas encore prêt
+      try {
+        await _registerServer({
+          deviceId: deviceId(), provider: 'fcm_android_native', registrationToken: token,
+          platform: 'android', appVariant: 'android-native',
+          appVersion: (window.VersionManager && window.VersionManager.getCurrent && window.VersionManager.getCurrent().version) || null,
+          locale: navigator.language || null,
+          timezone: (Intl && Intl.DateTimeFormat().resolvedOptions().timeZone) || null,
+          notificationPermission: 'granted',
+        });
+        return { ok: true, state: 'granted' };
+      } catch (e) { console.warn('[PushRegistration] native android :', e && e.message); return { ok: false, state: 'error' }; }
+    }
     const key = vapidKey();
     if (!key) return { ok: false, state: 'not-configured' };
     if (c.isIOS && !c.standalone) return { ok: false, state: 'ios-needs-install' };
