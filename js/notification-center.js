@@ -95,6 +95,8 @@ const NotificationCenter = (() => {
   let _list = [];
   let _unsub = null;
   let _mounted = false;
+  let _seeded = false;          // premier snapshot traité (évite le backlog)
+  const _known = new Set();     // ids déjà vus (anti-doublon de notif système)
 
   function _db() { return (typeof firebaseDB !== 'undefined' && firebaseDB) ? firebaseDB : (window.firebaseDB || null); }
   function _fns() { return (typeof firebaseFunctions !== 'undefined' && firebaseFunctions) ? firebaseFunctions : (window.firebaseFunctions || null); }
@@ -129,12 +131,37 @@ const NotificationCenter = (() => {
     try {
       _unsub = db.collection('notifications').where('recipientUid', '==', uid).limit(50)
         .onSnapshot(snap => {
+          const first = !_seeded;
           const byId = new Map(_list.map(n => [n.notificationId, n]));
-          snap.forEach(doc => { const d = doc.data() || {}; byId.set(d.notificationId || doc.id, { ...d, notificationId: d.notificationId || doc.id }); });
+          const fresh = [];
+          snap.forEach(doc => {
+            const d = doc.data() || {}; const id = d.notificationId || doc.id;
+            if (!_known.has(id)) { _known.add(id); if (!first) fresh.push({ ...d, notificationId: id }); }
+            byId.set(id, { ...d, notificationId: id });
+          });
           _list = Array.from(byId.values());
           _rerender();
+          // Notification système native « quand l'app tourne » (Electron +
+          // web premier/arrière-plan) : uniquement pour les NOUVELLES non-lues
+          // (jamais le backlog au premier chargement). Aucun contenu médical.
+          if (!first) fresh.filter(n => (n.readStatus || 'unread') === 'unread').forEach(_maybeSystemNotify);
+          _seeded = true;
         }, err => console.warn('[NotificationCenter] listener refusé :', err && err.message));
     } catch (e) { console.warn('[NotificationCenter] abonnement impossible :', e && e.message); }
+  }
+
+  // Notification système locale (API Web Notification — rendue nativement par
+  // Electron/Chromium). Générique, jamais de donnée médicale. Ne se déclenche
+  // que si l'utilisateur a accordé la permission.
+  function _maybeSystemNotify(n) {
+    try {
+      if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+      const lang = currentLang();
+      const title = resolveLabel(n.titleKey || 'notif.generic.title', n.localizationParams, lang);
+      const body = resolveLabel(n.bodyKey || 'notif.generic.body', n.localizationParams, lang);
+      const notif = new Notification(title, { body, tag: n.notificationId, silent: false });
+      notif.onclick = () => { try { window.focus(); } catch (_) {} openNotification(n.notificationId); try { notif.close(); } catch (_) {} };
+    } catch (_) {}
   }
 
   async function markRead(notificationId) {
@@ -264,7 +291,7 @@ const NotificationCenter = (() => {
   }
   function teardown() {
     if (_unsub) { try { _unsub(); } catch (_) {} _unsub = null; }
-    _list = []; _applyBadge(0); _closePanel();
+    _list = []; _seeded = false; _known.clear(); _applyBadge(0); _closePanel();
   }
 
   return {
