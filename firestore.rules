@@ -365,7 +365,7 @@ service cloud.firestore {
        mc_messages. */
     function notificationStatusFieldsOk(before, after) {
       return after.diff(before).affectedKeys().hasOnly([
-        'read', 'readStatus', 'readAt', 'seen', 'seenAt',
+        'read', 'readStatus', 'readAt', 'seen', 'seenAt', 'openedAt',
         'status', 'dismissedAt', 'archivedAt', 'updatedAt'
       ]);
     }
@@ -1156,6 +1156,57 @@ service cloud.firestore {
          notificationAuthorOk(request.resource.data) &&
          notificationRecipientOk(request.resource.data));
       allow delete: if isAdmin();
+    }
+
+    /* ═══════════════════════════════════════════════════════════
+       SYSTÈME DE NOTIFICATIONS (v2.9.42, chantier « notifications »)
+       Trois collections neuves, en plus de `notifications` (étendue ci-dessus).
+       Firestore reste la source de vérité ; le push n'est qu'un signal.
+       ═══════════════════════════════════════════════════════════ */
+
+    /* B. pushRegistrations/{uid}/devices/{deviceId} — un document par
+       installation. Contient des données TECHNIQUES SENSIBLES (jeton
+       d'enregistrement, souscription Web Push, installationId) : jamais
+       lisibles par un autre utilisateur, jamais listables publiquement.
+
+       ÉCRITURE : JAMAIS depuis le client — elle passe exclusivement par les
+       Cloud Functions callables registerPushDevice/unregisterPushDevice
+       (Auth + App Check exigés), qui écrivent via l'Admin SDK (lequel ignore
+       ces règles). `allow write: if false` ferme donc tout accès direct.
+       LECTURE : bornée au propriétaire (afficher « appareils enregistrés »
+       dans Paramètres — l'UI n'affiche que des métadonnées, jamais les
+       jetons). */
+    match /pushRegistrations/{uid} {
+      allow read, write: if false; // le document parent ne porte rien
+      match /devices/{deviceId} {
+        allow read: if signedIn() && request.auth.uid == uid;
+        allow write: if false; // Cloud Functions/Admin uniquement
+      }
+    }
+
+    /* C. notificationPreferences/{uid} — préférences par utilisateur.
+       Propriétaire uniquement ; uid immuable ; jamais la préférence d'un
+       autre compte. Le callable updateNotificationPreferences (Auth + App
+       Check) reste la voie recommandée, mais l'écriture directe bornée au
+       propriétaire est autorisée (ne dépend pas du déploiement des fonctions
+       pour fonctionner). */
+    match /notificationPreferences/{uid} {
+      allow read: if signedIn() && request.auth.uid == uid;
+      allow create: if signedIn() && request.auth.uid == uid &&
+        request.resource.data.get('uid', uid) == uid;
+      allow update: if signedIn() && request.auth.uid == uid &&
+        request.resource.data.get('uid', resource.data.get('uid', uid)) == uid;
+      allow delete: if false;
+    }
+
+    /* D. notificationDeliveries/{deliveryId} — journal technique de livraison
+       (contient providerMessageId et l'appareil visé). Cloud Functions/Admin
+       uniquement : jamais lisible publiquement, jamais d'identifiant
+       fournisseur exposé au client. Un état simplifié pourra être exposé plus
+       tard via une projection Cloud Function, jamais en lecture directe. */
+    match /notificationDeliveries/{deliveryId} {
+      allow read: if isAdmin();
+      allow write: if false; // Cloud Functions/Admin uniquement
     }
 
     match /registration_requests/{requestId} {
