@@ -63,17 +63,28 @@ Vérifier ensuite, sur un compte de test :
 
 ## 4. Fermer la lecture publique de `mc_accounts` — SEULEMENT après §3 validé
 
-Dans `firestore.rules`, remplacer `allow read: if true;` du bloc
-`match /mc_accounts/{docId}` par une règle restreinte (lecture réservée au
-titulaire/à l'admin). Les `get()` internes des règles sur `mc_accounts`
-continuent de fonctionner (ils ignorent la règle `read`). Puis :
+La règle restreinte est **déjà présente** dans `firestore.rules` (bloc
+`match /mc_accounts/{docId}` : lecture réservée au titulaire — `docId` ou
+`authUid` == `request.auth.uid` — ou à l'admin). Plus aucune édition manuelle
+n'est nécessaire ; il suffit de déployer. Les `get()` internes des règles sur
+`mc_accounts` continuent de fonctionner (ils ignorent la règle `read`), et la
+détection de doublon à l'inscription passe désormais par la fonction
+`checkAgentDuplicate` (déployée au §3).
 
 ```bash
 firebase deploy --only firestore:rules
 ```
 Contrôle immédiat : reconnexion professionnelle et premier accès patient
 fonctionnent toujours (désormais via les fonctions). En cas de problème :
-rollback des règles (`allow read: if true;`) le temps de diagnostiquer.
+rollback rapide des règles depuis l'onglet **Règles** de la console Firebase
+(version précédente) le temps de diagnostiquer.
+
+> 💡 **Raccourci ordonné.** Le script `scripts/deploy-ordered-v2942.sh`
+> enchaîne §3 → §4 → §6 avec des *gates* de confirmation manuelle entre chaque
+> étape : il **refuse de déployer les règles** tant que tu n'as pas confirmé
+> que le login staging fonctionne après le déploiement des fonctions. Lance
+> `scripts/deploy-ordered-v2942.sh --dry-run` pour prévisualiser sans rien
+> déployer, puis sans `--dry-run` pour exécuter.
 
 ## 5. Sécurité : App Check + CSP (staging d'abord)
 
