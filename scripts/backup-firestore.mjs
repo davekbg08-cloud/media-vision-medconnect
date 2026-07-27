@@ -22,6 +22,7 @@
    ===================================================== */
 import { mkdirSync, writeFileSync, createWriteStream } from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 // Collections applicatives réelles (extraites de firestore.rules) —
 // exclut les collections purement techniques (`system`) qui ne
@@ -123,6 +124,6 @@ async function main() {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch(err => { console.error('❌ Sauvegarde interrompue :', err); process.exit(1); });
 }

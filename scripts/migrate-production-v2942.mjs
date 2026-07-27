@@ -54,6 +54,7 @@
    ===================================================== */
 
 import { writeFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 
 /* Collections canoniques portant un champ d'établissement à réconcilier.
    patient_directory est traité à part (backfill depuis mc_patients). */
@@ -262,6 +263,6 @@ async function main() {
   if (!args.apply) console.log('\nRelancez avec --apply --i-have-a-backup pour appliquer réellement.');
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch(e => { console.error('❌ Migration interrompue :', e); process.exit(1); });
 }
