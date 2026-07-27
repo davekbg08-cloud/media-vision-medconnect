@@ -61,7 +61,15 @@ Vérifier ensuite, sur un compte de test :
 > `MEDCONNECT_FUNCTIONS_REGION`). Le client (`js/firebase-config.js`) initialise
 > `firebase.functions('europe-west1')` — garder les deux cohérents.
 
-## 4. Fermer la lecture publique de `mc_accounts` — SEULEMENT après §3 validé
+## 4. Fermer la lecture publique de `mc_accounts` — SEULEMENT après §3 ET §6 validés
+
+> ⚠️ **Prérequis d'ORDRE** : déployer d'abord les Cloud Functions (§3) **puis le
+> Hosting v2.9.42 (§6)**, et seulement ENSUITE fermer `mc_accounts`. C'est le
+> Hosting qui met en ligne le client v2.9.42 : il active App Check (les
+> fonctions ont `enforceAppCheck:true`) et fait passer la résolution de compte
+> par les fonctions. Fermer la règle alors que l'ancien client (lecture directe)
+> est encore servi casserait la connexion. Le script `deploy-ordered-v2942.sh`
+> applique déjà le bon ordre (fonctions → hosting → règles).
 
 La règle restreinte est **déjà présente** dans `firestore.rules` (bloc
 `match /mc_accounts/{docId}` : lecture réservée au titulaire — `docId` ou
@@ -144,9 +152,16 @@ habituel ; `MainActivity` pointe la PWA en `?apk=v2.9.42`.
 
 ## Ordre récapitulatif
 
-1. Sauvegarde → 2. Migration (dry-run puis apply) → 3. **Cloud Functions** →
-4. **Fermeture `mc_accounts`** → 5. App Check/CSP (staging) → 6. Hosting →
-7. Android.
+1. Sauvegarde → 2. Migration (dry-run puis apply) → 3. **Cloud Functions**
+(`enforceAppCheck`) → **6. Hosting v2.9.42** (met en ligne le client qui active
+App Check + passe par les fonctions) → **4. Fermeture `mc_accounts`** (sûre une
+fois le nouveau client servi) → 5. **App Check enforce** (seulement quand le %
+vérifié ≈ 100 %) → 7. Android.
+
+> Le Hosting (§6) doit précéder la fermeture de `mc_accounts` (§4) : c'est lui
+> qui met en ligne le client v2.9.42 (App Check + résolution via fonctions). Le
+> script `scripts/deploy-ordered-v2942.sh` applique cet ordre
+> (**fonctions → hosting → règles**) avec des gates de validation manuelle.
 
 Ne passer en production qu'une fois §3–§5 **validés en staging**. Sinon, la
 version reste **RELEASE BLOCKED**.
