@@ -28,7 +28,7 @@ test('firebase.json expose les en-têtes de sécurité attendus', () => {
   }
   const xfo = j.hosting.headers[0].headers.find(h => h.key === 'X-Frame-Options');
   assert.strictEqual(xfo.value, 'DENY');
-  // Une CSP est présente (report-only tant que l'enforcement n'est pas validé).
+  // Une CSP est présente (désormais bloquante — cf. csp-hosting-headers-v2942).
   assert.ok(headers.some(h => /Content-Security-Policy/.test(h)), 'une CSP doit être déclarée');
 });
 

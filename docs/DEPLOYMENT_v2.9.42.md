@@ -91,10 +91,37 @@ rollback rapide des règles depuis l'onglet **Règles** de la console Firebase
 - **App Check** : activer l'enforcement dans la console Firebase seulement après
   avoir vérifié qu'aucun appareil légitime n'est rejeté (voir
   `docs/FIREBASE_APP_CHECK_SETUP.md`).
-- **CSP** : la politique est en `Content-Security-Policy-Report-Only`. Après
-  quelques jours sans violation en staging, la promouvoir en
-  `Content-Security-Policy` (mode bloquant) dans `firebase.json`, puis
-  `firebase deploy --only hosting`.
+- **CSP** : la politique est désormais **bloquante** (`Content-Security-Policy`,
+  header dans `firebase.json`) et **complète** — audit de toutes les ressources
+  réellement chargées (Firebase SDK, reCAPTCHA/App Check, Leaflet, Google Fonts,
+  QR codes, Claude API, EuropePMC, Overpass). Elle prend effet au déploiement
+  Hosting (§6). Contrat verrouillé par `tests/csp-hosting-headers-v2942.test.js`.
+
+  - **Compromis assumé** : `script-src` conserve `'unsafe-inline'`. L'app repose
+    sur un `<script>` inline (index.html) et ~276 gestionnaires `onclick=`
+    inline ; les bloquer casserait toute l'UI. Le durcissement porte donc sur la
+    **restriction des hôtes** (scripts/connect/frame/img/style/font limités aux
+    domaines légitimes) + `object-src 'none'`, `base-uri 'self'`,
+    `form-action 'self'`, `frame-ancestors 'none'`, `worker-src 'self'`,
+    `manifest-src 'self'`. Suivi ouvert : migrer vers la délégation d'événements
+    pour retirer `'unsafe-inline'` et obtenir une vraie protection anti-XSS
+    inline.
+  - **Rollback immédiat** si une ressource légitime est bloquée en prod :
+    remettre la clé du header à `Content-Security-Policy-Report-Only` dans
+    `firebase.json` puis `firebase deploy --only hosting` (la politique
+    redevient observation seule, l'app n'est plus contrainte). Diagnostiquer via
+    la console navigateur (les violations y sont journalisées).
+  - **Vérif post-déploiement** (console navigateur, onglet Console) : connexion,
+    carte (tuiles + POI), recherche de littérature médicale, synthèse IA,
+    impression d'ordonnance (QR) — aucune erreur `Refused to … because it
+    violates the following Content Security Policy directive`.
+
+  > ⚠️ **Suivi sécurité (hors périmètre CSP)** : `js/medical-ai.js` appelle
+  > `https://api.anthropic.com` **directement depuis le navigateur**. La CSP
+  > autorise cet hôte pour ne pas casser la fonctionnalité, mais un appel direct
+  > expose la clé API côté client. Recommandation : proxifier via une Cloud
+  > Function (la clé restant dans Secret Manager). À traiter dans un chantier
+  > dédié — ne pas bloquer la CSP là-dessus.
 
 ---
 

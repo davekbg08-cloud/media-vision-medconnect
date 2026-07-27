@@ -140,9 +140,11 @@ step "Reste à décider MANUELLEMENT (non lancé par ce script)"
 cat <<EOF
   • App Check : activer l'enforcement dans la console APRÈS avoir vérifié qu'aucun
     appareil légitime n'est rejeté (docs/FIREBASE_APP_CHECK_SETUP.md).
-  • CSP : actuellement en Content-Security-Policy-Report-Only. Après quelques
-    jours sans violation en ${TARGET}, la promouvoir en Content-Security-Policy
-    (mode bloquant) dans firebase.json, puis: firebase deploy --only hosting.
+  • CSP : DÉJÀ bloquante et complète (firebase.json) — elle a pris effet à
+    l'étape Hosting ci-dessus. Vérifier la console navigateur (aucune violation
+    'Refused to ... Content Security Policy'). En cas de blocage d'une ressource
+    légitime : repasser la clé du header en Content-Security-Policy-Report-Only
+    puis redéployer le hosting (rollback observation seule).
   • Notifications (envoi réel) : clés VAPID dans Secret Manager + clé publique
     côté client + google-services.json Android, puis re-déployer les fonctions.
   • Android APK : versionCode 43 / 2.9.42, miroirs déjà synchronisés.
