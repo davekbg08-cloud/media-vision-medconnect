@@ -26,6 +26,8 @@
      node scripts/backfill-patient-directory.mjs --apply   # exécution réelle
    ===================================================== */
 
+import { pathToFileURL } from 'node:url';
+
 function parseArgs(argv) {
   const out = { apply: false, help: false };
   for (const arg of argv) {
@@ -127,7 +129,7 @@ async function main() {
   if (!args.apply) console.log('Relancez avec --apply pour appliquer réellement.');
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch(err => { console.error('❌ Migration interrompue :', err); process.exit(1); });
 }
 

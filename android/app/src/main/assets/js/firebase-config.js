@@ -35,10 +35,23 @@ function resolveAppCheckSiteKey() {
   return APP_CHECK_SITE_KEYS[hostname] || '';
 }
 
+/* Clé VAPID PUBLIQUE pour le push web (Phase 5 notifications) — à renseigner
+   depuis Console Firebase → Cloud Messaging → « Certificats Web Push » (clé de
+   paire de clés). PUBLIQUE (sûre à exposer, comme la clé reCAPTCHA) ; la clé
+   PRIVÉE reste côté serveur (Secret Manager, functions). Tant qu'elle est vide,
+   l'opt-in notifications affiche « non configuré » (jamais un faux bouton
+   activé). */
+window.PUSH_VAPID_PUBLIC_KEY = window.PUSH_VAPID_PUBLIC_KEY || '';
+
 /* ── INITIALISATION ─────────────────────────────── */
 let firebaseDB   = null;
 let firebaseAuth = null;
 let firebaseReady = false;
+// Chantiers 6/7 (v2.9.42) : client Cloud Functions. Reste null tant que le SDK
+// firebase-functions n'est pas chargé OU que les fonctions ne sont pas
+// déployées — le code appelant (js/auth.js) détecte cette absence et conserve
+// son chemin actuel en repli (aucune casse avant déploiement).
+let firebaseFunctions = null;
 
 // Séparée de initFirebase() pour rester testable isolément et pour que
 // l'absence du SDK App Check (firebase.appCheck) — normale tant que le
@@ -83,6 +96,12 @@ function initFirebase() {
     activateAppCheck();
     firebaseDB    = firebase.firestore();
     firebaseAuth  = firebase.auth ? firebase.auth() : null;
+    // Client Cloud Functions dans la MÊME région que les fonctions déployées
+    // (voir functions/index.js REGION). Inerte si le SDK n'est pas chargé.
+    try {
+      firebaseFunctions = firebase.functions ? firebase.functions('europe-west1') : null;
+      if (firebaseFunctions) window.firebaseFunctions = firebaseFunctions;
+    } catch (_) { firebaseFunctions = null; }
     firebaseReady = true;
 
     // Activer la persistance hors-ligne

@@ -17,7 +17,7 @@ const mainPath = path.resolve(__dirname, '..', 'electron/main.js');
 const mainSrc = fs.readFileSync(mainPath, 'utf8');
 
 const workflowPath = path.resolve(__dirname, '..', '.github/workflows/build-desktop-app.yml');
-const workflowSrc = fs.readFileSync(workflowPath, 'utf8');
+const workflowSrc = fs.readFileSync(workflowPath, 'utf8').replace(/\r\n/g, '\n');
 
 test('main.js charge une URL https:// distante, jamais file://', () => {
   assert.match(mainSrc, /loadURL\(\s*APP_URL\s*\)/);

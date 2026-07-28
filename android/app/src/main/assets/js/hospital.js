@@ -250,7 +250,6 @@ const HospitalPortal = (() => {
           ${window.HospitalCapabilities?.can?.(Auth.getUser()?.role, 'create_consultation')
             ? `<button class="btn btn-ghost btn-sm" aria-label="Nouvelle consultation" title="Nouvelle consultation" onclick="event.stopPropagation();HospitalPortal.openConsult('${p.id}')">🩺</button>` : ''}
           <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();HospitalPortal.viewAccessCode('${p.id}')">🔑</button>
-          <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();HospitalPortal.deletePatient('${p.id}')">🗑️</button>
         </div>
       </div>`;
   }
@@ -317,7 +316,6 @@ const HospitalPortal = (() => {
       ${cons.slice(0,3).map(c=>`
         <div class="mini-record">
           <span>📅 ${c.date}</span><span>${esc(c.diagnosis)}</span>
-          <button class="btn btn-ghost btn-xs" onclick="HospitalPortal.delConsult('${c.cid}','${id}')">🗑️</button>
         </div>`).join('')||`<p style="color:var(--text-muted);font-size:.85rem">${t('no_data')}</p>`}
       <div class="modal-footer">
         ${window.HospitalCapabilities?.can?.(Auth.getUser()?.role, 'create_consultation')
@@ -484,10 +482,14 @@ const HospitalPortal = (() => {
     `);
   }
 
-  function deletePatient(id) {
-    if (!canUsePatient(id)) { App.toast('Accès patient non autorisé.', 'error'); return; }
-    if (!confirm(t('msg_confirm_delete'))) return;
-    DB.deletePatient(id); App.toast(t('msg_deleted')); navigateMedConnect('patients');
+  // Chantier 3 (v2.9.42) — l'historique médical est APPEND-ONLY : la
+  // suppression d'une fiche patient n'est plus proposée aux rôles ordinaires
+  // (bouton retiré) et la fonction refuse désormais toute suppression
+  // (défense en profondeur ; côté serveur, mc_patients.delete est de toute
+  // façon réservé à l'admin plateforme). La correction d'une erreur passe
+  // par une nouvelle entrée, jamais par une destruction.
+  function deletePatient(_id) {
+    App.toast('🔒 Suppression non autorisée : l\'historique médical est protégé. Corrigez par une nouvelle entrée.', 'warning');
   }
 
   /* ── CONSULTATION + ORDONNANCE INTELLIGENTE ───── */
@@ -768,9 +770,12 @@ const HospitalPortal = (() => {
     navigateMedConnect('consultations');
   }
 
-  function delConsult(cid, patientId) {
-    if (!confirm(t('msg_confirm_delete'))) return;
-    DB.deleteConsultation(cid); App.toast(t('msg_deleted')); openDetail(patientId);
+  // Chantier 3 (v2.9.42) — une consultation signée ne se supprime pas
+  // (append-only, bouton retiré, mc_consultations.delete réservé à l'admin
+  // plateforme côté serveur). Une erreur se corrige par une nouvelle
+  // consultation de type « correction » liée à l'originale.
+  function delConsult(_cid, _patientId) {
+    App.toast('🔒 Une consultation ne peut pas être supprimée. Ajoutez une consultation de correction.', 'warning');
   }
 
   /* ── POINT D'ENTRÉE « NOUVELLE CONSULTATION » ───────

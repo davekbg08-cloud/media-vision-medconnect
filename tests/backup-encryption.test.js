@@ -104,7 +104,7 @@ test("encrypt-backup.mjs : round-trip réel — chiffre puis déchiffre (gpg), c
     execFileSync('gpg', ['--batch', '--yes', '--decrypt', '--passphrase', 'test-passphrase', '--output', decryptedTar, outPath]);
     const decryptedDir = path.join(tmpDir, 'decrypted-out');
     fs.mkdirSync(decryptedDir);
-    execFileSync('tar', ['-xzf', decryptedTar, '-C', decryptedDir]);
+    execFileSync('tar', ['--force-local', '-xzf', decryptedTar, '-C', decryptedDir]);
     const restoredContent = fs.readFileSync(path.join(decryptedDir, 'mc_accounts.ndjson'), 'utf8');
     assert.match(restoredContent, /PAT_MC-1/);
   } finally {

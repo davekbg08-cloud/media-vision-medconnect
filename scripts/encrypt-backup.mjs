@@ -36,6 +36,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync, statSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 function parseArgs(argv) {
   const out = { in: null, out: null, manifestOut: null, version: null };
@@ -99,7 +100,7 @@ async function main() {
     // tar+gzip d'abord (un seul flux à chiffrer), jamais écrit sur
     // disque en clair au-delà de cette étape intermédiaire locale au
     // runner (supprimée juste après, avant toute publication).
-    execFileSync('tar', ['-czf', tarPath, '-C', args.in, '.'], { stdio: 'inherit' });
+    execFileSync('tar', ['--force-local', '-czf', tarPath, '-C', args.in, '.'], { stdio: 'inherit' });
     execFileSync('gpg', [
       '--batch', '--yes', '--symmetric', '--cipher-algo', 'AES256',
       '--passphrase', passphrase, '--output', args.out, tarPath,
@@ -123,6 +124,6 @@ async function main() {
   console.log(`✅ Manifeste public (non sensible) : ${manifestOutPath}`);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch(err => { console.error('❌ Chiffrement interrompu :', err); process.exit(1); });
 }

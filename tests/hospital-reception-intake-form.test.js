@@ -69,7 +69,9 @@ function setup({ mcPatients = {} } = {}) {
   sandbox.HospitalPortal = { currentEstablishmentFields: () => ({ establishmentId: 'EST-1' }) };
   sandbox.Auth = { getUser: () => ({ uid: 'user-1' }) };
   sandbox.firebaseReady = true;
-  sandbox.firebaseDB = makeFirestoreMock({ mc_patients: mcPatients });
+  // Chantier 2 (v2.9.42) : la réception résout un numéro MC via
+  // patient_directory (identité administrative), plus jamais mc_patients.
+  sandbox.firebaseDB = makeFirestoreMock({ patient_directory: mcPatients });
   sandbox.DB = {
     getPatients: () => [],
     savePatients: () => {},

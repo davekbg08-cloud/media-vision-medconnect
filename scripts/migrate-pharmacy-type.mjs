@@ -41,6 +41,8 @@
      node scripts/migrate-pharmacy-type.mjs --apply    # applique le backfill
    ===================================================== */
 
+import { pathToFileURL } from 'node:url';
+
 function parseArgs(argv) {
   const out = { apply: false, help: false };
   for (const arg of argv) {
@@ -164,7 +166,7 @@ async function main() {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch(err => { console.error('❌ Migration interrompue :', err); process.exit(1); });
 }
 

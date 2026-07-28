@@ -2,13 +2,14 @@
    Tests — firebase.json : en-têtes de sécurité Firebase Hosting
    (audit "workflows mobile/desktop", section 22)
 
-   Déploiement PROGRESSIF, jamais brutal — même philosophie que
-   l'activation d'App Check (docs/FIREBASE_APP_CHECK_SETUP.md) : la CSP
-   est ajoutée en mode Content-Security-Policy-Report-Only (violations
-   journalisées par le navigateur, JAMAIS bloquées) pour observer le
-   comportement réel avant d'envisager un jour un mode bloquant. Les
-   autres en-têtes (X-Frame-Options, HSTS, Permissions-Policy) sont
-   sans ambiguïté et n'affectent aucune fonctionnalité existante.
+   MISE À JOUR v2.9.42 : la CSP, après une phase d'observation en
+   Content-Security-Policy-Report-Only et un audit complet des ressources
+   réellement chargées, est passée en mode BLOQUANT
+   (Content-Security-Policy). Le contrat détaillé (tous les hôtes, les
+   directives de durcissement) est verrouillé par
+   tests/csp-hosting-headers-v2942.test.js ; ce fichier-ci ne garde que
+   les vérifications transverses des en-têtes de sécurité. Les autres
+   en-têtes (X-Frame-Options, HSTS, Permissions-Policy) restent inchangés.
    ===================================================== */
 const { test } = require('node:test');
 const assert = require('node:assert');
@@ -67,19 +68,19 @@ test('firebase.json : Permissions-Policy autorise la géolocalisation (utilisée
   assert.match(pp, /payment=\(\)/);
 });
 
-test("firebase.json : la CSP est en mode Report-Only (jamais bloquante) — déploiement progressif obligatoire", () => {
+test("firebase.json : la CSP est désormais en mode BLOQUANT (Content-Security-Policy), plus Report-Only", () => {
   const config = loadConfig();
   const headers = config.hosting.headers.find(h => h.source === '**').headers;
-  assert.strictEqual(headerValue(headers, 'Content-Security-Policy'), undefined,
-    'aucune CSP BLOQUANTE ne doit être ajoutée avant observation en mode Report-Only');
-  assert.ok(headerValue(headers, 'Content-Security-Policy-Report-Only'),
-    'la CSP doit exister en mode Report-Only');
+  assert.ok(headerValue(headers, 'Content-Security-Policy'),
+    'la CSP bloquante (Content-Security-Policy) doit être présente');
+  assert.strictEqual(headerValue(headers, 'Content-Security-Policy-Report-Only'), undefined,
+    'plus de header Report-Only une fois la CSP promue en bloquant');
 });
 
-test('firebase.json : la CSP (Report-Only) autorise réellement tous les domaines externes utilisés par l\'app (Firebase, unpkg/Leaflet, tuiles OpenStreetMap, reCAPTCHA)', () => {
+test('firebase.json : la CSP bloquante autorise réellement tous les domaines externes utilisés par l\'app (Firebase, unpkg/Leaflet, tuiles OpenStreetMap, reCAPTCHA)', () => {
   const config = loadConfig();
   const headers = config.hosting.headers.find(h => h.source === '**').headers;
-  const csp = headerValue(headers, 'Content-Security-Policy-Report-Only');
+  const csp = headerValue(headers, 'Content-Security-Policy');
   assert.match(csp, /https:\/\/www\.gstatic\.com/, 'SDK Firebase (js/firebase-config.js, firebase-*.js)');
   assert.match(csp, /https:\/\/unpkg\.com/, 'Leaflet (js/map.js)');
   assert.match(csp, /https:\/\/\*\.tile\.openstreetmap\.org/, 'tuiles de carte (js/map.js)');
@@ -91,7 +92,7 @@ test('firebase.json : la CSP (Report-Only) autorise réellement tous les domaine
 test("firebase.json : la CSP interdit les plugins (object-src 'none') et fige base-uri/form-action sur 'self'", () => {
   const config = loadConfig();
   const headers = config.hosting.headers.find(h => h.source === '**').headers;
-  const csp = headerValue(headers, 'Content-Security-Policy-Report-Only');
+  const csp = headerValue(headers, 'Content-Security-Policy');
   assert.match(csp, /object-src 'none'/);
   assert.match(csp, /base-uri 'self'/);
   assert.match(csp, /form-action 'self'/);

@@ -18,6 +18,11 @@ const Auth = (() => {
     //    les vider ensuite ne perdrait aucune donnée médicale.
     try { await DB.flushOutbox?.(); } catch (_) {}
 
+    // Centre de notifications (Phase 6a v2.9.42) : couper l'écoute et vider le
+    // badge — l'agent suivant d'un poste partagé ne voit pas les notifications
+    // du précédent.
+    try { window.NotificationCenter?.teardown?.(); } catch (_) {}
+
     // 2) Vraie déconnexion Firebase (sinon la session serveur reste
     //    active pour le prochain utilisateur du poste).
     try {
@@ -444,8 +449,35 @@ const Auth = (() => {
      qu'il n'existe pas. Utilisé pour les 4 rôles : patient,
      médecin, pharmacien, infirmier.
   ──────────────────────────────────────────────────────── */
+  /* Chantiers 6/7 (v2.9.42) — appel à la Cloud Function authLookup si elle est
+     disponible (SDK chargé ET fonction déployée). Elle résout l'existence + le
+     routage minimal d'un compte SANS lecture publique de mc_accounts. En cas
+     d'indisponibilité (SDK absent, fonction non déployée, appel en échec), on
+     renvoie undefined pour signaler « pas de réponse serveur » — l'appelant
+     retombe alors sur la lecture directe actuelle (repli, tant que la lecture
+     publique de mc_accounts n'est pas fermée). */
+  async function _authLookupViaFunction(payload) {
+    const fns = (typeof firebaseFunctions !== 'undefined' && firebaseFunctions)
+      ? firebaseFunctions
+      : (typeof window !== 'undefined' ? window.firebaseFunctions : null);
+    if (!fns || typeof fns.httpsCallable !== 'function') return undefined;
+    try {
+      const callable = fns.httpsCallable('authLookup');
+      const res = await callable(payload);
+      return res && res.data ? res.data : { exists: false };
+    } catch (e) {
+      console.warn('[MedConnect] authLookup (Cloud Function) indisponible — repli lecture directe :', e?.message || e);
+      return undefined; // indisponible : l'appelant utilise le repli
+    }
+  }
+
   async function _fetchAccountByDocId(docId) {
     if (!docId || !_hasFirebaseDB()) return null;
+    // Voie serveur d'abord (patient : docId = PAT_{patientId}).
+    if (/^PAT_/.test(String(docId))) {
+      const viaFn = await _authLookupViaFunction({ patientId: String(docId).replace(/^PAT_/, '') });
+      if (viaFn !== undefined) return viaFn.exists ? viaFn : null;
+    }
     try {
       const doc = await firebaseDB.collection('mc_accounts').doc(docId).get();
       return doc.exists ? doc.data() : null;
@@ -521,8 +553,16 @@ const Auth = (() => {
         if (!snap.empty) { data = snap.docs[0].data(); foundId = snap.docs[0].id; }
       }
       if (!data) {
-        const snap = await firebaseDB.collection('mc_accounts').where('role', '==', role).where(field, '==', num).limit(1).get();
-        if (!snap.empty) { data = snap.docs[0].data(); foundId = snap.docs[0].id; }
+        // Chantiers 6/7 : voie serveur (authLookup) d'abord — pas de lecture
+        // publique de mc_accounts. Repli sur la lecture directe si la fonction
+        // est indisponible (non déployée), tant que la règle publique existe.
+        const viaFn = await _authLookupViaFunction({ role, professionalNumber: num });
+        if (viaFn !== undefined) {
+          if (viaFn.exists) { data = viaFn; foundId = viaFn.uid; }
+        } else {
+          const snap = await firebaseDB.collection('mc_accounts').where('role', '==', role).where(field, '==', num).limit(1).get();
+          if (!snap.empty) { data = snap.docs[0].data(); foundId = snap.docs[0].id; }
+        }
       }
     } catch (e) {
       console.warn('[MedConnect] resolveProfessionalAccountFromFirestore :', e);
@@ -1054,6 +1094,21 @@ const Auth = (() => {
     if (!_hasFirebaseDB()) return { conflict: 'offline' };
     const num = _normalizeMatricule(matricule);
     const mail = _normalizeEmail(email);
+    // Chantiers 6/7 (v2.9.42) — voie SERVEUR d'abord (checkAgentDuplicate) : la
+    // détection de doublon lit d'AUTRES comptes, impossible en lecture directe
+    // une fois mc_accounts fermé. La Cloud Function ne renvoie que l'existence
+    // d'un conflit, jamais les données du compte.
+    const fns = (typeof firebaseFunctions !== 'undefined' && firebaseFunctions) ? firebaseFunctions
+      : (typeof window !== 'undefined' ? window.firebaseFunctions : null);
+    if (fns && typeof fns.httpsCallable === 'function') {
+      try {
+        const res = await fns.httpsCallable('checkAgentDuplicate')({ role, matricule: num, professionalNumber: num, email: mail });
+        return (res && res.data && res.data.conflict) ? { conflict: 'account' } : { conflict: null };
+      } catch (e) {
+        console.warn('[MedConnect] checkAgentDuplicate (fonction) indisponible — repli lecture directe :', e?.message || e);
+        // repli ci-dessous (tant que la lecture publique de mc_accounts existe)
+      }
+    }
     try {
       for (const field of ['matricule', 'professionalNumber']) {
         const snap = await firebaseDB.collection('mc_accounts').where('role', '==', role).where(field, '==', num).limit(5).get();

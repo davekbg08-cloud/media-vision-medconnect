@@ -28,22 +28,25 @@ const auth = read('js/auth.js');
 /* ── db.js : listeners patients filtrés ─────────────── */
 
 test('setupUserScopedListeners recharge mc_patients par établissement ET par created_by', () => {
-  const block = db.slice(db.indexOf('function setupUserScopedListeners'));
-  assert.match(block, /collection\('mc_patients'\)\.where\('establishmentId', '==', estId\)/,
+  const block = db.slice(db.indexOf('_memberEstablishmentIds'));
+  assert.match(block, /collection\('mc_patients'\)\.where\('establishmentId', '==', \w+\)/,
     'listener filtré par establishmentId attendu');
   assert.match(block, /collection\('mc_patients'\)\.where\('created_by', '==', user\.uid\)/,
     'listener filet created_by attendu');
 });
 
-test('les listeners patients sont réservés aux rôles membres (pas patient/pharmacien seuls)', () => {
+test('les listeners de la fiche clinique sont réservés aux rôles cliniques (chantier 2)', () => {
+  // Chantier 2 (v2.9.42) : reception/lab retirés du bloc clinique — ils
+  // n'ont plus accès à mc_patients (identité via patient_directory).
   const block = db.slice(db.indexOf('function setupUserScopedListeners'));
-  assert.match(block, /\['doctor', 'nurse', 'reception', 'lab', 'admin_hospital'\]\.includes\(user\.role\)/);
+  assert.match(block, /\['doctor', 'nurse', 'admin_hospital'\]\.includes\(user\.role\)/);
 });
 
 test('les établissements du membre sont énumérés (courant + affiliations)', () => {
-  const block = db.slice(db.indexOf('function setupUserScopedListeners'));
+  // Chantier 1 (v2.9.42) : énumération extraite dans le helper _memberEstablishmentIds.
+  const block = db.slice(db.indexOf('_memberEstablishmentIds'));
   assert.match(block, /getCurrentHospital\?\.\(\)/);
-  assert.match(block, /getDoctorHospitals\?\.\(user\.uid\)/);
+  assert.match(block, /getDoctorHospitals\?\.\(uid\)/);
 });
 
 test('le listener GLOBAL mc_patients est conservé (admin) et documenté comme tel', () => {

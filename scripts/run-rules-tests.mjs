@@ -61,8 +61,9 @@ import { spawn } from 'node:child_process';
 import { readdirSync, openSync, closeSync, readFileSync, unlinkSync, statSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { fileURLToPath } from 'node:url';
 
-const DIR = path.resolve(new URL('.', import.meta.url).pathname, '../tests/firestore-rules');
+const DIR = path.resolve(fileURLToPath(new URL('.', import.meta.url)), '../tests/firestore-rules');
 const POLL_MS = 250;
 const STABLE_MS = 1500;
 const MAX_MS = 90000;

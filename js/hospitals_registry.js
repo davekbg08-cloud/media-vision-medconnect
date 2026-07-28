@@ -264,16 +264,19 @@ const HospitalsRegistry = (() => {
 
   function saveAffiliations(list) {
     const normalized = list.map(normalizeRequest);
+    // Chantier 8 (v2.9.42) — écritures ciblées : ne republier vers Firestore
+    // que les demandes NOUVELLES ou MODIFIÉES (diff par requestId), jamais
+    // toute la liste. Avant, chaque appel republiait toutes les demandes —
+    // écritures ×N et tentatives sur des demandes d'autres agents présentes
+    // dans le cache. L'état précédent est lu AVANT le store.
+    const prev = new Map(load(REQ_KEY).map(normalizeRequest).map(a => [a.requestId, JSON.stringify(a)]));
     store(REQ_KEY, normalized);
     store(LEGACY_REQ_KEY, normalized);
     // Correctif (audit) : mc_affiliations (allow write: if isAdmin();)
     // n'est jamais lue par l'app (seule affiliation_requests l'est,
-    // voir js/db.js) — cette écriture était systématiquement rejetée
-    // pour l'appelant réel (le professionnel demandeur, non-admin),
-    // sans impact fonctionnel mais avec un réessai perpétuel silencieux
-    // dans la file d'attente locale. Collection legacy morte, retirée.
+    // voir js/db.js) — écriture legacy morte, retirée.
     normalized.forEach(a => {
-      pushCloud('affiliation_requests', a.requestId, a);
+      if (prev.get(a.requestId) !== JSON.stringify(a)) pushCloud('affiliation_requests', a.requestId, a);
     });
   }
 

@@ -45,6 +45,12 @@ const DB = (() => {
   const BLOCKED_ERROR_CODES = new Set([
     'permission-denied', 'invalid-argument', 'failed-precondition',
     'not-found', 'already-exists', 'unauthenticated', 'out-of-range',
+    // Chantier 10 (v2.9.42) : une vente hors ligne rejouée à la
+    // reconnexion dont le stock RÉEL relu est insuffisant ne peut pas être
+    // honorée telle quelle — elle est QUARANTAINÉE (jamais un écrasement
+    // silencieux du stock, jamais un rejeu en boucle) pour décision manuelle
+    // du pharmacien (réappro, annulation, remboursement).
+    'insufficient_stock',
   ]);
   function classifyOutboxError(err) {
     const code = err?.code || null;
@@ -66,7 +72,7 @@ const DB = (() => {
      décider d'un droit d'accès (les règles Firestore restent la seule
      barrière). */
   function _opContext(meta = {}) {
-    let userUid = null, userRole = null, hospitalId = null;
+    let userUid = null, userRole = null, hospitalId = null, ownerAuthUid = null;
     try {
       const u = window.Auth?.getUser?.();
       userUid = u?.uid || null; userRole = u?.role || null;
@@ -74,10 +80,20 @@ const DB = (() => {
     try {
       hospitalId = window.HospitalsRegistry?.getCurrentHospital?.()?.establishmentId || null;
     } catch (_) {}
+    // Chantier 5 (v2.9.42) — identité PROPRIÉTAIRE réelle (uid Firebase Auth)
+    // au moment de la mise en file, pour un rejeu multi-utilisateur sûr :
+    // sur un poste partagé, une opération n'est rejouée que par SON auteur
+    // (voir flushOutbox), jamais sous le compte d'un agent suivant.
+    try {
+      ownerAuthUid = (typeof firebaseAuth !== 'undefined' && firebaseAuth && firebaseAuth.currentUser)
+        ? firebaseAuth.currentUser.uid : null;
+    } catch (_) {}
     return {
       module: meta.module || null,
       operationType: meta.operationType || null,
       userUid, userRole, hospitalId,
+      ownerAuthUid,        // uid Firebase réel (rejeu sûr)
+      accountUid: userUid, // uid applicatif (PAT_{id} pour un patient)
       groupId: meta.groupId || null,
     };
   }
@@ -137,6 +153,10 @@ const DB = (() => {
       type: 'batch',
       writes: writes.map(([col, id, data]) => [col, String(id), data]),
       merge: meta.merge === true, // v2.9.36 : rejeu en écriture partielle (complétion médicale)
+      // Chantier 10 (v2.9.42) : plan de réconciliation transactionnelle d'une
+      // vente pharmacie hors ligne (rejeu par relecture + décrément relatif du
+      // stock réel, idempotent) — absent pour tout autre lot.
+      ...(meta.saleReconcile ? { saleReconcile: meta.saleReconcile } : {}),
       ..._opContext(meta),
       groupId,
       operationType: meta.operationType || 'batch',
@@ -174,7 +194,44 @@ const DB = (() => {
 
   /** Rejoue UNE entrée (set ou batch). Retourne true si l'écriture a
       abouti. Ne modifie pas la file — l'appelant s'en charge. */
+  /* Chantier 10 (v2.9.42) — rejeu RÉCONCILIÉ d'une vente pharmacie mise en
+     file hors ligne. Au lieu d'écraser le stock avec la valeur absolue
+     calculée sur un cache périmé (survente possible), on relit le stock RÉEL
+     dans une transaction et on le décrémente relativement (mid, qty). La
+     vente est refusée ENTIÈREMENT (throw insufficient_stock → entrée
+     quarantainée « blocked ») si un article n'a plus assez de stock au moment
+     du rejeu. Idempotent : si la vente est déjà posée (sid présent), on ne
+     re-décrémente rien. */
+  async function _replaySaleReconcile(rec) {
+    await firebaseDB.runTransaction(async (tx) => {
+      const saleRef = firebaseDB.collection('mc_sales').doc(String(rec.saleId));
+      const saleSnap = await tx.get(saleRef); // lecture AVANT toute écriture
+      const medRefs = (rec.decrements || []).map(d => firebaseDB.collection('mc_medicines').doc(String(d.mid)));
+      const medSnaps = [];
+      for (const r of medRefs) medSnaps.push(await tx.get(r));
+      if (saleSnap.exists) return; // déjà appliquée : rejeu idempotent, aucun re-décrément
+      const updates = [];
+      medSnaps.forEach((snap, i) => {
+        const d = rec.decrements[i];
+        const available = snap.exists ? (parseInt(snap.data().stock) || 0) : 0;
+        if (!snap.exists || d.qty <= 0 || d.qty > available) {
+          const err = new Error('insufficient_stock'); err.code = 'insufficient_stock';
+          throw err;
+        }
+        updates.push({ ref: medRefs[i], newStock: available - d.qty });
+      });
+      updates.forEach(u => tx.update(u.ref, { stock: String(u.newStock), updatedAt: new Date().toISOString() }));
+      tx.set(saleRef, rec.saleDoc);
+    });
+    return true;
+  }
+
   async function _replayEntry(e) {
+    // Vente pharmacie hors ligne : réconciliation transactionnelle du stock
+    // réel (jamais un écrasement absolu) quand une transaction est disponible.
+    if (e.saleReconcile && typeof firebaseDB.runTransaction === 'function') {
+      return _replaySaleReconcile(e.saleReconcile);
+    }
     if (e.type === 'batch') {
       if (typeof firebaseDB.batch !== 'function') throw new Error('batch non supporté');
       const batch = firebaseDB.batch();
@@ -226,8 +283,28 @@ const DB = (() => {
     if (!q.length) return;
     _flushing = true;
     const now = Date.now();
+    // Chantier 5 (v2.9.42) — identité Firebase courante, pour ne rejouer que
+    // les opérations DE l'utilisateur connecté.
+    let currentAuthUid = null;
+    try {
+      currentAuthUid = (typeof firebaseAuth !== 'undefined' && firebaseAuth && firebaseAuth.currentUser)
+        ? firebaseAuth.currentUser.uid : null;
+    } catch (_) {}
     const remaining = [];
     for (const e of q) {
+      // QUARANTAINE multi-utilisateur : une entrée dont l'ownerAuthUid est
+      // connu mais ne correspond PAS à l'utilisateur Firebase courant n'est
+      // JAMAIS rejouée sous son compte, ni supprimée — elle est conservée
+      // telle quelle et repartira quand SON auteur se reconnectera (poste
+      // partagé). Sans utilisateur connecté, on ne peut prouver aucune
+      // identité : les entrées à propriétaire connu attendent aussi. Les
+      // entrées legacy (sans ownerAuthUid, créées avant ce correctif) ne
+      // sont pas quarantainées ici — leur rejeu reste gardé côté serveur par
+      // les règles Firestore (un rejeu sous le mauvais compte est rejeté).
+      if (e.ownerAuthUid && e.ownerAuthUid !== currentAuthUid) {
+        remaining.push(e);
+        continue;
+      }
       if (e.classification === 'blocked') {
         remaining.push(e); // jamais rejouée automatiquement — action manuelle requise
         continue;
@@ -307,28 +384,37 @@ const DB = (() => {
     return true;
   }
 
-  /* Export JSON de diagnostic — les valeurs dont la clé évoque un
-     secret (mot de passe, PIN, jeton…) sont expurgées récursivement :
-     le fichier peut être partagé pour diagnostic sans fuiter un
-     identifiant. */
-  const SENSITIVE_KEY_RE = /(password|passwd|pwd|pin|secret|token|apikey|api_key|credential|authkey|auth_key|privatekey|private_key)/i;
-  function _redactSecrets(value) {
-    if (Array.isArray(value)) return value.map(_redactSecrets);
-    if (value && typeof value === 'object') {
-      const out = {};
-      for (const [k, v] of Object.entries(value)) {
-        out[k] = SENSITIVE_KEY_RE.test(k) ? '[expurgé]' : _redactSecrets(v);
-      }
-      return out;
-    }
-    return value;
+  /* Chantier 5 (v2.9.42) — l'export de diagnostic ne contient QUE des
+     métadonnées non médicales : jamais le payload (data/writes), donc jamais
+     de nom, numéro MC, téléphone, diagnostic, médicaments, résultat, message,
+     PIN ni code d'accès. Le nom des collections concernées est conservé (ex.
+     mc_consultations) — utile au diagnostic, jamais sensible. */
+  function _outboxEntryMeta(e) {
+    const collections = e.type === 'batch'
+      ? [...new Set((e.writes || []).map(w => w[0]))]
+      : (e.collection ? [e.collection] : []);
+    return {
+      operationId: e.operationId || null,
+      type: e.type || null,
+      operationType: e.operationType || null,
+      module: e.module || null,
+      collections,
+      docCount: e.type === 'batch' ? (e.writes || []).length : 1,
+      classification: e.classification || null,
+      attempts: e.attempts || 0,
+      queuedAt: e.queuedAt || null,
+      updatedAt: e.updatedAt || null,
+      nextRetryAt: e.nextRetryAt || null,
+      lastErrorCode: e.lastErrorCode || null,
+      // JAMAIS : data, writes, ownerAuthUid, noms, MC, téléphone, contenu clinique.
+    };
   }
   function exportOutboxDiagnostic() {
     return JSON.stringify({
       exportedAt: new Date().toISOString(),
       appVersion: (typeof window !== 'undefined' && window.VersionManager?.getCurrent?.()?.version) || null,
       summary: getOutboxSummary(),
-      entries: _redactSecrets(_outboxLoad()),
+      entries: _outboxLoad().map(_outboxEntryMeta),
     }, null, 2);
   }
 
@@ -694,10 +780,17 @@ const DB = (() => {
     listen(firebaseDB.collection('mc_appointments'), snap => {
       if (!snap.empty) mergeStore('mc_appointments', 'aid', snap.docs.map(d => d.data()));
     });
-    // Comptes
-    listen(firebaseDB.collection('mc_accounts'), snap => {
-      storeSnapshot('mc_accounts', snap);
-    });
+    // Comptes — Chantiers 6/7 (v2.9.42) : une fois la lecture publique de
+    // mc_accounts fermée, seule une requête bornée est acceptée. L'écoute
+    // collection-entière n'est conservée que pour l'ADMIN plateforme (qui a un
+    // accès complet, isAdmin). Pour les autres rôles, la résolution de compte
+    // passe désormais par les Cloud Functions (authLookup) — pas par un cache
+    // cloud de tous les comptes.
+    if ((window.Auth?.getUser?.()?.role) === 'admin') {
+      listen(firebaseDB.collection('mc_accounts'), snap => {
+        storeSnapshot('mc_accounts', snap);
+      });
+    }
     // Profils pharmacies visibles publiquement — listener FILTRÉ :
     // fusion obligatoire, un remplacement intégral écraserait les
     // autres profils chargés par la sync initiale.
@@ -748,6 +841,20 @@ const DB = (() => {
       identifiant : un snapshot filtré ne doit jamais écraser le
       reste de la liste locale. */
   let _userListenersUnsubs = [];
+  // Chantier 1 (v2.9.42) — établissements ACTIFS dont l'utilisateur est
+  // membre, pour scoper les requêtes cliniques. Le filet created_by couvre
+  // le cas où le registre n'est pas encore chargé.
+  function _memberEstablishmentIds(uid) {
+    const estIds = new Set();
+    try {
+      const cur = window.HospitalsRegistry?.getCurrentHospital?.();
+      if (cur?.establishmentId) estIds.add(cur.establishmentId);
+      (window.HospitalsRegistry?.getDoctorHospitals?.(uid) || [])
+        .forEach(h => { if (h?.establishmentId) estIds.add(h.establishmentId); });
+    } catch (_) { /* registre indisponible : le filet created_by suffit */ }
+    return estIds;
+  }
+
   function setupUserScopedListeners() {
     if (!firebaseReady || !firebaseDB) return;
     const user = window.Auth?.getUser?.();
@@ -804,63 +911,64 @@ const DB = (() => {
         'mc_prescriptions', 'pid');
     }
 
-    // Médecin / infirmier : la règle Firestore les autorise à LIRE la
-    // collection mc_prescriptions (currentRoleIs doctor/nurse). Sans ce
-    // listener, leurs ordonnances n'étaient jamais rechargées après la
-    // connexion — cause du bug « ordonnances qui n'apparaissent pas ».
-    // Le filtrage métier (contexte établissement, consentement patient)
-    // reste appliqué à l'affichage par prescriptionsForContext ; ici on
-    // se contente de ramener les données en local par fusion.
-    if (user.role === 'doctor' || user.role === 'nurse') {
-      scoped(firebaseDB.collection('mc_prescriptions'),
-        'mc_prescriptions', 'pid');
+    /* ── Rechargement query-safe de TOUT l'historique clinique ──
+       Chantier 1 (v2.9.42) — généralise le correctif patients de v2.9.41 à
+       l'ensemble des collections cliniques. Le SEUL chemin cloud était des
+       listeners collection-entière (setupRealtimeListeners) que les règles
+       PAR-DOCUMENT rejettent en bloc pour tout rôle non-admin : l'historique
+       (consultations, ordonnances, analyses, rendez-vous, admissions,
+       urgences, maternité, vaccinations) ne revenait donc jamais après une
+       reconnexion ou sur un appareil neuf. On remplace par des requêtes
+       FILTRÉES, seules formes acceptées par les règles (mesuré à
+       l'émulateur), en deux familles :
+         • MEMBRE d'établissement : where('establishmentId','==', <chaque
+           établissement actif>) + filet where('created_by','==', uid).
+           Le filtre garantit resolveHospitalId==id → l'appartenance est
+           évaluée une fois sur un doc fixe ; l'isolation inter-établissements
+           reste intacte. subscriptionReadGateOk s'applique (desktop
+           abonnement expiré → requête refusée, conforme au produit).
+         • PATIENT : where('patient_id','==', <son numéro de fiche>). La
+           règle canReadMedicalData reconnaît le titulaire du compte
+           PAT_{patient_id} (patientOwnsClinicalDoc) — jamais coupé par
+           l'abonnement (le patient n'est pas doctor/nurse). C'est ce qui
+           fait réapparaître SON historique complet sur un appareil neuf.
+       mergeStore fusionne par identifiant sans jamais écraser une écriture
+       locale non encore confirmée. Le pharmacien garde son écoute ciblée
+       (pharmacyUid ci-dessus) ; mc_messages reste par destinataire. */
+    const CLINICAL_COLLECTIONS = [
+      ['mc_consultations', 'cid'], ['mc_prescriptions', 'pid'],
+      ['mc_appointments', 'aid'],  ['mc_lab_results', 'lid'],
+      ['mc_admissions', 'aid'],    ['mc_emergency_cases', 'eid'],
+      ['mc_maternity_cases', 'mid'], ['mc_vaccinations', 'vid'],
+    ];
+
+    // Chantier 2 (v2.9.42) — RÔLES CLINIQUES uniquement (doctor/nurse/
+    // admin_hospital). La réception et le laboratoire ne lisent PLUS la fiche
+    // clinique mc_patients ni le contenu clinique (consultations, ordonnances,
+    // etc.) : ils identifient un patient via patient_directory (lecture
+    // directe, cf. hospital-reception.js/hospital-lab.js) et chargent leurs
+    // propres collections de workflow ailleurs. Confidentialité imposée aussi
+    // côté règles (mc_patients read = isClinicalHospitalMember).
+    if (['doctor', 'nurse', 'admin_hospital'].includes(user.role)) {
+      const estIds = _memberEstablishmentIds(user.uid);
+      // Fiches patient (identifiant canonique 'id') — v2.9.41, conservé.
+      scoped(firebaseDB.collection('mc_patients').where('created_by', '==', user.uid), 'mc_patients', 'id');
+      estIds.forEach(id => scoped(firebaseDB.collection('mc_patients').where('establishmentId', '==', id), 'mc_patients', 'id'));
+      // Reste de l'historique clinique de l'établissement.
+      CLINICAL_COLLECTIONS.forEach(([coll, idField]) => {
+        scoped(firebaseDB.collection(coll).where('created_by', '==', user.uid), coll, idField);
+        estIds.forEach(id => scoped(firebaseDB.collection(coll).where('establishmentId', '==', id), coll, idField));
+      });
     }
 
-    // ── Patients — rechargement après connexion (chantier v2.9.41) ──
-    // Bug confirmé (photos utilisateur : une fiche visible côté médecin
-    // « disparaît » après déconnexion/reconnexion, et « numéro de fiche
-    // introuvable » côté patient) : le SEUL chemin cloud pour les patients
-    // était le listener GLOBAL collection-entière de setupRealtimeListeners
-    // — que les règles PAR-DOCUMENT de mc_patients (canReadMedicalData ||
-    // belongsToSameEstablishment) REJETTENT en bloc pour tout rôle clinique
-    // (jamais pour l'admin, dont isAdmin() est constant : ce listener
-    // global lui reste utile et n'est pas retiré). Conséquence : le cache
-    // mc_patients n'était JAMAIS rechargé depuis Firestore ; après la purge
-    // du cache médical au logout (js/auth.js), la liste patients restait
-    // vide alors que les fiches étaient bien dans le cloud.
-    //
-    // Correctif = requêtes FILTRÉES, seule forme que les règles acceptent
-    // (mesuré à l'émulateur, spike v2.9.41) :
-    //   • where('establishmentId','==', <chaque établissement du membre>)
-    //     ACCEPTÉE : le filtre garantit resolveHospitalId(resource.data)==id,
-    //     donc isHospitalMember(id) (belongsToSameEstablishment) est évalué
-    //     une seule fois sur un document fixe → toutes les fiches renvoyées
-    //     sont lisibles. L'isolation reste intacte (autre établissement =
-    //     REJETÉ, vérifié).
-    //   • where('created_by','==', uid) ACCEPTÉE (doctorCanRead) : filet
-    //     pour une fiche sans establishmentId (ex. praticien solo).
-    //   (where('doctorUids','array-contains',uid) est REJETÉ → non utilisé.)
-    //
-    // Rôles concernés : ceux qui lisent mc_patients par appartenance
-    // (clinique + accueil/labo + admin_hospital). Le pharmacien est isolé ;
-    // le patient lit sa propre fiche par un autre chemin (login, v2.9.41).
-    // mergeStore fusionne par 'id' sans doublon et ne retire jamais une
-    // entrée locale absente du snapshot (une fiche créée hors-ligne encore
-    // en file n'est pas effacée).
-    if (['doctor', 'nurse', 'reception', 'lab', 'admin_hospital'].includes(user.role)) {
-      scoped(firebaseDB.collection('mc_patients').where('created_by', '==', user.uid),
-        'mc_patients', 'id');
-      const estIds = new Set();
-      try {
-        const cur = window.HospitalsRegistry?.getCurrentHospital?.();
-        if (cur?.establishmentId) estIds.add(cur.establishmentId);
-        (window.HospitalsRegistry?.getDoctorHospitals?.(user.uid) || [])
-          .forEach(h => { if (h?.establishmentId) estIds.add(h.establishmentId); });
-      } catch (_) { /* registre indisponible : le filet created_by suffit */ }
-      estIds.forEach(estId => {
-        scoped(firebaseDB.collection('mc_patients').where('establishmentId', '==', estId),
-          'mc_patients', 'id');
-      });
+    if (user.role === 'patient') {
+      let ficheId = '';
+      try { ficheId = (localStorage.getItem('mc_my_patient_id') || user.patient_id || user.username || '').toUpperCase(); } catch (_) { ficheId = (user.patient_id || '').toUpperCase(); }
+      if (ficheId) {
+        CLINICAL_COLLECTIONS.forEach(([coll, idField]) => {
+          scoped(firebaseDB.collection(coll).where('patient_id', '==', ficheId), coll, idField);
+        });
+      }
     }
   }
 
@@ -889,7 +997,10 @@ const DB = (() => {
     const p = { ...data, id: generatePatientId(data.country_code), firstAccessCode: generateFirstAccessCode(), created_at: new Date().toISOString() };
     list.push(p); store('mc_patients', list);
     _push('mc_patients', p.id, p);
-    _push('patients', p.id, p);
+    // Chantier 1 (v2.9.42) — collections canoniques : la collection miroir
+    // 'patients' n'est plus alimentée (jamais relue nulle part ; mc_patients
+    // est l'unique source). Réduit de moitié les écritures patient et
+    // supprime tout risque de seconde source contradictoire.
     _push('medical_records', p.id, {
       recordId: p.id,
       patientId: p.id,
@@ -916,6 +1027,18 @@ const DB = (() => {
     const uid = `PAT_${patientId}`;
     if (getAccounts().some(a => a.uid === uid)) return true;
     if (!firebaseReady || !firebaseDB) return false;
+    // Chantiers 6/7 (v2.9.42) — voie SERVEUR d'abord (authLookup) : une fois
+    // mc_accounts fermé, l'existence d'un compte patient se vérifie côté serveur
+    // (aucune lecture publique). Repli lecture directe tant que la règle
+    // publique existe / si la fonction est indisponible.
+    const fns = (typeof firebaseFunctions !== 'undefined' && firebaseFunctions) ? firebaseFunctions
+      : (typeof window !== 'undefined' ? window.firebaseFunctions : null);
+    if (fns && typeof fns.httpsCallable === 'function') {
+      try {
+        const res = await fns.httpsCallable('authLookup')({ patientId });
+        if (res && res.data) return res.data.exists === true;
+      } catch (e) { console.warn('[MedConnect] authLookup (compte patient) indisponible — repli :', e?.message || e); }
+    }
     try {
       const doc = await firebaseDB.collection('mc_accounts').doc(uid).get();
       return doc.exists;
@@ -1058,9 +1181,10 @@ const DB = (() => {
         createdAt: p.created_at,
         updatedAt: p.created_at,
       };
+      // Chantier 1 (v2.9.42) — miroir 'patients' retiré du batch (source
+      // canonique unique = mc_patients ; jamais relue).
       const writes = [
         ['mc_patients', p.id, p],
-        ['patients', p.id, p],
         ['medical_records', p.id, medicalRecord],
         ['patient_directory', p.id, buildPatientDirectoryEntry(p)],
       ];
@@ -1086,10 +1210,14 @@ const DB = (() => {
       }
 
       if (result.timedOut) {
-        // Réconciliation : le commit est peut-être passé malgré le
-        // timeout côté interface.
+        // Réconciliation : le commit est peut-être passé malgré le timeout
+        // côté interface. Chantier 2 (v2.9.42) — on relit patient_directory/
+        // {id} (écrit dans le MÊME batch atomique) plutôt que mc_patients :
+        // la réception, qui crée aussi des patients, ne lit plus jamais la
+        // fiche clinique mc_patients ; patient_directory lui est autorisé et
+        // son existence prouve tout autant que le batch a abouti.
         try {
-          const doc = await firebaseDB.collection('mc_patients').doc(p.id).get();
+          const doc = await firebaseDB.collection('patient_directory').doc(p.id).get();
           if (doc.exists) {
             confirmLocally();
             return { patient: p, confirmed: true, reconciled: true };
@@ -1125,7 +1253,7 @@ const DB = (() => {
       list[idx] = { ...list[idx], ...data, id, updated_at: new Date().toISOString() };
       store('mc_patients', list);
       _push('mc_patients', id, list[idx]);
-      _push('patients', id, list[idx]);
+      // Chantier 1 (v2.9.42) — miroir 'patients' retiré (canonique unique).
       _push('medical_records', id, {
         recordId: id,
         patientId: id,
@@ -1155,14 +1283,26 @@ const DB = (() => {
 
   function getPatientById(id) { return getPatients().find(p => p.id === id) || null; }
 
-  function searchPatients(q) {
-    if (!q) return getPatients();
+  /* Chantier 9 (v2.9.42) — borne d'établissement OPTIONNELLE. Le cache
+     local ne supprime jamais une fiche (mergeStore fusionne sans effacer) :
+     une fiche d'un établissement quitté peut donc y subsister. Un appelant
+     clinique qui passe un ou plusieurs establishmentId garantit qu'aucune
+     fiche hors de SES établissements ne remonte à la recherche, même si elle
+     traîne encore en cache. Sans ce paramètre : comportement inchangé (les
+     appelants existants filtrent déjà par created_by/établissement à leur
+     niveau, et les règles Firestore bornent toujours la lecture cloud). */
+  function searchPatients(q, establishmentIds = null) {
+    const scope = Array.isArray(establishmentIds)
+      ? new Set(establishmentIds.filter(Boolean))
+      : (establishmentIds ? new Set([establishmentIds]) : null);
+    const inScope = (p) => !scope || scope.has(p.establishmentId) || scope.has(p.hospital_id);
+    if (!q) return getPatients().filter(inScope);
     const ql = q.toLowerCase();
-    return getPatients().filter(p =>
+    return getPatients().filter(p => inScope(p) && (
       (p.id||'').toLowerCase().includes(ql) ||
       (p.firstname||'').toLowerCase().includes(ql) ||
       (p.lastname||'').toLowerCase().includes(ql) ||
-      (p.phone||'').includes(ql));
+      (p.phone||'').includes(ql)));
   }
 
   /* Chantier v2.9.34 (P1) : recherche dans l'ANNUAIRE non clinique
@@ -1240,9 +1380,22 @@ const DB = (() => {
      COMPTES
   ══════════════════════════════════════════════════ */
   function getAccounts()    { return load('mc_accounts'); }
+  // Chantier 8 (v2.9.42) — écritures CIBLÉES : ne republier vers Firestore
+  // que les documents réellement NOUVEAUX ou MODIFIÉS depuis le dernier état
+  // local, jamais toute la liste. Avant, saveAccounts(liste) poussait CHAQUE
+  // compte à chaque appel — écritures ×N (coût) et tentatives d'écriture sur
+  // les documents d'AUTRES utilisateurs simplement présents dans le cache,
+  // systématiquement rejetées puis rejouées en boucle par l'outbox. Le diff
+  // par uid supprime les deux problèmes sans changer aucun appelant.
+  function _changedByKey(prevList, nextList, keyField) {
+    const prev = new Map((prevList || []).map(x => [x[keyField], JSON.stringify(x)]));
+    return (nextList || []).filter(x => x && x[keyField] != null && prev.get(x[keyField]) !== JSON.stringify(x));
+  }
+
   function saveAccounts(l)  {
+    const changed = _changedByKey(load('mc_accounts'), l, 'uid');
     store('mc_accounts', l);
-    l.forEach(a => {
+    changed.forEach(a => {
       _push('mc_accounts', a.uid, a);
       mirrorAccountProfile(a);
     });
@@ -1250,8 +1403,11 @@ const DB = (() => {
 
   function getUsers()       { return load('users'); }
   function saveUsers(l)     {
+    // Chantier 8 (v2.9.42) — écritures ciblées (voir saveAccounts) :
+    // seuls les profils nouveaux/modifiés sont republiés.
+    const changed = _changedByKey(load('users'), l, 'uid');
     store('users', l);
-    l.forEach(u => {
+    changed.forEach(u => {
       _push('users', u.uid, u);
       const collection = roleCollection(u.role);
       if (collection) _push(collection, u.uid, u);
@@ -1260,8 +1416,11 @@ const DB = (() => {
 
   function getRegistrationRequests() { return load('registration_requests'); }
   function saveRegistrationRequests(l) {
+    // Chantier 8 (v2.9.42) — écritures ciblées : seules les demandes
+    // nouvelles/modifiées sont republiées.
+    const changed = _changedByKey(load('registration_requests'), l, 'requestId');
     store('registration_requests', l);
-    l.forEach(r => _push('registration_requests', r.requestId, r));
+    changed.forEach(r => _push('registration_requests', r.requestId, r));
   }
 
   function createRegistrationRequest(account) {
@@ -1387,9 +1546,9 @@ const DB = (() => {
         completed_by_consultation_id: cid || '',
         updated_at: nowIso,
       };
+      // Chantier 1 (v2.9.42) — miroir 'patients' retiré (canonique unique).
       const writes = [
         ['mc_patients', patientId, patch],
-        ['patients', patientId, patch],
       ];
       const opMeta = {
         operationType: 'patient_medical_completion', module: 'patients',
@@ -1479,7 +1638,8 @@ const DB = (() => {
       sourceDevice: data.sourceDevice || window.ExchangeBridge?.currentSourceDevice?.() || 'mobile' };
     list.push(p); store('mc_prescriptions', list);
     _push('mc_prescriptions', p.pid, p);
-    _push('prescriptions', p.pid, p);
+    // Chantier 1 (v2.9.42) — miroir 'prescriptions' retiré (mc_prescriptions
+    // est l'unique source ; jamais relue).
     return p;
   }
 
@@ -1498,7 +1658,6 @@ const DB = (() => {
     const updated = _updatePrescriptionLocal(pid, data);
     if (!updated) return null;
     _push('mc_prescriptions', pid, updated);
-    _push('prescriptions', pid, updated);
     return updated;
   }
 
@@ -1517,7 +1676,6 @@ const DB = (() => {
     const wasOffline = !firebaseReady || !firebaseDB;
     const ok = await pushAndReport([
       ['mc_prescriptions', pid, updated],
-      ['prescriptions', pid, updated],
     ]);
     return { ok, reason: ok ? null : (wasOffline ? 'offline' : 'denied') };
   }
@@ -1569,7 +1727,7 @@ const DB = (() => {
       sourceDevice: data.sourceDevice || window.ExchangeBridge?.currentSourceDevice?.() || 'mobile' };
     list.push(a); store('mc_appointments', list);
     _push('mc_appointments', a.aid, a);
-    _push('appointments', a.aid, a);
+    // Chantier 1 (v2.9.42) — miroir 'appointments' retiré (canonique unique).
     return a;
   }
 
@@ -1580,7 +1738,6 @@ const DB = (() => {
       list[idx] = { ...list[idx], ...data, aid };
       store('mc_appointments', list);
       _push('mc_appointments', aid, list[idx]);
-      _push('appointments', aid, list[idx]);
     }
   }
 
@@ -1846,13 +2003,22 @@ const DB = (() => {
          errorCode }                                           → rejet réel.
        { ok:false, confirmed:false, failed:true, busy:true }   → double appel.
 
-     LIMITE HONNÊTE : la garantie stricte anti-survente concurrente ne
-     s'applique qu'aux ventes réalisées EN LIGNE. Hors ligne, le SDK ne
-     permet pas de transaction : le lot optimiste (basé sur le stock
-     local) est mis en file et rejoué à la reconnexion — une survente
-     concurrente ne peut alors être totalement exclue. En pharmacie, le
-     poste de caisse est normalement connecté ; ce repli reste préférable
-     à un blocage de la vente. */
+     Chantier 10 (v2.9.42) — RÉCONCILIATION du rejeu hors ligne : la vente
+     hors ligne est mise en file avec un plan de réconciliation (mid, qty).
+     À la reconnexion, elle n'est PLUS rejouée par un lot qui écrase le stock
+     avec une valeur absolue périmée : _replaySaleReconcile relit le stock
+     RÉEL dans une transaction et le décrémente relativement, refuse
+     entièrement (quarantaine « blocked » pour décision manuelle) si le stock
+     est devenu insuffisant, et est idempotente (aucun re-décrément si la
+     vente est déjà posée). La survente ne peut donc plus survenir même au
+     rejeu d'une vente hors ligne — au prix d'un refus explicite plutôt que
+     d'un stock faux. Le pré-contrôle local reste un simple feedback rapide.
+
+     LIMITE HONNÊTE RÉSIDUELLE : hors ligne, l'interface confirme « en file »
+     (jamais « vendu »), et la vente ne devient réelle qu'après ce rejeu
+     réconcilié — une vente hors ligne peut donc être refusée A POSTERIORI si
+     le stock a été épuisé entre-temps par un autre poste. C'est le
+     comportement correct (pas de survente), signalé au pharmacien. */
   let _sellingPharmacy = false;
   async function addSaleAtomic(items, total, patientId) {
     if (_sellingPharmacy) return { ok: false, confirmed: false, failed: true, busy: true };
@@ -1890,7 +2056,18 @@ const DB = (() => {
         ['mc_sales', s.sid, s],
         ...updatedMeds.map(m => ['mc_medicines', m.mid, m]),
       ];
-      const opMeta = { operationType: 'pharmacy_sale', module: 'pharmacy', groupId: s.sid };
+      // Chantier 10 (v2.9.42) — plan de RÉCONCILIATION porté par l'entrée
+      // outbox : à la reconnexion, la vente hors ligne n'est PLUS rejouée
+      // comme un batch qui écrase le stock avec une valeur absolue périmée
+      // (survente possible). _replayEntry rejoue à la place une TRANSACTION
+      // qui relit le stock réel et le décrémente relativement (mid, qty),
+      // refuse si insuffisant, et est idempotente (ne re-décrémente pas si la
+      // vente est déjà posée). Voir _replaySaleReconcile.
+      const decrements = list.map(it => ({ mid: String(it.mid), qty: parseInt(it.qty) || 0 }));
+      const opMeta = {
+        operationType: 'pharmacy_sale', module: 'pharmacy', groupId: s.sid,
+        saleReconcile: { saleId: s.sid, saleDoc: s, decrements },
+      };
 
       const confirmLocally = () => {
         const salesList = getSales();

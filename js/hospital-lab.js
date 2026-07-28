@@ -227,13 +227,15 @@ const HospitalLabModule = (() => {
     `);
   }
 
-  /* ── Recherche patient (cache local, puis Firestore ciblé) ──
-     Ne télécharge jamais toute la collection : lecture directe du
-     document mc_patients/{mc} (id = numéro MC) si absent du cache
-     local. L'isolation par établissement est appliquée côté serveur
-     (firestore.rules belongsToSameEstablishment) — un refus
-     permission-denied est traité comme "introuvable" pour ce poste,
-     jamais comme une erreur réseau. */
+  /* ── Recherche patient (cache local, puis annuaire ciblé) ──
+     Chantier 2 (v2.9.42) — confidentialité : le laboratoire ne lit plus
+     JAMAIS la fiche clinique mc_patients. Il résout un numéro MC exact via
+     patient_directory/{mc} — l'IDENTITÉ ADMINISTRATIVE minimale (nom,
+     prénom, sexe, naissance, téléphone), jamais de diagnostic, allergie,
+     traitement ou note médicale. L'isolation par établissement reste
+     appliquée côté serveur (règle patient_directory) ; un refus
+     permission-denied est traité comme "introuvable" pour ce poste. La
+     forme retournée conserve `id` (= numéro MC) pour le reste du flux. */
   let _mcSearchToken = 0;
   async function _lookupPatient(mc) {
     if (!mc) return null;
@@ -241,8 +243,10 @@ const HospitalLabModule = (() => {
     if (local) return local;
     if (!window.firebaseReady || !window.firebaseDB) return null;
     try {
-      const snap = await firebaseDB.collection('mc_patients').doc(mc).get();
-      return snap.exists ? { id: snap.id, ...snap.data() } : null;
+      const snap = await firebaseDB.collection('patient_directory').doc(mc).get();
+      if (!snap.exists) return null;
+      const d = snap.data() || {};
+      return { id: snap.id, ...d, firstname: d.firstname, lastname: d.lastname };
     } catch (e) {
       if (e?.code === 'permission-denied') return null;
       throw e;

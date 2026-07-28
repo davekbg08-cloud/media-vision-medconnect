@@ -48,6 +48,8 @@
      node scripts/sync-account-security.mjs --apply        # exécution réelle
    ===================================================== */
 
+import { pathToFileURL } from 'node:url';
+
 // Rôles métier standards pouvant recevoir un custom claim `role` —
 // 'admin' EXCLU volontairement : ce script ne pose jamais ce rôle
 // depuis mc_accounts (voir la gestion dédiée de l'allowlist plus bas).
@@ -322,6 +324,6 @@ async function main() {
   if (!args.apply) console.log('Relancez avec --apply pour appliquer réellement.');
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch(err => { console.error('❌ Synchronisation interrompue :', err); process.exit(1); });
 }

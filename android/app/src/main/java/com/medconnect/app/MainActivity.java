@@ -28,7 +28,7 @@ import java.util.Arrays;
 
 public class MainActivity extends AppCompatActivity {
 
-    private static final String MEDCONNECT_PWA_URL = "https://davekbg08-cloud.github.io/media-vision-medconnect/?apk=v2.9.41";
+    private static final String MEDCONNECT_PWA_URL = "https://davekbg08-cloud.github.io/media-vision-medconnect/?apk=v2.9.42";
     private static final String TRUSTED_APK_URL_PREFIX = "https://davekbg08-cloud.github.io/media-vision-medconnect/downloads/";
     // v2.9.35 (audit sécurité Android) : seules les pages de CET origine
     // restent chargées dans le WebView de l'application (celui qui expose
@@ -120,8 +120,65 @@ public class MainActivity extends AppCompatActivity {
         });
 
         myWebView.addJavascriptInterface(new AndroidUpdateBridge(), "AndroidUpdater");
+        // Pont push natif (Phase 5 notifications) : la WebView lit le jeton FCM
+        // natif via window.MedConnectPush et l'enregistre (registerPushDevice).
+        myWebView.addJavascriptInterface(new MedConnectPushBridge(this), "MedConnectPush");
+
+        // Notifications natives : canaux stables + permission Android 13+ +
+        // récupération du jeton FCM (confinée au service, sans import Firebase
+        // ici). Sans google-services.json, tout ceci reste inerte sans erreur.
+        MedConnectMessagingService.createChannels(this);
+        requestNotificationPermissionIfNeeded();
+        MedConnectMessagingService.fetchAndCache(this);
 
         myWebView.loadUrl(MEDCONNECT_PWA_URL);
+
+        // Ouverture depuis une notification système : transmet le notificationId
+        // à la WebView une fois la page chargée (jamais de donnée médicale dans
+        // l'Intent — voir MedConnectMessagingService).
+        handleNotificationIntent(getIntent());
+    }
+
+    private static final int POST_NOTIFICATIONS_REQUEST_CODE = 102;
+    private void requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= 33) {
+            if (ContextCompat.checkSelfPermission(this, "android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(this, new String[]{"android.permission.POST_NOTIFICATIONS"}, POST_NOTIFICATIONS_REQUEST_CODE);
+            }
+        }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleNotificationIntent(intent);
+    }
+
+    private void handleNotificationIntent(Intent intent) {
+        if (intent == null) return;
+        final String nid = intent.getStringExtra("mc_notification_id");
+        final String deepLink = intent.getStringExtra("mc_deep_link");
+        if (nid == null && deepLink == null) return;
+        // Relaie à la WebView après chargement. Les valeurs sont encodées en
+        // JSON (échappement) ; MedConnect (js) valide la route (allowlist).
+        final String js = "window.MedConnectNativeNotification && window.MedConnectNativeNotification.open("
+                + jsonString(nid) + "," + jsonString(deepLink) + ");";
+        if (myWebView != null) myWebView.postDelayed(() ->
+                myWebView.evaluateJavascript(js, null), 1200);
+    }
+
+    private static String jsonString(String s) {
+        if (s == null) return "null";
+        StringBuilder b = new StringBuilder("\"");
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '"' || c == '\\') b.append('\\').append(c);
+            else if (c == '\n') b.append("\\n");
+            else if (c < 0x20) b.append(String.format("\\u%04x", (int) c));
+            else b.append(c);
+        }
+        return b.append('"').toString();
     }
 
     /* v2.9.35 (audit sécurité Android) : ouvre une destination hors

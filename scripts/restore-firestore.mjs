@@ -18,6 +18,7 @@
    ===================================================== */
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 function parseArgs(argv) {
   const out = { from: null, apply: false, collections: null };
@@ -104,6 +105,6 @@ async function main() {
   if (!args.apply) console.log('Relancez avec --apply pour appliquer réellement.');
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch(err => { console.error('❌ Restauration interrompue :', err); process.exit(1); });
 }

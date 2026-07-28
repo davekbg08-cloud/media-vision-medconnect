@@ -69,3 +69,8 @@ test-results/
 .eslintcache
 firebase-debug.log*
 firestore-debug.log*
+
+# Artefacts de vérification locaux (suites émulateur, checks jetables) — jamais commités
+rules_full_verify.log
+*_verify.log
+_check*.mjs

@@ -44,6 +44,11 @@ test('mc_patients : médecin membre du même établissement, NON auteur, lit la 
   const env = await getTestEnv();
   await clearAll(env);
   await seedMember(env, 'HOSP-A', 'doctor-member-1');
+  // Chantier 2 (v2.9.42) : la lecture de mc_patients exige désormais un rôle
+  // CLINIQUE (isClinicalHospitalMember) — comme mc_consultations/mc_prescriptions
+  // déjà — pour exclure réception/labo. Le médecin doit donc porter son rôle
+  // (seedRole), exactement comme les tests infirmier/labo de ce fichier.
+  await seedRole(env, 'doctor-member-1', 'doctor');
   await seedDoc(env, 'mc_patients', 'MC-E1', { id: 'MC-E1', establishmentId: 'HOSP-A', created_by: 'nurse-creator-1' });
   // Aucun document mc_consents créé — l'accès ne doit PAS en dépendre.
   const doctor = env.authenticatedContext('doctor-member-1').firestore();

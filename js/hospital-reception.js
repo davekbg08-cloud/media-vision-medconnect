@@ -262,12 +262,16 @@ const HospitalReceptionModule = (() => {
      réception pour éviter de recréer par erreur la fiche de quelqu'un
      affilié à un autre établissement. */
   let _rcSearchToken = 0;
+  // Chantier 2 (v2.9.42) — confidentialité : la réception ne lit plus JAMAIS
+  // la fiche clinique mc_patients. Résolution d'un numéro MC exact via
+  // patient_directory/{mc} — identité administrative minimale uniquement
+  // (nom, prénom, sexe, naissance, téléphone), jamais de contenu clinique.
   async function _lookupPatientCloud(mc) {
     const local = (window.DB?.getPatients?.() || []).find(x => String(x.id||'').toUpperCase() === mc);
     if (local) return { patient: local, denied: false };
     if (!window.firebaseReady || !window.firebaseDB) return { patient: null, denied: false };
     try {
-      const snap = await window.firebaseDB.collection('mc_patients').doc(mc).get();
+      const snap = await window.firebaseDB.collection('patient_directory').doc(mc).get();
       if (!snap.exists) return { patient: null, denied: false };
       const patient = { id: snap.id, ...snap.data() };
       // Fusionne dans le cache local SANS écraser une entrée locale

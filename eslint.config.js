@@ -36,7 +36,7 @@ const PROJECT_GLOBALS = [
 
 // Globales d'état Firebase RÉELLEMENT réassignées par firebase-config.js
 // (firebaseReady bascule true/false, firebaseDB/Auth sont posés) → writable.
-const WRITABLE_GLOBALS = ['firebaseDB', 'firebaseAuth', 'firebaseReady'];
+const WRITABLE_GLOBALS = ['firebaseDB', 'firebaseAuth', 'firebaseReady', 'firebaseFunctions'];
 
 // Divers (garde UMD `typeof module`, encodage, plateforme).
 const MISC_GLOBALS = ['module', 'exports', 'require', 'process', 'globalThis', 'TextEncoder', 'TextDecoder'];

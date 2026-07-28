@@ -7,6 +7,8 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Notifications système (Android 13+) — Phase 5 notifications v2.9.42 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-feature
         android:name="android.hardware.camera"
         android:required="false" />
@@ -41,6 +43,21 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- Service FCM natif (Phase 5 notifications v2.9.42). Reçoit des
+             messages DATA-ONLY expurgés ; jamais de donnée médicale. Inerte
+             sans google-services.json. -->
+        <service
+            android:name=".MedConnectMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+        <!-- Canal par défaut FCM (fallback) : administratif (importance basse). -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="medconnect_administrative" />
     </application>
 
 </manifest>

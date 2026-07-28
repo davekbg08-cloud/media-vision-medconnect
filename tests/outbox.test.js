@@ -298,7 +298,7 @@ test('les entrées portent le contexte enrichi (operationId, type, operationType
   assert.strictEqual(e.classification, 'retryable');
 });
 
-test('exportOutboxDiagnostic() : expurge récursivement mot de passe/PIN/token du payload, sans perdre les autres champs', async () => {
+test('exportOutboxDiagnostic() : métadonnées SEULES — aucun payload ni valeur sensible (chantier 5, v2.9.42)', async () => {
   const { DB, ctrl } = loadDB();
   ctrl.ready = false;
   // Clés sensibles construites DYNAMIQUEMENT : le scanner de secrets du
@@ -313,15 +313,25 @@ test('exportOutboxDiagnostic() : expurge récursivement mot de passe/PIN/token d
   payload.nested['tok' + 'en'] = 'fixture-jeton';
   await DB.pushCloud('mc_accounts', 'ACC-EXP-1', payload);
   const json = DB.exportOutboxDiagnostic();
+  // Chantier 5 : l'export ne contient PLUS le payload du tout (metadata-only).
+  // La protection n'est plus une expurgation clé-par-clé (faillible) mais
+  // l'OMISSION complète de data/writes — aucun champ métier n'est exporté.
   assert.doesNotMatch(json, /fixture-a-expurger/);
   assert.doesNotMatch(json, /fixture-cle-api/);
   assert.doesNotMatch(json, /fixture-jeton/);
   assert.doesNotMatch(json, /fixture-code/);
-  assert.match(json, /\[expurgé\]/);
-  assert.match(json, /visible/, 'les champs non sensibles restent exportés');
-  assert.match(json, /ACC-EXP-1/);
+  assert.doesNotMatch(json, /visible/, 'aucun champ du payload (même non sensible) n\'est exporté');
   const parsed = JSON.parse(json);
   assert.ok(parsed.summary && parsed.entries.length === 1, 'l\'export contient résumé + entrées');
+  const entry = parsed.entries[0];
+  // Métadonnées utiles au diagnostic.
+  assert.strictEqual(entry.type, 'set');
+  assert.deepStrictEqual(entry.collections, ['mc_accounts']);
+  assert.strictEqual(entry.classification, 'retryable');
+  // Jamais de payload ni d'identité propriétaire.
+  assert.strictEqual(entry.data, undefined);
+  assert.strictEqual(entry.writes, undefined);
+  assert.strictEqual(entry.ownerAuthUid, undefined);
 });
 
 test('une entrée héritée (v2.9.33, sans operationId/type) est normalisée à la lecture, jamais perdue', async () => {

@@ -91,10 +91,11 @@ test('addPatientAndConfirmAtomic() confirmé : le patient apparaît dans le cach
   assert.strictEqual(confirmed, true);
   assert.strictEqual(win.DB.getPatients().length, 1);
   assert.strictEqual(win.DB.getPatients()[0].id, patient.id);
-  // Les 4 documents (dont patient_directory, section 7) doivent être
-  // écrits dans le MÊME batch (un seul commit).
+  // Chantier 1 (v2.9.42) — collections canoniques : le miroir mort
+  // 'patients' n'est plus écrit. Les 3 documents canoniques (mc_patients,
+  // medical_records, patient_directory) sont écrits dans le MÊME batch.
   const cols = firebaseDB._sets.map(s => s.col).sort();
-  assert.deepStrictEqual(cols, ['mc_patients', 'medical_records', 'patient_directory', 'patients']);
+  assert.deepStrictEqual(cols, ['mc_patients', 'medical_records', 'patient_directory']);
 });
 
 test('addPatientAndConfirmAtomic() alimente patient_directory sans AUCUN champ clinique', async () => {
@@ -145,14 +146,14 @@ test("addPatientAndConfirmAtomic() échec transitoire (batch rejeté sans code) 
   assert.ok(result.operationId);
   assert.strictEqual(win.DB.getPatients().length, 0, 'le cache local ne doit être renseigné qu\'après confirmation réelle');
   const entries = win.DB.getOutboxEntries();
-  assert.strictEqual(entries.length, 1, 'UNE seule entrée pour tout le groupe — jamais 4 écritures indépendantes');
+  assert.strictEqual(entries.length, 1, 'UNE seule entrée pour tout le groupe — jamais des écritures indépendantes');
   assert.strictEqual(entries[0].type, 'batch');
   assert.strictEqual(entries[0].operationType, 'patient_create');
-  assert.strictEqual(entries[0].writes.length, 4);
+  assert.strictEqual(entries[0].writes.length, 3);
   // join() : les tableaux issus du sandbox vm ont un AUTRE prototype
   // Array — deepStrictEqual les refuse même à contenu identique.
   assert.strictEqual(entries[0].writes.map(w => w[0]).sort().join(','),
-    'mc_patients,medical_records,patient_directory,patients');
+    'mc_patients,medical_records,patient_directory');
 });
 
 test('addPatientAndConfirmAtomic() hors ligne (firebaseDB indisponible) : groupe atomique en file, cache vierge, code non affichable', async () => {

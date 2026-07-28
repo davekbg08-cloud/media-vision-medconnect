@@ -2,7 +2,7 @@
    MedConnect 2.0 — Service Worker
    Optimisation chargement / PWA
    ===================================================== */
-const CACHE = 'medconnect-v4.42';
+const CACHE = 'medconnect-v4.43';
 
 const ASSETS = [
   './', './index.html', './css/style.css', './css/establishments-balance.css',
@@ -15,6 +15,8 @@ const ASSETS = [
   'https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js',
   'https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js',
   'https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js',
+  'https://www.gstatic.com/firebasejs/9.22.0/firebase-functions-compat.js',
+  'https://www.gstatic.com/firebasejs/9.22.0/firebase-messaging-compat.js',
   'https://www.gstatic.com/firebasejs/9.22.0/firebase-app-check-compat.js',
   './js/firebase-config.js',
   './js/lazy-loader.js',
@@ -48,6 +50,7 @@ const ASSETS = [
   './js/patient.js', './js/hospital.js', './js/pharmacy.js',
   './js/share.js', './js/admin.js', './js/settings.js',
   './js/prescription-flow-fix.js',
+  './js/push-registration.js', './js/notification-center.js',
   './js/auth.js', './js/registration-submit-flow.js', './js/app.js',
   './js/global_back_button.js', './js/patient_edit_guard.js', './js/auth-ui-cleanup.js',
   './js/affiliation-cleanup.js',
@@ -86,6 +89,62 @@ self.addEventListener('activate', event => {
 // jamais automatiquement de son propre chef.
 self.addEventListener('message', event => {
   if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
+});
+
+/* ============================================================
+   Notifications push (Phase 5/6b, v2.9.42)
+   Le payload est DATA-ONLY et EXPURGÉ (notificationId/category/priority/
+   deepLink) : aucune donnée médicale. Le SW affiche un libellé GÉNÉRIQUE ; le
+   client relit la notification autorisée depuis Firestore après le clic.
+   ============================================================ */
+const MC_PUSH_TITLE = 'MedConnect';
+const MC_PUSH_BODY = 'Vous avez une nouvelle notification sécurisée.';
+const MC_ROUTE_ALLOW = ['/notifications', '/appointments', '/lab', '/prescriptions', '/messages', '/admissions', '/transfers'];
+
+// Valide une route de deep link : interne, même origine, dans l'allowlist.
+function mcSafePath(deepLink) {
+  if (typeof deepLink !== 'string' || !deepLink.startsWith('/') || deepLink.startsWith('//')) return '/notifications';
+  const ok = MC_ROUTE_ALLOW.some(p => deepLink === p || deepLink.startsWith(p + '/'));
+  return ok ? deepLink : '/notifications';
+}
+
+self.addEventListener('push', event => {
+  let data = {};
+  try { const raw = event.data ? event.data.json() : {}; data = raw.data || raw || {}; } catch (_) { data = {}; }
+  const deepLink = mcSafePath(data.deepLink);
+  event.waitUntil((async () => {
+    try {
+      const count = parseInt(data.badgeCount, 10);
+      if (self.navigator && self.navigator.setAppBadge && !isNaN(count)) { count > 0 ? self.navigator.setAppBadge(count) : self.navigator.clearAppBadge(); }
+    } catch (_) {}
+    await self.registration.showNotification(MC_PUSH_TITLE, {
+      body: MC_PUSH_BODY,
+      tag: data.notificationId || undefined,   // regroupe/évite les doublons
+      renotify: false,
+      data: { notificationId: data.notificationId || null, path: deepLink },
+      icon: './assets/icon.png', badge: './assets/icon.png',
+    });
+  })());
+});
+
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  const path = mcSafePath(event.notification.data && event.notification.data.path);
+  const nid = event.notification.data && event.notification.data.notificationId;
+  event.waitUntil((async () => {
+    const all = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const target = new URL(path, self.location.origin).href;
+    for (const c of all) {
+      if ('focus' in c) { try { c.postMessage({ type: 'MC_NOTIF_OPEN', notificationId: nid, path }); } catch (_) {} return c.focus(); }
+    }
+    if (self.clients.openWindow) return self.clients.openWindow(target);
+  })());
+});
+
+// Rotation de souscription Web Push : le client se réenregistrera au prochain
+// démarrage (getState/enable). On ne tente pas d'écrire ici (pas d'auth SW).
+self.addEventListener('pushsubscriptionchange', event => {
+  event.waitUntil(Promise.resolve());
 });
 
 function shouldBypassCache(request) {

@@ -1593,3 +1593,47 @@ body.rtl .tl-connector { left: auto; right: -1.1rem; }
   .ai-results-grid { grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); }
 }
 .ai-result-card { display: flex; flex-direction: column; }
+
+/* ============================================================
+   Centre de notifications in-app (Phase 6a, v2.9.42)
+   Cloche flottante universelle + panneau. Thème clair/sombre.
+   ============================================================ */
+#mc-notif-root { position: fixed; top: 12px; right: 12px; z-index: 3000; }
+#mc-notif-bell {
+  position: relative; width: 44px; height: 44px; border-radius: 50%;
+  border: 1px solid var(--border, #d0d7de); background: var(--card, #fff);
+  font-size: 20px; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.15);
+  display: flex; align-items: center; justify-content: center;
+}
+#mc-notif-bell:focus-visible { outline: 3px solid var(--accent, #2563eb); outline-offset: 2px; }
+.mc-notif-badge {
+  position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px;
+  padding: 0 4px; border-radius: 9px; background: var(--danger, #dc2626);
+  color: #fff; font-size: 11px; line-height: 18px; text-align: center; font-weight: 700;
+}
+#mc-notif-panel {
+  position: absolute; top: 52px; right: 0; width: min(360px, 92vw);
+  max-height: min(70vh, 520px); overflow-y: auto; background: var(--card, #fff);
+  border: 1px solid var(--border, #d0d7de); border-radius: 12px;
+  box-shadow: 0 8px 30px rgba(0,0,0,.22);
+}
+.mc-notif-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px; border-bottom: 1px solid var(--border, #eaecef); position: sticky; top: 0;
+  background: var(--card, #fff);
+}
+.mc-notif-linkbtn { background: none; border: none; color: var(--accent, #2563eb); cursor: pointer; font-size: 13px; }
+.mc-notif-card { padding: 12px 14px; border-bottom: 1px solid var(--border, #f0f1f3); cursor: pointer; }
+.mc-notif-card:hover, .mc-notif-card:focus-visible { background: var(--hover, #f6f8fa); outline: none; }
+.mc-notif-unread { background: rgba(37,99,235,.06); }
+.mc-notif-title { font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 6px; }
+.mc-notif-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent, #2563eb); display: inline-block; }
+.mc-notif-body { font-size: 13px; color: var(--text-muted, #57606a); margin-top: 3px; }
+.mc-notif-meta { font-size: 11px; color: var(--text-muted, #8b949e); margin-top: 5px; }
+.mc-notif-empty { padding: 24px 14px; text-align: center; color: var(--text-muted, #8b949e); font-size: 13px; }
+@media (prefers-color-scheme: dark) {
+  #mc-notif-bell, #mc-notif-panel, .mc-notif-head { background: var(--card, #1c2128); }
+}
+.mc-notif-foot { padding: 10px 14px; border-top: 1px solid var(--border, #eaecef); text-align: center; position: sticky; bottom: 0; background: var(--card, #fff); }
+#mc-notif-push:disabled { color: var(--text-muted, #8b949e); cursor: default; }
+@media (prefers-color-scheme: dark) { .mc-notif-foot { background: var(--card, #1c2128); } }
