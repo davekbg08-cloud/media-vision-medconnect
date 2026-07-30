@@ -82,7 +82,10 @@ for (const [label, file, flag] of [
     const src = read(file);
     assert.match(src, new RegExp(`let ${flag} = false;`), `déclaration du verrou ${flag}`);
     assert.match(src, new RegExp(`if \\(${flag}\\) return;`), 'garde en tête');
-    assert.match(src, new RegExp(`finally \\{ ${flag} = false; \\}`), 'relâché dans finally (jamais bloqué)');
+    // Remise à zéro dans un finally (jamais bloqué). L'accolade fermante n'est
+    // plus exigée immédiatement : certains handlers ajoutent un nettoyage (ex.
+    // App.setBtnLoading(_btn, false)) dans le même finally.
+    assert.match(src, new RegExp(`finally \\{ ${flag} = false;`), 'relâché dans finally (jamais bloqué)');
   });
 }
 

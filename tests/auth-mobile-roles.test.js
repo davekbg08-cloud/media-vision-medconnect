@@ -30,7 +30,7 @@ test("l'inscription filtre les rôles par plateforme : labo/réception seulement
 });
 
 test('le bouton de connexion patient dit simplement « Se connecter »', () => {
-  assert.match(auth, /onclick="Auth\._doPatient\(\)">🔐 Se connecter<\/button>/, 'libellé corrigé');
+  assert.match(auth, /onclick="Auth\._doPatient\(event\)">🔐 Se connecter<\/button>/, 'libellé corrigé (event passé pour l\'état de chargement)');
   assert.ok(!auth.includes('Se connecter à mon dossier existant'), "l'ancien libellé redondant ne doit plus exister");
   assert.ok(!auth.includes('Compte existant :'), "l'encart « Compte existant » (non essentiel) doit être retiré");
   // Le second bouton (premier accès) reste — c'est lui qui distingue les deux cas.

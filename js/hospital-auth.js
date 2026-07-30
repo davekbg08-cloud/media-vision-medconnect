@@ -229,7 +229,7 @@ const HospitalAuth = (() => {
               <label>Mot de passe hôpital</label>
               <input id="ha-login-pw" type="password" placeholder="••••••••">
             </div>
-            <button class="btn btn-primary btn-full" onclick="HospitalAuth.login()">Se connecter</button>
+            <button class="btn btn-primary btn-full" onclick="HospitalAuth.login(event)">Se connecter</button>
           </div>
 
           <div id="ha-register" style="display:none">
@@ -276,9 +276,16 @@ const HospitalAuth = (() => {
   // Anti double-appui : la connexion enchaîne recherche cloud +
   // signIn Firebase awaités — un second clic relançait tout en parallèle.
   let _loggingIn = false;
-  async function login() {
+  async function login(ev) {
     if (_loggingIn) return;
     _loggingIn = true;
+    // Ferme le clavier + état de chargement sur le bouton (premier appui
+    // fiable, feedback visuel) ; timeout 15 s sur les appels réseau — une
+    // connexion qui pend ne fige plus le bouton (parité mobile/desktop).
+    try { document.activeElement?.blur?.(); } catch (_) {}
+    const _btn = ev?.currentTarget || ev?.target || null;
+    App.setBtnLoading?.(_btn, true);
+    const T = p => (App.withTimeout ? App.withTimeout(p, 15000) : p);
     try {
       const mat = document.getElementById('ha-login-mat').value.trim();
       const pw  = document.getElementById('ha-login-pw').value;
@@ -300,7 +307,7 @@ const HospitalAuth = (() => {
       let signedInViaAuth = false;
       if (typeof firebaseAuth !== 'undefined' && firebaseAuth) {
         try {
-          await firebaseAuth.signInWithEmailAndPassword(email, pw);
+          await T(firebaseAuth.signInWithEmailAndPassword(email, pw));
           signedInViaAuth = true;
         } catch (authErr) {
           // Repli hérité (établissement créé avant ce correctif, encore
@@ -308,7 +315,7 @@ const HospitalAuth = (() => {
         }
       }
 
-      const est = await findByOfficialId(mat);
+      const est = await T(findByOfficialId(mat));
       if (!est) { App.toast('Établissement introuvable pour ce matricule.', 'error'); return; }
 
       // Correctif (bug confirmé) : findByOfficialId() peut avoir trouvé
@@ -353,7 +360,7 @@ const HospitalAuth = (() => {
     } catch (e) {
       console.error('[HospitalAuth] login :', e);
       App.toast(e.message || 'Connexion impossible.', 'error');
-    } finally { _loggingIn = false; }
+    } finally { _loggingIn = false; App.setBtnLoading?.(_btn, false); }
   }
 
   /* Migration organique (même principe que le PIN patient) : crée le

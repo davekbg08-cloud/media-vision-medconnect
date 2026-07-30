@@ -83,7 +83,7 @@ test('② variantes de rôle réutilisant les couleurs sémantiques', () => {
 
 test('② App.setBtnLoading existe, est exporté, et ne casse pas button-feedback (aria-busy + disabled)', () => {
   assert.match(appSrc, /function setBtnLoading\(btn, loading\)/);
-  assert.match(appSrc, /toggleTheme, openModal, closeModal, toast, setBtnLoading, init/);
+  assert.match(appSrc, /toggleTheme, openModal, closeModal, toast, setBtnLoading, withTimeout, init/);
   const i = appSrc.indexOf('function setBtnLoading(');
   const body = appSrc.slice(i, i + 500);
   assert.match(body, /setAttribute\('aria-busy', 'true'\)/);

@@ -485,6 +485,17 @@ const App = (() => {
     }
   }
 
+  // Borne une promesse par un délai (rejette avec Error('timeout') après `ms`).
+  // Utilisé par TOUTES les connexions (auth.js admin/professionnel/patient,
+  // hospital-auth.js desktop) : un appel Firebase qui pend (réseau lent,
+  // App Check…) ne doit jamais figer le bouton indéfiniment.
+  function withTimeout(promise, ms = 15000) {
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
+    ]);
+  }
+
   function closeMobileSidebar() { document.getElementById('sidebar')?.classList.remove('open'); }
 
   async function init() {
@@ -562,7 +573,7 @@ const App = (() => {
 
   return {
     afterLogin, buildNav, navigateTo, goHome, refresh, startExchangeSync,
-    toggleTheme, openModal, closeModal, toast, setBtnLoading, init,
+    toggleTheme, openModal, closeModal, toast, setBtnLoading, withTimeout, init,
     closeMobileSidebar, refreshIfCurrent,
   };
 })();
