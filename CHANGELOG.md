@@ -7,6 +7,17 @@ jour) et l'écran **Paramètres → À propos**.
 La source unique de la version en cours est `config/app-version.json` —
 ce fichier doit rester cohérent avec elle.
 
+## 2.9.44 — 2026-07-30
+
+Chantier **App Check : audit + fiabilisation** (aucun changement de comportement visible ; Cloud Firestore reste en **Surveillance / Non appliqué** ; aucune règle Firestore, connexion, vaccination ni notification modifiée). Additif, sans régression.
+
+- **Activation App Check strictement idempotente** (`js/firebase-config.js`) : une seule activation par chargement même si `initFirebase()`/une restauration rappelle `activateAppCheck()` (état de module dédié, ne dépend plus seulement de `firebase.apps.length`) — plus de second provider ni de second `activate()`. Ordre d'init préservé (App Check avant Firestore/Auth/Functions).
+- **Vérification réelle du jeton au chargement** : `verifyAppCheckToken()` (`getToken(false)`, **timeout 10 s**, une seule fois par chargement, **jamais bloquante** pour Firestore en mode Surveillance).
+- **État de diagnostic sûr** `window.MedConnectAppCheckStatus` (`status/provider/hostname/activated/tokenVerified/lastCheckedAt/errorCode`) — **jamais** de jeton, de clé ni d'objet Firebase interne. Statuts : `activated`, `valid`, `unconfigured_domain`, `sdk_missing`, `activation_failed`, `token_failed`, `timeout`. Domaine inconnu → `unconfigured_domain` (aucune activation avec une mauvaise clé). Journaux **expurgés** (le jeton n'apparaît jamais).
+- **Tests** : `tests/firebase-app-check.test.js` étendu (27 tests — idempotence, ordre d'init, résolution par domaine, `getToken` valide/échec/timeout, non-fuite du jeton, statut sûr, parité Android, précache SW). `docs/FIREBASE_APP_CHECK_SETUP.md` complété (procédure de test manuel par plateforme + vérifications console non automatisables).
+
+Firebase reste en **compat 9.22.0** (aucune migration modulaire/Vite/React). Clés reCAPTCHA Enterprise publiques inchangées. Version **2.9.44** (build 2026.07.30.1, versionCode 45, cache `medconnect-v4.45`). Miroirs Android resynchronisés octet pour octet.
+
 ## 2.9.43 — 2026-07-28
 
 Chantier correctif ciblé : **fenêtre « Accès Administrateur »** et **module Vaccinations**. Additif, sans régression (suite JS + règles émulateur + lint + scan).
