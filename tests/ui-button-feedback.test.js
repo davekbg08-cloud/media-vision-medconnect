@@ -82,7 +82,10 @@ for (const [label, file, flag] of [
     const src = read(file);
     assert.match(src, new RegExp(`let ${flag} = false;`), `déclaration du verrou ${flag}`);
     assert.match(src, new RegExp(`if \\(${flag}\\) return;`), 'garde en tête');
-    assert.match(src, new RegExp(`finally \\{ ${flag} = false; \\}`), 'relâché dans finally (jamais bloqué)');
+    // Remise à zéro dans un finally (jamais bloqué). L'accolade fermante n'est
+    // plus exigée immédiatement : certains handlers ajoutent un nettoyage (ex.
+    // App.setBtnLoading(_btn, false)) dans le même finally.
+    assert.match(src, new RegExp(`finally \\{ ${flag} = false;`), 'relâché dans finally (jamais bloqué)');
   });
 }
 
@@ -104,21 +107,32 @@ for (const [label, flag, unlockLabel] of [
   });
 }
 
-test('connexion administrateur (_doAdmin) : bouton verrouillé AVANT le premier await, libéré en cas d\'échec', () => {
+test('connexion administrateur (_doAdmin) : verrou de module AVANT le premier await, timeout 15 s, clavier fermé, libéré en cas d\'échec', () => {
   const src = read('js/auth.js');
   const start = src.indexOf('async function _doAdmin(');
   const end = src.indexOf('function _launch(', start);
   const body = src.slice(start, end);
-  const disableIdx = body.indexOf('submitBtn.disabled = true');
-  // Premier await RÉEL (pas le mot « await » d'un commentaire) : le
-  // nettoyage de session puis la connexion Firebase.
-  const firstAwaitIdx = body.indexOf('await firebaseAuth');
-  assert.ok(disableIdx !== -1, 'le bouton doit être désactivé');
-  assert.ok(firstAwaitIdx !== -1, 'la connexion Firebase doit être awaitée');
-  assert.ok(disableIdx < firstAwaitIdx, 'la désactivation doit précéder le premier await (couvre clic ET touche Entrée)');
-  assert.match(body, /if \(submitBtn\?\.disabled\) return;/, 'une seconde soumission pendant la connexion doit être ignorée');
+
+  // Verrou de MODULE (indépendant du DOM) posé AVANT le premier await réel.
+  const busyLockIdx = body.indexOf('_adminBusy = true');
+  const firstAwaitIdx = body.indexOf('await withTimeout(firebaseAuth');
+  assert.ok(busyLockIdx !== -1, 'le verrou _adminBusy doit être posé');
+  assert.ok(firstAwaitIdx !== -1, 'la connexion Firebase doit passer par withTimeout');
+  assert.ok(busyLockIdx < firstAwaitIdx, 'le verrou doit précéder le premier await (couvre clic ET touche Entrée)');
+
+  // Un seul appel simultané : sortie immédiate si déjà en cours.
+  assert.match(body, /if \(_adminBusy\) return;/, 'un second appel pendant le traitement doit être ignoré');
+  // État de chargement (spinner) via le helper unifié.
+  assert.match(body, /App\.setBtnLoading\?\.\(submitBtn, true\)/, 'le bouton doit afficher un état de chargement');
+  // Timeout 15 s : une connexion qui pend ne doit jamais figer le bouton.
+  assert.match(body, /withTimeout\(/, 'les appels Firebase doivent être bornés par un timeout');
+  assert.match(body, /15000/, 'le timeout doit être de 15 secondes');
+  // Ferme le clavier mobile avant la connexion (premier appui fiable).
+  assert.match(body, /document\.activeElement\?\.blur/, 'le clavier doit être fermé avant la connexion');
+  // Libération dans finally (échec/refus) : bouton réutilisable immédiatement.
   assert.match(body, /finally \{/, 'le verrou doit être libéré dans finally');
-  assert.match(body, /submitBtn\.disabled = false/, "le bouton doit redevenir utilisable après un échec");
+  assert.match(body, /_adminBusy = false/, 'le verrou doit être relâché après un échec');
+  assert.match(body, /App\.setBtnLoading\?\.\(submitBtn, false\)/, 'le bouton doit redevenir utilisable après un échec');
 });
 
 test('saveNewPatient (hospital.js) : le bouton est désactivé AVANT le premier await (contrôle d\'abonnement)', () => {

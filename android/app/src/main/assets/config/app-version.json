@@ -1,8 +1,17 @@
 {
-  "version": "2.9.42",
-  "build": "2026.07.23.2",
-  "buildDate": "2026-07-23",
+  "version": "2.9.43",
+  "build": "2026.07.28.1",
+  "buildDate": "2026-07-28",
   "changelog": [
+    {
+      "version": "2.9.43",
+      "date": "2026-07-28",
+      "notes": [
+        "Connexions fiables (desktop ET mobile) : tous les boutons « Se connecter » — administrateur, professionnel (médecin/infirmier/pharmacien), patient et établissement — répondent dès le premier appui. Un seul essai à la fois, délai maximal de 15 secondes (une connexion qui pend ne fige plus le bouton), indicateur de chargement et messages d'erreur clairs ; le clavier se ferme avant la connexion. Pour l'admin, le rôle est vérifié dans Firestore avant d'ouvrir le tableau de bord",
+        "Modales : sur écran tactile, le clavier ne s'ouvre plus automatiquement à l'ouverture d'une fenêtre — fini le décalage qui faisait « rater » le premier appui sur les boutons",
+        "Vaccinations : la saisie se fait désormais dans le dossier du patient sélectionné (rattachement au patient garanti) ; une vaccination ne peut plus être enregistrée sans patient. Confidentialité renforcée : un soignant ne peut créer/modifier une vaccination que pour son propre établissement, jamais pour un autre"
+      ]
+    },
     {
       "version": "2.9.42",
       "date": "2026-07-23",

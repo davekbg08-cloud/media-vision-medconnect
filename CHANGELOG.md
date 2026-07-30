@@ -7,6 +7,16 @@ jour) et l'écran **Paramètres → À propos**.
 La source unique de la version en cours est `config/app-version.json` —
 ce fichier doit rester cohérent avec elle.
 
+## 2.9.43 — 2026-07-28
+
+Chantier correctif ciblé : **fenêtre « Accès Administrateur »** et **module Vaccinations**. Additif, sans régression (suite JS + règles émulateur + lint + scan).
+
+- **Connexions fiables dès le premier appui — desktop ET mobile.** Le même durcissement s'applique à **toutes** les connexions : administrateur, professionnel (médecin/infirmier/pharmacien), patient (mobile) et établissement (desktop). Verrou de module (un seul essai simultané, indépendant de l'état du bouton), **timeout de 15 s** sur les appels Firebase (une connexion qui pend ne fige plus le bouton — cause des « plusieurs appuis sans effet »), indicateur de chargement unifié (`App.setBtnLoading`) et helper partagé `App.withTimeout`, messages d'erreur distincts (délai vs identifiants/droits), **fermeture du clavier** avant la connexion. Pour l'admin, le **rôle est vérifié dans Firestore** avant d'ouvrir le tableau de bord. Verrouillé par `tests/login-hardening-v2943.test.js`.
+- **Modales : plus d'ouverture automatique du clavier sur écran tactile.** L'auto-focus d'un champ texte décalait le viewport et faisait « rater » le premier appui sur les boutons ; désactivé sur pointeur tactile (conservé au clavier/souris).
+- **Vaccinations rattachées à un patient + confidentialité.** La saisie soignante se fait désormais dans le **dossier du patient ouvert** (`MedicalRecordDesktop`) — rattachement patient garanti, avec tampon d'établissement ; l'écran mobile redevient la vue patient (lecture). Garde-fou anti-orphelin côté client. **Règles `mc_vaccinations` resserrées** : création réservée à un rôle clinique, avec `patient_id` non vide, appartenance active au **même établissement** que la fiche et `created_by` réel ; modification/suppression limitées à l'établissement (fin de l'écriture inter-établissements). Verrouillé par `tests/firestore-rules/mc-vaccinations-write.rules.test.js` et `tests/vaccination-patient-link-v2943.test.js`.
+
+Version **2.9.43** (build 2026.07.28.1, versionCode 44, cache `medconnect-v4.44`). Miroirs Android resynchronisés octet pour octet.
+
 ## 2.9.42 — 2026-07-23
 
 Chantier « prêt pour la production » (v2.9.42). Transforme la 2.9.41 en une version réellement utilisable avec de vraies données médicales : intégrité, synchronisation, confidentialité, droits, historique, multi-appareils et suppression des faux succès. **Additif, sans régression** (émulateur de règles + suite JS + lint + scan de secrets à chaque chantier). Firestore reste la seule source de vérité ; localStorage/IndexedDB ne sont que des caches.

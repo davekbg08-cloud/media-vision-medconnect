@@ -376,6 +376,14 @@ const App = (() => {
 
     try {
       requestAnimationFrame(() => {
+        // Sur écran TACTILE, ne pas auto-focuser : cela ouvrirait le clavier,
+        // décalerait le viewport et ferait « rater » le premier appui sur les
+        // boutons de la modale (bug signalé sur « Accès Administrateur »).
+        // L'utilisateur tactile tape le champ quand il le souhaite. Sur
+        // clavier/souris (pointeur fin), l'auto-focus reste un confort.
+        const coarse = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+          && window.matchMedia('(pointer: coarse)').matches;
+        if (coarse) return;
         const focusable = bodyNode.querySelector(
           'input, select, textarea, button, [tabindex]:not([tabindex="-1"])'
         );
@@ -477,6 +485,17 @@ const App = (() => {
     }
   }
 
+  // Borne une promesse par un délai (rejette avec Error('timeout') après `ms`).
+  // Utilisé par TOUTES les connexions (auth.js admin/professionnel/patient,
+  // hospital-auth.js desktop) : un appel Firebase qui pend (réseau lent,
+  // App Check…) ne doit jamais figer le bouton indéfiniment.
+  function withTimeout(promise, ms = 15000) {
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
+    ]);
+  }
+
   function closeMobileSidebar() { document.getElementById('sidebar')?.classList.remove('open'); }
 
   async function init() {
@@ -554,7 +573,7 @@ const App = (() => {
 
   return {
     afterLogin, buildNav, navigateTo, goHome, refresh, startExchangeSync,
-    toggleTheme, openModal, closeModal, toast, setBtnLoading, init,
+    toggleTheme, openModal, closeModal, toast, setBtnLoading, withTimeout, init,
     closeMobileSidebar, refreshIfCurrent,
   };
 })();

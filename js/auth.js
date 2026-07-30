@@ -177,7 +177,7 @@ const Auth = (() => {
             style="letter-spacing:2px;text-transform:uppercase;font-family:monospace"
             oninput="this.value=this.value.toUpperCase()">
         </div>
-        <button class="btn-p" onclick="Auth._doPatient()">🔐 Se connecter</button>
+        <button class="btn-p" onclick="Auth._doPatient(event)">🔐 Se connecter</button>
         <button class="btn btn-ghost" style="width:100%;margin-top:.6rem" onclick="Auth._createPatientPin()">🆕 Premier accès : créer mon PIN</button>`,
 
       doctor: `
@@ -189,7 +189,7 @@ const Auth = (() => {
           <label class="inp-lbl">Mot de passe *</label>
           <input type="password" id="ld-pass" class="inp" placeholder="••••••">
         </div>
-        <button class="btn-p" onclick="Auth._doDoctor()">🔐 Se connecter</button>`,
+        <button class="btn-p" onclick="Auth._doDoctor(event)">🔐 Se connecter</button>`,
 
       pharmacist: `
         <div class="form-group" style="margin-top:.75rem">
@@ -200,7 +200,7 @@ const Auth = (() => {
           <label class="inp-lbl">Mot de passe *</label>
           <input type="password" id="lph-pass" class="inp" placeholder="••••••">
         </div>
-        <button class="btn-p" onclick="Auth._doPharmacist()">🔐 Se connecter</button>`,
+        <button class="btn-p" onclick="Auth._doPharmacist(event)">🔐 Se connecter</button>`,
 
       nurse: `
         <div class="form-group" style="margin-top:.75rem">
@@ -211,7 +211,7 @@ const Auth = (() => {
           <label class="inp-lbl">Mot de passe *</label>
           <input type="password" id="ln-pass" class="inp" placeholder="••••••">
         </div>
-        <button class="btn-p" onclick="Auth._doNurse()">🔐 Se connecter</button>`,
+        <button class="btn-p" onclick="Auth._doNurse(event)">🔐 Se connecter</button>`,
     };
     document.getElementById('login-form').innerHTML = forms[role] || '';
   }
@@ -696,13 +696,35 @@ const Auth = (() => {
   }
 
   /* ── ACTIONS CONNEXION ────────────────────────────── */
-  async function _doPatient() {
+  // Verrou de module : un seul essai de connexion patient à la fois, avec état
+  // de chargement, fermeture du clavier et timeout 15 s (comme admin/pro).
+  let _patientBusy = false;
+  async function _doPatient(ev) {
+    if (_patientBusy) return;
+    try { document.activeElement?.blur?.(); } catch (_) {}
+    const btn = ev?.currentTarget || ev?.target || null;
+    _patientBusy = true;
+    App.setBtnLoading?.(btn, true);
+    try {
+      await _doPatientFlow();
+    } catch (err) {
+      _err('auth-err', String(err?.message) === 'timeout'
+        ? '⏱️ Délai dépassé (15 s). Vérifiez votre connexion internet puis réessayez.'
+        : '❌ Connexion impossible. Réessayez.');
+    } finally {
+      _patientBusy = false;
+      App.setBtnLoading?.(btn, false);
+    }
+  }
+
+  async function _doPatientFlow() {
+    const T = p => (App.withTimeout ? App.withTimeout(p, 15000) : p); // timeout 15 s
     const id  = (document.getElementById('lp-id')?.value  || '').trim().toUpperCase();
     const pin = (document.getElementById('lp-pin')?.value || '').trim();
     if (!id || !pin) { _err('auth-err', 'Veuillez remplir tous les champs.'); return; }
     if (!id.startsWith('MC-')) { _err('auth-err', '❌ Format invalide. Ex : MC-2026-CD-A3B7X9Q2'); return; }
     if (pin.length < 4) { _err('auth-err', '❌ PIN trop court — minimum 4 chiffres.'); return; }
-    await _syncBeforeAuth('connexion patient');
+    await T(_syncBeforeAuth('connexion patient'));
 
     // Chantier v2.9.41 — la connexion patient ne dépend PLUS de la présence
     // de la fiche dans le cache local, ni d'une lecture cloud PRÉ-auth : les
@@ -713,7 +735,7 @@ const Auth = (() => {
     // déconnexion (qui purge le cache). On authentifie via le COMPTE
     // (mc_accounts, lecture publique) + le PIN (Firebase Auth), PUIS on
     // relit la fiche en tant que propriétaire (_hydratePatientRecordAfterAuth).
-    let existing = _findPatientAccount(id) || _mergeAccountLocally(await _fetchAccountByDocId(`PAT_${id}`));
+    let existing = _findPatientAccount(id) || _mergeAccountLocally(await T(_fetchAccountByDocId(`PAT_${id}`)));
     if (!existing) {
       _err('auth-err', '⚠️ Aucun compte trouvé pour cette fiche, ni localement ni dans le cloud.<br>Si c’est votre tout premier accès, utilisez “Premier accès : créer mon PIN”.');
       return;
@@ -726,7 +748,7 @@ const Auth = (() => {
     // définition — contrairement à _signInFirebaseForAccount conçue
     // pour des comptes dont uid EST déjà l'uid Firebase).
     if (existing.email && _hasFirebaseAuth()) {
-      const { ok } = await _signInPatientFirebaseAuth(existing.email, _toFirebasePassword(pin));
+      const { ok } = await T(_signInPatientFirebaseAuth(existing.email, _toFirebasePassword(pin)));
       if (!ok) { _err('auth-err', '❌ PIN incorrect.'); return; }
     } else if (!existing.email && existing.password !== undefined) {
       // Compte hérité (créé avant ce chantier), PIN encore en clair.
@@ -736,7 +758,7 @@ const Auth = (() => {
       // (jamais de suppression qui laisserait le compte inaccessible).
       if (existing.password !== pin) { _err('auth-err', '❌ PIN incorrect.'); return; }
       const email = _syntheticPatientEmail(id);
-      const migrated = await _createPatientFirebaseAuth(email, _toFirebasePassword(pin), { ...existing, email });
+      const migrated = await T(_createPatientFirebaseAuth(email, _toFirebasePassword(pin), { ...existing, email }));
       if (migrated.authUid) {
         delete migrated.password;
         existing = migrated;
@@ -852,41 +874,64 @@ const Auth = (() => {
     App.toast(`✅ Bienvenue${welcomeName ? ' ' + welcomeName : ''} ! PIN créé.`);
   }
 
-  async function _doProfessional(role, numId, passId, launcher = _launch) {
+  // Verrou de module : un seul essai de connexion professionnelle à la fois
+  // (mobile). Corrige le double-appui et les « plusieurs appuis sans effet ».
+  let _professionalBusy = false;
+  async function _doProfessional(role, numId, passId, launcher = _launch, ev) {
+    if (_professionalBusy) return; // un seul appel simultané
     const num  = (document.getElementById(numId)?.value  || '').trim().toUpperCase();
     const pass = (document.getElementById(passId)?.value || '').trim();
+    // Ferme le clavier mobile avant la connexion (viewport stable → premier
+    // appui fiable, comme pour l'admin).
+    try { document.activeElement?.blur?.(); } catch (_) {}
     if (!num || !pass) { _err('auth-err', 'Veuillez remplir tous les champs obligatoires.'); return; }
 
-    // Firestore d'abord (source principale). localStorage n'intervient
-    // qu'en repli si Firestore est indisponible (hors-ligne, etc.).
-    let account = await resolveProfessionalAccountFromFirestore(role, num);
-    let fromCache = false;
-    if (!account) {
-      account = _findProfessionalAccount(role, num);
-      fromCache = !!account;
+    const btn = ev?.currentTarget || ev?.target || null;
+    const T = p => (App.withTimeout ? App.withTimeout(p, 15000) : p); // timeout 15 s
+    _professionalBusy = true;
+    App.setBtnLoading?.(btn, true); // spinner + disabled + aria-busy
+
+    try {
+      // Firestore d'abord (source principale). localStorage n'intervient
+      // qu'en repli si Firestore est indisponible (hors-ligne, etc.).
+      let account = await T(resolveProfessionalAccountFromFirestore(role, num));
+      let fromCache = false;
+      if (!account) {
+        account = _findProfessionalAccount(role, num);
+        fromCache = !!account;
+      }
+      if (!account) { _err('auth-err', 'Compte introuvable ou non encore validé.'); return; }
+
+      // Statut vérifié AVANT toute tentative Firebase Auth — un compte
+      // pending/rejected/suspended ne doit jamais déclencher de message
+      // technique Firebase.
+      if (!handleAccountStatusBeforeAuth(account, role, num)) return;
+
+      if (account.email && _hasFirebaseAuth()) {
+        const ok = await T(_signInFirebaseForAccount(account, pass));
+        if (!ok) return;
+      } else if (account.password && account.password !== pass) {
+        _err('auth-err', 'Mot de passe incorrect.');
+        return;
+      }
+
+      if (!fromCache) _upsertAccount(account);
+      _save(account); launcher(account);
+    } catch (err) {
+      _err('auth-err', String(err?.message) === 'timeout'
+        ? '⏱️ Délai dépassé (15 s). Vérifiez votre connexion internet puis réessayez.'
+        : '❌ Connexion impossible. Réessayez.');
+    } finally {
+      // Échec/refus : bouton réutilisable immédiatement. Succès : l'écran a
+      // déjà changé, la réactivation est sans effet.
+      _professionalBusy = false;
+      App.setBtnLoading?.(btn, false);
     }
-    if (!account) { _err('auth-err', 'Compte introuvable ou non encore validé.'); return; }
-
-    // Statut vérifié AVANT toute tentative Firebase Auth — un compte
-    // pending/rejected/suspended ne doit jamais déclencher de message
-    // technique Firebase.
-    if (!handleAccountStatusBeforeAuth(account, role, num)) return;
-
-    if (account.email && _hasFirebaseAuth()) {
-      const ok = await _signInFirebaseForAccount(account, pass);
-      if (!ok) return;
-    } else if (account.password && account.password !== pass) {
-      _err('auth-err', 'Mot de passe incorrect.');
-      return;
-    }
-
-    if (!fromCache) _upsertAccount(account);
-    _save(account); launcher(account);
   }
 
-  function _doDoctor()     { return _doProfessional('doctor', 'ld-num', 'ld-pass', _launchDoctor); }
-  function _doPharmacist() { return _doProfessional('pharmacist', 'lph-num', 'lph-pass', _launch); }
-  function _doNurse()      { return _doProfessional('nurse', 'ln-num', 'ln-pass', _launch); }
+  function _doDoctor(e)     { return _doProfessional('doctor', 'ld-num', 'ld-pass', _launchDoctor, e); }
+  function _doPharmacist(e) { return _doProfessional('pharmacist', 'lph-num', 'lph-pass', _launch, e); }
+  function _doNurse(e)      { return _doProfessional('nurse', 'ln-num', 'ln-pass', _launch, e); }
 
   /* ── ACTIONS INSCRIPTION ──────────────────────────── */
   async function _createFirebaseUser(email, pass, account) {
@@ -1445,23 +1490,41 @@ const Auth = (() => {
     _adminModal();
   }
 
+  // Verrou de MODULE (indépendant de l'état DOM du bouton) : garantit un seul
+  // appel de connexion admin simultané, même si le bouton est re-rendu ou
+  // introuvable. Corrige les « plusieurs appuis sans effet » quand un appel
+  // précédent restait en cours.
+  let _adminBusy = false;
+
   async function _doAdmin(e) {
     e.preventDefault();
+    if (_adminBusy) return; // un seul appel simultané, robuste
+
     const email = (document.getElementById('adm-u')?.value || '').trim();
     const pass  = (document.getElementById('adm-p')?.value || '').trim();
     const el    = document.getElementById('adm-err');
     const showAdminError = msg => { if (el) { el.textContent = msg; el.style.display = 'block'; } };
+    const clearError = () => { if (el) { el.textContent = ''; el.style.display = 'none'; } };
+
+    clearError();
+    // Ferme le clavier mobile AVANT la connexion : clavier ouvert = viewport
+    // décalé = premier appui « raté » sur le bouton (bug signalé).
+    try { document.activeElement?.blur?.(); } catch (_) {}
 
     if (!email || !pass) { showAdminError('Veuillez remplir l\'email et le mot de passe administrateur.'); return; }
     if (!_hasFirebaseAuth() || !_hasFirebaseDB()) { showAdminError('❌ Firebase indisponible. Vérifiez la connexion internet puis réessayez.'); return; }
 
-    // Verrou anti double-appui (clic ET touche Entrée passent par le
-    // submit du formulaire) : désactivé AVANT le premier await — une
-    // seconde soumission pendant la connexion relançait signOut +
-    // signInWithEmailAndPassword en parallèle.
     const submitBtn = e.target?.querySelector?.('button[type="submit"]');
-    if (submitBtn?.disabled) return;
-    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = '⏳ Connexion…'; }
+    _adminBusy = true;
+    App.setBtnLoading?.(submitBtn, true); // spinner + disabled + aria-busy
+
+    // Timeout 15 s : une connexion Firebase qui pend (réseau lent, App Check…)
+    // ne doit JAMAIS figer le bouton indéfiniment. Passé ce délai, on échoue
+    // proprement et le bouton redevient utilisable dès le premier appui suivant.
+    const withTimeout = (p, ms) => Promise.race([
+      p,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
+    ]);
 
     try {
       // Nettoie une éventuelle session Firebase résiduelle (ex. un agent
@@ -1469,11 +1532,13 @@ const Auth = (() => {
       // que les règles Firestore voient la mauvaise identité.
       if (firebaseAuth.currentUser) { try { await firebaseAuth.signOut(); } catch (_) {} }
 
-      const credential = await firebaseAuth.signInWithEmailAndPassword(email, pass);
+      const credential = await withTimeout(firebaseAuth.signInWithEmailAndPassword(email, pass), 15000);
       const uid = credential?.user?.uid;
       if (!uid) throw new Error('admin_uid_missing');
 
-      const doc = await firebaseDB.collection('users').doc(uid).get();
+      // Vérifie le rôle administrateur dans Firestore AVANT d'ouvrir le tableau
+      // de bord (aucune auto-promotion possible côté client).
+      const doc = await withTimeout(firebaseDB.collection('users').doc(uid).get(), 15000);
       if (!doc.exists) { showAdminError('❌ Profil administrateur introuvable dans Firestore.'); return; }
 
       const profile = doc.data() || {};
@@ -1492,13 +1557,14 @@ const Auth = (() => {
       App.toast('✅ Administrateur connecté — synchronisé avec Firestore.');
     } catch (error) {
       console.warn('[MedConnect] Connexion administrateur cloud impossible :', error);
-      showAdminError('❌ Connexion administrateur impossible. Vérifiez email, mot de passe et droits Firestore.');
+      showAdminError(String(error?.message) === 'timeout'
+        ? '⏱️ Délai dépassé (15 s). Vérifiez votre connexion internet puis réessayez.'
+        : '❌ Connexion administrateur impossible. Vérifiez email, mot de passe et droits Firestore.');
     } finally {
-      // Échec ou refus : le bouton redevient utilisable. Succès : le
-      // modal est fermé, la réactivation est sans effet.
-      if (submitBtn && document.body.contains(submitBtn)) {
-        submitBtn.disabled = false; submitBtn.textContent = 'Se connecter';
-      }
+      // Échec/refus : bouton réutilisable immédiatement. Succès : modal fermé,
+      // la réactivation est sans effet.
+      _adminBusy = false;
+      App.setBtnLoading?.(submitBtn, false);
     }
   }
 

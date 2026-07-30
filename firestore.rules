@@ -1508,8 +1508,27 @@ service cloud.firestore {
     }
 
     match /mc_vaccinations/{docId} {
+      // Lecture : patient propriétaire, clinicien habilité, ou admin
+      // (canReadMedicalData). Un document sans patient rattaché n'est lisible
+      // par personne (canReadMedicalData échoue faute de champ patient).
       allow read: if canReadMedicalData(resource.data);
-      allow write: if isAdmin() || currentRoleIs('doctor') || currentRoleIs('nurse');
+      // Correctif confidentialité/intégrité (chantier vaccination) : l'ancien
+      // « allow write: if doctor|nurse » laissait N'IMPORTE quel soignant de
+      // N'IMPORTE quel établissement créer/écraser une vaccination — y compris
+      // ORPHELINE (sans patient) et pour un autre hôpital. Désormais la
+      // création exige : rôle clinique, un patient_id NON vide, l'appartenance
+      // au MÊME établissement que la fiche, et created_by == l'auteur réel.
+      allow create: if isAdmin() ||
+        ((currentRoleIs('doctor') || currentRoleIs('nurse')) &&
+         request.resource.data.patient_id is string &&
+         request.resource.data.patient_id.size() > 0 &&
+         belongsToSameEstablishment(request.resource.data) &&
+         request.resource.data.get('created_by', null) == request.auth.uid);
+      // Modification/suppression : admin, ou soignant du MÊME établissement
+      // (jamais inter-établissements comme le permettait l'ancienne règle).
+      allow update, delete: if isAdmin() ||
+        ((currentRoleIs('doctor') || currentRoleIs('nurse')) &&
+         belongsToSameEstablishment(resource.data));
     }
 
     match /mc_lab_results/{docId} {
