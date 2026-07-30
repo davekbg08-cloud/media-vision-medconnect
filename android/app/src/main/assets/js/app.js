@@ -376,6 +376,14 @@ const App = (() => {
 
     try {
       requestAnimationFrame(() => {
+        // Sur écran TACTILE, ne pas auto-focuser : cela ouvrirait le clavier,
+        // décalerait le viewport et ferait « rater » le premier appui sur les
+        // boutons de la modale (bug signalé sur « Accès Administrateur »).
+        // L'utilisateur tactile tape le champ quand il le souhaite. Sur
+        // clavier/souris (pointeur fin), l'auto-focus reste un confort.
+        const coarse = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+          && window.matchMedia('(pointer: coarse)').matches;
+        if (coarse) return;
         const focusable = bodyNode.querySelector(
           'input, select, textarea, button, [tabindex]:not([tabindex="-1"])'
         );

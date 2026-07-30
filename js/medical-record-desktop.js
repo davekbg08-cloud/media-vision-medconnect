@@ -378,7 +378,16 @@ const MedicalRecordDesktop = (() => {
 
   /* ── Vaccinations ───────────────────────────────── */
   function renderVaccinations(list) {
-    return !list.length ? `<div class="card empty-state"><p>Aucune vaccination.</p></div>` : `
+    // Chantier vaccination : l'AJOUT se fait ICI, dans le dossier du patient
+    // OUVERT (_activeId) — d'où un rattachement patient garanti, contrairement
+    // à l'ancien écran mobile. Réservé aux rôles cliniques habilités à écrire.
+    let canAdd = false;
+    try { canAdd = ['doctor', 'nurse', 'admin'].includes(currentRole()); } catch (_) {}
+    const addBtn = canAdd
+      ? `<button class="btn btn-primary btn-sm" onclick="MedicalRecordDesktop.openAddVaccination()">+ Ajouter</button>`
+      : '';
+    const header = `<div class="page-header" style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;margin-bottom:.6rem"><h3 style="margin:0">💉 Vaccinations</h3>${addBtn}</div>`;
+    const body = !list.length ? `<div class="card empty-state"><p>Aucune vaccination.</p></div>` : `
       <div class="records-list">
         ${list.map(v => `
           <div class="record-card">
@@ -391,6 +400,57 @@ const MedicalRecordDesktop = (() => {
             ${v.notes ? `<p>${esc(v.notes)}</p>` : ''}
           </div>`).join('')}
       </div>`;
+    return header + body;
+  }
+
+  /* ── Ajout de vaccination (dossier du patient ouvert) ────────────────
+     Le patient est _activeId (dossier ouvert) ; le tampon établissement
+     (created_by + hospital_id/establishmentId) vient de HospitalPortal.
+     Les deux sont EXIGÉS par les règles Firestore mc_vaccinations.create :
+     impossible de produire une vaccination orpheline ou inter-établissements. */
+  function openAddVaccination() {
+    if (!_activeId) { App.toast?.('❌ Aucun patient ouvert.', 'error'); return; }
+    App.openModal?.('💉 Ajouter une vaccination', `
+      <form onsubmit="MedicalRecordDesktop.saveVaccination(event)">
+        <div class="form-group"><label>Vaccin *</label><input type="text" id="mrd-v-vax" required placeholder="BCG, Polio, COVID-19…"></div>
+        <div class="form-group"><label>Date *</label><input type="date" id="mrd-v-date" value="${new Date().toISOString().slice(0,10)}" required></div>
+        <div class="form-group"><label>Dose</label><input type="text" id="mrd-v-dose" value="1" placeholder="1, 2, Rappel…"></div>
+        <div class="form-group"><label>Médecin</label><input type="text" id="mrd-v-doc" value="${esc(Auth.getUser?.()?.name || '')}"></div>
+        <div class="form-group"><label>Prochain rappel</label><input type="date" id="mrd-v-next"></div>
+        <div class="form-group"><label>Notes</label><textarea id="mrd-v-notes" rows="2"></textarea></div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-ghost" onclick="App.closeModal()">Annuler</button>
+          <button type="submit" class="btn btn-primary">💾 Enregistrer</button>
+        </div>
+      </form>`);
+  }
+
+  function saveVaccination(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    const pid = _activeId;
+    if (!pid) { App.toast?.('❌ Aucun patient ouvert — vaccination non enregistrée.', 'error'); return; }
+    const est = (window.HospitalPortal && window.HospitalPortal.currentEstablishmentFields)
+      ? window.HospitalPortal.currentEstablishmentFields() : {};
+    if (!est.establishmentId && !est.hospital_id) {
+      App.toast?.('❌ Aucun établissement actif — vaccination non enregistrée.', 'error'); return;
+    }
+    const vaccine = (document.getElementById('mrd-v-vax')?.value || '').trim();
+    const date    = (document.getElementById('mrd-v-date')?.value || '').trim();
+    if (!vaccine || !date) { App.toast?.('❌ Vaccin et date requis.', 'error'); return; }
+    DB.addVaccination({
+      patient_id: pid,
+      vaccine, date,
+      dose:      (document.getElementById('mrd-v-dose')?.value || '1').trim() || '1',
+      doctor:    (document.getElementById('mrd-v-doc')?.value || Auth.getUser?.()?.name || '').trim(),
+      next_date: (document.getElementById('mrd-v-next')?.value || '').trim(),
+      notes:     (document.getElementById('mrd-v-notes')?.value || '').trim(),
+      ...est, // created_by + hospital_id/establishmentId — requis par les règles
+    });
+    App.closeModal?.();
+    App.toast?.('✅ Vaccination enregistrée');
+    // Rafraîchit le dossier ouvert (cache invalidé) pour afficher l'entrée.
+    if (_recordCache[pid]) _recordCache[pid] = loadRecord(pid);
+    renderTabContent();
   }
 
   /* ── Imagerie (prévue même sans document) ───────── */
@@ -497,6 +557,7 @@ const MedicalRecordDesktop = (() => {
 
   return {
     render, filter, open, switchTab, setFilter,
+    openAddVaccination, saveVaccination,
     // Exposés en plus pour être testables sans DOM (fonctions pures ou
     // ne dépendant que de DB/HospitalsRegistry déjà chargés) — la
     // logique de sécurité (isolation établissement, visibilité par

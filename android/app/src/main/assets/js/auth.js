@@ -1445,23 +1445,41 @@ const Auth = (() => {
     _adminModal();
   }
 
+  // Verrou de MODULE (indépendant de l'état DOM du bouton) : garantit un seul
+  // appel de connexion admin simultané, même si le bouton est re-rendu ou
+  // introuvable. Corrige les « plusieurs appuis sans effet » quand un appel
+  // précédent restait en cours.
+  let _adminBusy = false;
+
   async function _doAdmin(e) {
     e.preventDefault();
+    if (_adminBusy) return; // un seul appel simultané, robuste
+
     const email = (document.getElementById('adm-u')?.value || '').trim();
     const pass  = (document.getElementById('adm-p')?.value || '').trim();
     const el    = document.getElementById('adm-err');
     const showAdminError = msg => { if (el) { el.textContent = msg; el.style.display = 'block'; } };
+    const clearError = () => { if (el) { el.textContent = ''; el.style.display = 'none'; } };
+
+    clearError();
+    // Ferme le clavier mobile AVANT la connexion : clavier ouvert = viewport
+    // décalé = premier appui « raté » sur le bouton (bug signalé).
+    try { document.activeElement?.blur?.(); } catch (_) {}
 
     if (!email || !pass) { showAdminError('Veuillez remplir l\'email et le mot de passe administrateur.'); return; }
     if (!_hasFirebaseAuth() || !_hasFirebaseDB()) { showAdminError('❌ Firebase indisponible. Vérifiez la connexion internet puis réessayez.'); return; }
 
-    // Verrou anti double-appui (clic ET touche Entrée passent par le
-    // submit du formulaire) : désactivé AVANT le premier await — une
-    // seconde soumission pendant la connexion relançait signOut +
-    // signInWithEmailAndPassword en parallèle.
     const submitBtn = e.target?.querySelector?.('button[type="submit"]');
-    if (submitBtn?.disabled) return;
-    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = '⏳ Connexion…'; }
+    _adminBusy = true;
+    App.setBtnLoading?.(submitBtn, true); // spinner + disabled + aria-busy
+
+    // Timeout 15 s : une connexion Firebase qui pend (réseau lent, App Check…)
+    // ne doit JAMAIS figer le bouton indéfiniment. Passé ce délai, on échoue
+    // proprement et le bouton redevient utilisable dès le premier appui suivant.
+    const withTimeout = (p, ms) => Promise.race([
+      p,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
+    ]);
 
     try {
       // Nettoie une éventuelle session Firebase résiduelle (ex. un agent
@@ -1469,11 +1487,13 @@ const Auth = (() => {
       // que les règles Firestore voient la mauvaise identité.
       if (firebaseAuth.currentUser) { try { await firebaseAuth.signOut(); } catch (_) {} }
 
-      const credential = await firebaseAuth.signInWithEmailAndPassword(email, pass);
+      const credential = await withTimeout(firebaseAuth.signInWithEmailAndPassword(email, pass), 15000);
       const uid = credential?.user?.uid;
       if (!uid) throw new Error('admin_uid_missing');
 
-      const doc = await firebaseDB.collection('users').doc(uid).get();
+      // Vérifie le rôle administrateur dans Firestore AVANT d'ouvrir le tableau
+      // de bord (aucune auto-promotion possible côté client).
+      const doc = await withTimeout(firebaseDB.collection('users').doc(uid).get(), 15000);
       if (!doc.exists) { showAdminError('❌ Profil administrateur introuvable dans Firestore.'); return; }
 
       const profile = doc.data() || {};
@@ -1492,13 +1512,14 @@ const Auth = (() => {
       App.toast('✅ Administrateur connecté — synchronisé avec Firestore.');
     } catch (error) {
       console.warn('[MedConnect] Connexion administrateur cloud impossible :', error);
-      showAdminError('❌ Connexion administrateur impossible. Vérifiez email, mot de passe et droits Firestore.');
+      showAdminError(String(error?.message) === 'timeout'
+        ? '⏱️ Délai dépassé (15 s). Vérifiez votre connexion internet puis réessayez.'
+        : '❌ Connexion administrateur impossible. Vérifiez email, mot de passe et droits Firestore.');
     } finally {
-      // Échec ou refus : le bouton redevient utilisable. Succès : le
-      // modal est fermé, la réactivation est sans effet.
-      if (submitBtn && document.body.contains(submitBtn)) {
-        submitBtn.disabled = false; submitBtn.textContent = 'Se connecter';
-      }
+      // Échec/refus : bouton réutilisable immédiatement. Succès : modal fermé,
+      // la réactivation est sans effet.
+      _adminBusy = false;
+      App.setBtnLoading?.(submitBtn, false);
     }
   }
 

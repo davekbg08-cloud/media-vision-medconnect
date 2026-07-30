@@ -259,12 +259,17 @@ const PatientPortal = (() => {
   function renderVaccinations(main) {
     const p = getMe(); if (!p) { main.innerHTML = noRecord(); return; }
     const list = DB.getPatientVaccinations(p.id);
-    const user = Auth.getUser();
     main.innerHTML = `
       <div class="page-header">
         <h2>💉 Vaccinations</h2>
-        ${user?.role==='nurse'||user?.role==='doctor' ? `<button class="btn btn-primary btn-sm" onclick="PatientPortal.openAddVacc('${p.id}')">+ Ajouter</button>` : ''}
       </div>
+      <!-- Chantier vaccination : cet écran est la VUE PATIENT (lecture de son
+           carnet). La saisie soignante se fait désormais depuis le dossier
+           médical du patient sélectionné (MedicalRecordDesktop), où la
+           vaccination est correctement rattachée au patient ET à
+           l'établissement — l'ancien bouton d'ajout ici produisait des
+           vaccinations non rattachées (voir openAddVacc/saveVacc, conservés
+           mais protégés par un garde-fou anti-orphelin). -->
       ${!list.length ? `<div class="card empty-state"><p>${t('no_data')}</p></div>` : ''}
       <div class="records-list">
         ${list.map(v=>`
@@ -298,8 +303,13 @@ const PatientPortal = (() => {
 
   function saveVacc(e, patientId) {
     e.preventDefault();
+    // Garde-fou (chantier vaccination) : JAMAIS de vaccination orpheline.
+    // Sans patient rattaché, la saisie n'a aucun sens et serait de toute façon
+    // refusée par les règles Firestore — on le signale clairement côté client.
+    const pid = String(patientId || '').trim();
+    if (!pid) { App.toast('❌ Aucun patient sélectionné — vaccination non enregistrée.', 'error'); return; }
     DB.addVaccination({
-      patient_id: patientId,
+      patient_id: pid,
       vaccine:    document.getElementById('v-vax').value,
       date:       document.getElementById('v-date').value,
       dose:       document.getElementById('v-dose').value||'1',
