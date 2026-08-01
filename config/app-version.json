@@ -1,8 +1,15 @@
 {
-  "version": "2.9.43",
-  "build": "2026.07.28.1",
-  "buildDate": "2026-07-28",
+  "version": "2.9.44",
+  "build": "2026.07.30.1",
+  "buildDate": "2026-07-30",
   "changelog": [
+    {
+      "version": "2.9.44",
+      "date": "2026-07-30",
+      "notes": [
+        "App Check (sécurité anti-abus) fiabilisé : activation unique et idempotente, vérification réelle de l'obtention du jeton au chargement (avec délai maximal), et état de diagnostic sûr pour l'administrateur — sans jamais exposer le jeton. Aucun changement de comportement visible ; Cloud Firestore reste en mode Surveillance (non appliqué)."
+      ]
+    },
     {
       "version": "2.9.43",
       "date": "2026-07-28",

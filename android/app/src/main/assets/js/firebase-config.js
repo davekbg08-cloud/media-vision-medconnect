@@ -53,25 +53,112 @@ let firebaseReady = false;
 // son chemin actuel en repli (aucune casse avant déploiement).
 let firebaseFunctions = null;
 
+// ── App Check — état de MODULE pour une activation STRICTEMENT idempotente
+// et une vérification RÉELLE du jeton. Aucun jeton et aucune clé ne sont
+// jamais journalisés ni exposés (voir docs/FIREBASE_APP_CHECK_SETUP.md).
+// firebase.apps.length protège initializeApp mais PAS un second appel à
+// activateAppCheck() — d'où cet état dédié.
+let _appCheckInstance = null;           // instance firebase.appCheck() réutilisée
+let _appCheckActivationStarted = false; // activation tentée une seule fois
+let _appCheckTokenPromise = null;       // vérification getToken : une seule par chargement
+const _appCheckStatus = {
+  // idle|activating|activated|activation_failed|unconfigured_domain|sdk_missing|valid|token_failed|timeout
+  status: 'idle',
+  provider: 'recaptcha-enterprise',
+  hostname: (typeof window !== 'undefined' && window.location && window.location.hostname) || '',
+  activated: false,
+  tokenVerified: false,
+  lastCheckedAt: null,
+  errorCode: null,
+};
+// Publie un état de diagnostic SÛR (jamais de jeton, jamais de clé, jamais
+// d'objet Firebase interne) — utilisable par l'admin et les tests.
+function _publishAppCheckStatus(patch) {
+  if (patch) Object.assign(_appCheckStatus, patch);
+  if (typeof window !== 'undefined') {
+    window.MedConnectAppCheckStatus = {
+      status: _appCheckStatus.status,
+      provider: _appCheckStatus.provider,
+      hostname: _appCheckStatus.hostname,
+      activated: _appCheckStatus.activated,
+      tokenVerified: _appCheckStatus.tokenVerified,
+      lastCheckedAt: _appCheckStatus.lastCheckedAt,
+      errorCode: _appCheckStatus.errorCode,
+    };
+  }
+}
+_publishAppCheckStatus();
+
 // Séparée de initFirebase() pour rester testable isolément et pour que
 // l'absence du SDK App Check (firebase.appCheck) — normale tant que le
-// script firebase-app-check-compat.js n'est pas chargé, ex. anciens
-// caches PWA pas encore rafraîchis — ne fasse jamais échouer
-// l'initialisation Firebase principale.
+// script firebase-app-check-compat.js n'est pas chargé — ne fasse jamais
+// échouer l'initialisation. IDEMPOTENTE : une seule activation par
+// chargement, même si initFirebase()/une restauration la rappelle.
 function activateAppCheck() {
+  if (_appCheckActivationStarted) return _appCheckInstance;
+  _appCheckActivationStarted = true;
+
   const siteKey = resolveAppCheckSiteKey();
-  if (!siteKey) return;
+  if (!siteKey) {
+    // Domaine non déclaré (tests, file://, dev local, origine inattendue) :
+    // ne JAMAIS activer avec une mauvaise clé ; l'app reste en Surveillance.
+    _publishAppCheckStatus({ status: 'unconfigured_domain', activated: false });
+    console.warn('[MedConnect] App Check : domaine non configuré (' + (_appCheckStatus.hostname || 'inconnu') + ') — activation ignorée, mode Surveillance conservé.');
+    return null;
+  }
+  if (typeof firebase === 'undefined' || !firebase.appCheck) {
+    _publishAppCheckStatus({ status: 'sdk_missing', activated: false });
+    return null;
+  }
   try {
-    if (!firebase.appCheck) return;
     const appCheck = firebase.appCheck();
     appCheck.activate(
       new firebase.appCheck.ReCaptchaEnterpriseProvider(siteKey),
-      true // isTokenAutoRefreshEnabled
+      true // isTokenAutoRefreshEnabled — laissé actif
     );
+    _appCheckInstance = appCheck;
+    _publishAppCheckStatus({ status: 'activated', activated: true, errorCode: null });
+    return appCheck;
   } catch (err) {
-    console.warn('[MedConnect] App Check indisponible :', err);
+    // Message expurgé : ni jeton, ni clé, ni objet d'erreur complet.
+    _publishAppCheckStatus({ status: 'activation_failed', activated: false, errorCode: (err && err.code) || 'activation_error' });
+    console.warn('[MedConnect] App Check : activation impossible (étape activate).');
+    return null;
   }
 }
+
+// Vérification RÉELLE du jeton, UNE SEULE fois par chargement, NON bloquante
+// pour Firestore (mode Surveillance). Réutilise l'instance existante, ne force
+// pas le renouvellement, timeout 10 s. Ne journalise/expose JAMAIS le jeton.
+function verifyAppCheckToken() {
+  if (_appCheckTokenPromise) return _appCheckTokenPromise; // une par chargement
+  _appCheckTokenPromise = (async () => {
+    const inst = _appCheckInstance;
+    if (!inst || typeof inst.getToken !== 'function') {
+      const code = _appCheckStatus.status === 'unconfigured_domain' ? 'unconfigured_domain'
+        : _appCheckStatus.status === 'sdk_missing' ? 'sdk_missing'
+        : 'activation_failed';
+      _publishAppCheckStatus({ status: code, tokenVerified: false, lastCheckedAt: new Date().toISOString(), errorCode: code });
+      return code;
+    }
+    try {
+      const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 10000));
+      await Promise.race([inst.getToken(false), timeout]); // false = ne force pas le renouvellement
+      // Succès : on ne journalise ni ne stocke JAMAIS le jeton (ni début, ni
+      // fin, ni longueur, ni claims).
+      _publishAppCheckStatus({ status: 'valid', tokenVerified: true, lastCheckedAt: new Date().toISOString(), errorCode: null });
+      console.log('[MedConnect] App Check : jeton obtenu avec succès.');
+      return 'valid';
+    } catch (err) {
+      const code = String(err && err.message) === 'timeout' ? 'timeout' : 'token_failed';
+      _publishAppCheckStatus({ status: code, tokenVerified: false, lastCheckedAt: new Date().toISOString(), errorCode: code });
+      console.warn('[MedConnect] App Check : jeton non obtenu — étape getToken — ' + (_appCheckStatus.hostname || 'inconnu') + ' — ' + code);
+      return code;
+    }
+  })();
+  return _appCheckTokenPromise;
+}
+if (typeof window !== 'undefined') { window.verifyAppCheckToken = verifyAppCheckToken; }
 
 /* ── Attente de la restauration Firebase Auth ──────────────
    Au chargement, firebaseAuth.currentUser est synchroniquement null
@@ -103,6 +190,11 @@ function initFirebase() {
       if (firebaseFunctions) window.firebaseFunctions = firebaseFunctions;
     } catch (_) { firebaseFunctions = null; }
     firebaseReady = true;
+
+    // Vérification RÉELLE du jeton App Check — UNE fois par chargement, en
+    // arrière-plan : ne bloque JAMAIS le démarrage de Firestore (mode
+    // Surveillance). Le résultat alimente window.MedConnectAppCheckStatus.
+    try { verifyAppCheckToken(); } catch (_) {}
 
     // Activer la persistance hors-ligne
     firebaseDB.enablePersistence({ synchronizeTabs: true })

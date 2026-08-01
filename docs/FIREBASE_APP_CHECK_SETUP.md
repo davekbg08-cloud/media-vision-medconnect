@@ -193,3 +193,78 @@ peut être faite que manuellement.
   appelle bien le bon fournisseur avec la bonne clé selon le domaine
   (`davekbg08-cloud.github.io`, `medconnect-e81ba.web.app`,
   `medconnect-e81ba.firebaseapp.com`, et un domaine inconnu resté inerte).
+
+## Fiabilisation client + vérification du jeton (v2.9.44)
+
+`js/firebase-config.js` a été durci (aucun changement de comportement visible,
+Cloud Firestore reste en **Surveillance / Non appliqué**) :
+
+- **Activation strictement idempotente** : une seule activation par chargement,
+  même si `initFirebase()` / une restauration rappelle `activateAppCheck()`
+  (état de module `_appCheckInstance` / `_appCheckActivationStarted` ; ne
+  dépend pas seulement de `firebase.apps.length`).
+- **Ordre préservé** : App Check activé **avant** `firestore()`, `auth()`,
+  `functions()`.
+- **Vérification RÉELLE du jeton** au chargement (`verifyAppCheckToken()`,
+  `getToken(false)` sans forcer le renouvellement, **timeout 10 s**, une seule
+  fois par chargement, **jamais bloquante** pour Firestore).
+- **Statut de diagnostic SÛR** exposé via `window.MedConnectAppCheckStatus` :
+  `{ status, provider, hostname, activated, tokenVerified, lastCheckedAt,
+  errorCode }`. **Jamais** de jeton, de clé, ni d'objet Firebase interne.
+  Valeurs de `status` : `activated`, `valid`, `unconfigured_domain`,
+  `sdk_missing`, `activation_failed`, `token_failed`, `timeout`.
+- **Domaine inconnu** → `unconfigured_domain` : aucune activation avec une
+  mauvaise clé, l'app continue en Surveillance (jamais de faux positif).
+- **Journalisation expurgée** : en cas de succès, uniquement
+  `[MedConnect] App Check : jeton obtenu avec succès.` ; en cas d'échec, un code
+  générique + hostname + étape. Le jeton n'est **jamais** journalisé (ni début,
+  ni fin, ni longueur, ni claims).
+
+> ⚠️ Ce statut client n'est **pas** une preuve de sécurité : seul Firebase
+> valide réellement le jeton. Il sert au diagnostic et aux tests.
+
+### Procédure de test manuel après déploiement
+
+**Navigateur — GitHub Pages** (`https://davekbg08-cloud.github.io/media-vision-medconnect/`)
+1. Déployer la nouvelle PWA, vider/recharger le service worker (rechargement
+   forcé ou désinstallation de la PWA).
+2. Ouvrir la console. Vérifier : aucun double init ; le message
+   « App Check : jeton obtenu avec succès » ; `MedConnectAppCheckStatus.status`
+   vaut `"valid"`.
+3. Se connecter, puis exécuter une lecture Firestore réelle autorisée.
+4. Vérifier l'absence d'erreur App Check.
+
+**Navigateur — Firebase Hosting** (`https://medconnect-e81ba.web.app`)
+- Répéter exactement les mêmes étapes.
+
+**iPhone / PWA**
+1. Ouvrir le domaine officiel dans Safari.
+2. Mettre à jour ou réinstaller la PWA sur l'écran d'accueil si nécessaire.
+3. Lancer depuis l'icône, se connecter, ouvrir une page qui lit Firestore.
+4. Vérifier les métriques App Check dans Firebase Console. **Ne pas** activer
+   l'Enforcement après un seul test réussi.
+
+**Android (WebView)**
+1. Installer la nouvelle version signée (`downloads/medconnect-v2.9.44.apk`).
+2. Vérifier le domaine réellement chargé (`davekbg08-cloud.github.io`).
+3. Se connecter, lire Firestore.
+4. Contrôler les métriques du domaine GitHub Pages dans App Check.
+
+**Electron**
+1. Vérifier l'URL réellement chargée (`medconnect-e81ba.web.app`).
+2. Se connecter, lire Firestore.
+3. Vérifier les métriques App Check du domaine correspondant.
+
+**Firebase Console — relevé (plusieurs jours)**
+`Firebase Console → App Check → Applications → medconnect-web → Métriques des
+requêtes → Cloud Firestore`. Relever : requêtes valides / sans jeton /
+invalides, par plateforme, domaine et version. **Conserver Cloud Firestore sur
+Surveillance / Non appliqué** tant que les requêtes vérifiées ne sont pas
+proches de 100 %.
+
+### Vérifications manuelles NON automatisables (hors dépôt)
+- Restriction réelle des domaines de chaque **clé reCAPTCHA Enterprise** dans
+  Google Cloud Console (chaque clé limitée à son/ses domaine(s)).
+- Enregistrement de l'app **web** dans App Check avec le fournisseur
+  **reCAPTCHA Enterprise** (déjà fait — coche verte constatée en console).
+- Couverture des **deux** origines web officielles (`github.io` et `.web.app`).

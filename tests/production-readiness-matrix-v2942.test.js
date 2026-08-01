@@ -21,10 +21,10 @@ const read = (p) => fs.readFileSync(root(p), 'utf8');
 const exists = (p) => fs.existsSync(root(p));
 
 const EXPECTED = {
-  version: '2.9.43',
-  build: '2026.07.28.1',
-  versionCode: '44',
-  cache: 'medconnect-v4.44',
+  version: '2.9.44',
+  build: '2026.07.30.1',
+  versionCode: '45',
+  cache: 'medconnect-v4.45',
 };
 
 test('config/app-version.json porte la version et le build attendus', () => {
@@ -39,17 +39,17 @@ test('package.json et electron/package.json concordent', () => {
   assert.strictEqual(JSON.parse(read('electron/package.json')).version, EXPECTED.version);
 });
 
-test('Android build.gradle porte versionCode 44 et versionName 2.9.43', () => {
+test('Android build.gradle porte versionCode 45 et versionName 2.9.44', () => {
   const g = read('android/app/build.gradle');
   assert.match(g, new RegExp(`versionCode\\s+${EXPECTED.versionCode}`));
   assert.match(g, new RegExp(`versionName\\s+"${EXPECTED.version}"`));
 });
 
-test('sw.js porte le cache medconnect-v4.44', () => {
+test('sw.js porte le cache medconnect-v4.45', () => {
   assert.match(read('sw.js'), new RegExp(`const CACHE = '${EXPECTED.cache}'`));
 });
 
-test('MainActivity pointe la PWA en ?apk=v2.9.43', () => {
+test('MainActivity pointe la PWA en ?apk=v2.9.44', () => {
   assert.match(read('android/app/src/main/java/com/medconnect/app/MainActivity.java'),
     new RegExp(`\\?apk=v${EXPECTED.version.replace(/\./g, '\\.')}`));
 });
