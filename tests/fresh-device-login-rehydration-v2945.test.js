@@ -117,7 +117,33 @@ test('setupUserScopedListeners remonte les écoutes admin APRÈS login', () => {
     'via scoped() pour être désabonnable et fusionner (mergeStore)');
 });
 
-/* ── 5. Non-régression : aucune modif de règles ni d’App Check console ─ */
+/* ── 5. Connexion admin (cloud) réellement utilisée : durcie comme les autres ─
+   MedConnectAdminCloud.login REMPLACE Auth._doAdmin (adminCloudOnlyPatch) :
+   c'est ELLE qu'il faut durcir, pas seulement le _doAdmin de auth.js (qui
+   était masqué). Sans cela, le bouton « Accès Administrateur » ne se
+   verrouillait pas et ne s'accompagnait d'aucun timeout 15 s. */
+test('la connexion admin cloud (celle qui remplace _doAdmin) est durcie : verrou + timeout 15 s + chargement + clavier', () => {
+  const login = firebaseConfig.slice(
+    firebaseConfig.indexOf('async function login(event)'),
+    firebaseConfig.indexOf('function installCloudAdminTrigger'));
+  assert.match(firebaseConfig, /let _adminCloudBusy = false;/, 'verrou de module admin cloud');
+  assert.match(login, /if \(_adminCloudBusy\) return;/, 'un seul appel simultané');
+  assert.match(login, /document\.activeElement\?\.blur/, 'clavier fermé avant connexion');
+  assert.match(login, /window\.App\?\.setBtnLoading\?\.\(btn, true\)/, 'état de chargement sur le bouton');
+  assert.match(login, /window\.App\.withTimeout\(p, 15000\)/, 'timeout 15 s partagé');
+  assert.match(login, /await T\(firebaseAuth\.signInWithEmailAndPassword/, 'signIn borné par le timeout');
+  assert.match(login, /await T\(firebaseDB\.collection\('users'\)\.doc\(uid\)\.get\(\)\)/, 'lecture du rôle bornée');
+  assert.match(login, /finally \{[\s\S]*_adminCloudBusy = false;[\s\S]*setBtnLoading\?\.\(btn, false\)/,
+    'verrou + chargement relâchés dans finally');
+  assert.match(login, /Délai dépassé \(15 s\)/, 'message clair au timeout');
+});
+
+test('adminCloudOnlyPatch remplace bien Auth._doAdmin par la connexion cloud durcie', () => {
+  assert.match(firebaseConfig, /Auth\._doAdmin = login;/,
+    'la connexion réellement câblée au bouton est la version durcie');
+});
+
+/* ── 6. Non-régression : aucune modif de règles ni d’App Check console ─ */
 test('non-régression : le correctif n’active PAS enforceAppCheck ailleurs ni ne touche les règles', () => {
   // Le correctif est 100% client : il ne doit rien changer au posture
   // App Check (Surveillance) ni introduire un nouveau enforceAppCheck côté client.

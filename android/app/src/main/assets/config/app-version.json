@@ -8,7 +8,8 @@
       "date": "2026-08-02",
       "notes": [
         "Correctif important — appareil neuf / PWA réinstallée : après réinstallation de l'application (ou sur un nouveau téléphone), la connexion pouvait être refusée (« aucun compte trouvé ») et le tableau de bord rester vide alors que les données étaient bien présentes en ligne. En cause : sur un appareil sans données locales, la protection anti-abus (App Check) n'avait pas encore produit son premier jeton au moment du tout premier « Se connecter ». L'application attend désormais ce jeton avant de vérifier le compte, et le patient peut se reconnecter directement avec son numéro de fiche et son PIN même sans aucune donnée locale.",
-        "Correctif — administrateur sur appareil neuf : le tableau de bord d'administration affichait 0 partout (0 médecin, 0 patient, 0 consultation) après une réinstallation ; les données se rechargent désormais correctement une fois la session ouverte."
+        "Correctif — administrateur sur appareil neuf : le tableau de bord d'administration affichait 0 partout (0 médecin, 0 patient, 0 consultation) après une réinstallation ; les données se rechargent désormais correctement une fois la session ouverte.",
+        "Correctif — bouton « Accès Administrateur » : il ne se verrouillait pas pendant la connexion (pas d'indicateur de chargement, pas de délai maximal de 15 secondes). La connexion administrateur réellement utilisée reçoit désormais le même durcissement que les autres : un seul essai à la fois, bouton verrouillé avec indicateur pendant l'opération, délai maximal de 15 secondes et message clair si le délai est dépassé, fermeture du clavier avant la connexion."
       ]
     },
     {

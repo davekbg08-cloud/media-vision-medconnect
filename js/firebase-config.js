@@ -309,8 +309,16 @@ initFirebase();
     }
   }
 
+  // Verrou de module : un seul essai de connexion administrateur à la fois.
+  // C'est LA connexion admin réellement utilisée (elle remplace Auth._doAdmin
+  // plus bas) : elle doit donc porter le même durcissement que les autres
+  // connexions (v2.9.43) — verrou, fermeture du clavier, état de chargement
+  // sur le bouton, et timeout 15 s sur les appels Firebase pour qu'une
+  // connexion qui pend ne fige jamais le bouton.
+  let _adminCloudBusy = false;
   async function login(event) {
     event?.preventDefault?.();
+    if (_adminCloudBusy) return; // un seul appel simultané
     const email = (document.getElementById('adm-cloud-email')?.value || '').trim();
     const pass = (document.getElementById('adm-cloud-pass')?.value || '').trim();
     if (!email || !pass) {
@@ -321,13 +329,21 @@ initFirebase();
       showError('adm-cloud-err', '❌ Firebase indisponible. Vérifiez la connexion internet puis réessayez.');
       return;
     }
+    // Ferme le clavier avant la connexion (viewport stable → premier appui
+    // fiable, comme pour les autres connexions).
+    try { document.activeElement?.blur?.(); } catch (_) {}
+    const btn = event?.submitter ||
+      document.getElementById('adm-cloud-email')?.form?.querySelector('button[type="submit"]') || null;
+    const T = p => (window.App?.withTimeout ? window.App.withTimeout(p, 15000) : p); // timeout 15 s
 
+    _adminCloudBusy = true;
+    window.App?.setBtnLoading?.(btn, true); // spinner + disabled + aria-busy
     try {
-      const credential = await firebaseAuth.signInWithEmailAndPassword(email, pass);
+      const credential = await T(firebaseAuth.signInWithEmailAndPassword(email, pass));
       const uid = credential?.user?.uid;
       if (!uid) throw new Error('admin_uid_missing');
 
-      const doc = await firebaseDB.collection('users').doc(uid).get();
+      const doc = await T(firebaseDB.collection('users').doc(uid).get());
       if (!doc.exists) {
         showError('adm-cloud-err', '❌ Profil administrateur introuvable dans Firestore.');
         return;
@@ -364,7 +380,12 @@ initFirebase();
       App.toast('✅ Administrateur connecté.');
     } catch (error) {
       console.warn('[MedConnect] Connexion administrateur cloud impossible :', error);
-      showError('adm-cloud-err', '❌ Connexion administrateur impossible. Vérifiez email, mot de passe et droits Firestore.');
+      showError('adm-cloud-err', String(error?.message) === 'timeout'
+        ? '⏱️ Délai dépassé (15 s). Vérifiez votre connexion internet puis réessayez.'
+        : '❌ Connexion administrateur impossible. Vérifiez email, mot de passe et droits Firestore.');
+    } finally {
+      _adminCloudBusy = false;
+      window.App?.setBtnLoading?.(btn, false);
     }
   }
 
