@@ -7,6 +7,18 @@ jour) et l'écran **Paramètres → À propos**.
 La source unique de la version en cours est `config/app-version.json` —
 ce fichier doit rester cohérent avec elle.
 
+## 2.9.45 — 2026-08-02
+
+Chantier correctif **appareil neuf / PWA réinstallée** : après réinstallation de l'application (ou sur un nouveau téléphone), la connexion pouvait être refusée (« aucun compte trouvé ») et le tableau de bord rester vide alors que toutes les données étaient bien présentes en ligne. **100 % client** — aucune règle Firestore, aucun réglage de la console App Check, aucun `enforceAppCheck`, aucune migration modifiés (compat 9.22.0 conservée). Additif, sans régression (suite JS 1009/1009).
+
+- **Cause racine.** Sur iOS, une PWA installée a un stockage **séparé** de Safari : la PWA fraîche démarre sans cache local et déconnectée. Avant authentification, la **seule** voie de résolution d'un compte est la Cloud Function `authLookup`, qui **exige un jeton App Check** (`enforceAppCheck` côté serveur). Sur une install neuve, le premier « Se connecter » partait **avant** que reCAPTCHA Enterprise ait produit son premier jeton → `authLookup` rejeté ; la lecture publique de `mc_accounts` ayant été fermée en 2.9.42, il ne restait **aucun repli** → « compte refusé ». Les annuaires `doctors`/`nurses` exigeant `signedIn()`, patients **et** professionnels étaient touchés.
+- **Attente du jeton App Check avant `authLookup`** (`js/firebase-config.js` : nouveau helper `waitForAppCheckToken(timeoutMs)` borné et non bloquant, exposé sur `window` ; `js/auth.js` et `js/db.js` l'attendent avant l'appel). Corrige la course sur appareil neuf. Le jeton n'est **jamais** journalisé ni exposé.
+- **Repli patient par connexion Firebase Auth directe** (`js/auth.js`, `_doPatientFlow`) : si la résolution de compte échoue quand même, on tente directement `signInWithEmailAndPassword` via l'**e-mail synthétique déterministe** dérivé du numéro de fiche (Firebase Auth n'est **pas** soumis à App Check en mode Surveillance). Si le PIN est correct, la session est reconstituée et la fiche relue en propriétaire. Un patient peut donc se reconnecter avec son seul numéro de fiche + PIN sur un appareil vierge.
+- **Admin — repeuplement du tableau de bord** (`js/db.js`, `setupUserScopedListeners`) : les écoutes collection-entière autorisées par `isAdmin()` (`mc_patients`, `mc_accounts`, `mc_consultations`) sont désormais remontées **après** login. Elles étaient déclarées au boot (avant connexion) donc rejetées et jamais rejouées → l'admin voyait 0 partout sur un appareil neuf.
+- **Tests** : `tests/fresh-device-login-rehydration-v2945.test.js` (8 cas — helper borné/non-fuite, ordre attente→`authLookup` dans auth.js et db.js, repli patient, e-mail déterministe, écoutes admin post-login, non-régression App Check/règles).
+
+Version **2.9.45** (build 2026.08.02.1, versionCode 46, cache `medconnect-v4.46`). Miroirs Android resynchronisés octet pour octet.
+
 ## 2.9.44 — 2026-07-30
 
 Chantier **App Check : audit + fiabilisation** (aucun changement de comportement visible ; Cloud Firestore reste en **Surveillance / Non appliqué** ; aucune règle Firestore, connexion, vaccination ni notification modifiée). Additif, sans régression.

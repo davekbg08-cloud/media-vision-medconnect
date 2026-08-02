@@ -1,8 +1,16 @@
 {
-  "version": "2.9.44",
-  "build": "2026.07.30.1",
-  "buildDate": "2026-07-30",
+  "version": "2.9.45",
+  "build": "2026.08.02.1",
+  "buildDate": "2026-08-02",
   "changelog": [
+    {
+      "version": "2.9.45",
+      "date": "2026-08-02",
+      "notes": [
+        "Correctif important — appareil neuf / PWA réinstallée : après réinstallation de l'application (ou sur un nouveau téléphone), la connexion pouvait être refusée (« aucun compte trouvé ») et le tableau de bord rester vide alors que les données étaient bien présentes en ligne. En cause : sur un appareil sans données locales, la protection anti-abus (App Check) n'avait pas encore produit son premier jeton au moment du tout premier « Se connecter ». L'application attend désormais ce jeton avant de vérifier le compte, et le patient peut se reconnecter directement avec son numéro de fiche et son PIN même sans aucune donnée locale.",
+        "Correctif — administrateur sur appareil neuf : le tableau de bord d'administration affichait 0 partout (0 médecin, 0 patient, 0 consultation) après une réinstallation ; les données se rechargent désormais correctement une fois la session ouverte."
+      ]
+    },
     {
       "version": "2.9.44",
       "date": "2026-07-30",

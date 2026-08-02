@@ -160,6 +160,40 @@ function verifyAppCheckToken() {
 }
 if (typeof window !== 'undefined') { window.verifyAppCheckToken = verifyAppCheckToken; }
 
+// Attend que le jeton App Check soit DISPONIBLE avant un appel soumis à
+// enforceAppCheck (ex. la Cloud Function authLookup, seul chemin de
+// résolution de compte AVANT authentification sur un appareil neuf).
+//
+// Sans cette attente, sur une install FRAÎCHE (PWA réinstallée, nouveau
+// téléphone…) le premier « Se connecter » part AVANT que reCAPTCHA
+// Enterprise ait produit son tout premier jeton (l'activation est lancée
+// en arrière-plan). authLookup rejette alors l'appel (jeton absent) et,
+// la lecture publique de mc_accounts étant fermée (v2.9.42), plus aucun
+// compte n'est trouvé → « compte refusé ». On force donc l'obtention du
+// jeton (getToken) une fois, avec un timeout borné, avant de continuer.
+//
+// Ne bloque JAMAIS durablement : renvoie true si un jeton est prêt, false
+// sinon (domaine non configuré, SDK absent, timeout) — l'appelant continue
+// de toute façon (le repli patient prend le relais). Ne journalise/expose
+// JAMAIS le jeton. Idempotence légère : chaque appel réutilise l'instance
+// et le cache de jeton du SDK (getToken(false) ne renvoie un nouvel appel
+// réseau que si aucun jeton valide n'est en cache).
+function waitForAppCheckToken(timeoutMs = 8000) {
+  return (async () => {
+    const inst = _appCheckInstance;
+    if (!inst || typeof inst.getToken !== 'function') return false;
+    try {
+      const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs));
+      await Promise.race([inst.getToken(false), timeout]);
+      return true;
+    } catch (_) {
+      // Timeout ou échec : on ne journalise pas le jeton ; l'appelant gère.
+      return false;
+    }
+  })();
+}
+if (typeof window !== 'undefined') { window.waitForAppCheckToken = waitForAppCheckToken; }
+
 /* ── Attente de la restauration Firebase Auth ──────────────
    Au chargement, firebaseAuth.currentUser est synchroniquement null
    jusqu'à ce que le SDK ait fini de restaurer une session persistée

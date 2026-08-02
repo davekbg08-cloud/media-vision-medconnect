@@ -961,6 +961,28 @@ const DB = (() => {
       });
     }
 
+    // Admin PLATEFORME — ré-attache APRÈS login les écoutes collection-entière
+    // que seul isAdmin() autorise. Elles sont bien déclarées dans
+    // setupRealtimeListeners(), mais celui-ci tourne au BOOT, avant la
+    // connexion : la requête part alors non authentifiée, est rejetée en bloc,
+    // et n'est JAMAIS rejouée ensuite. Résultat sur un appareil NEUF (PWA
+    // réinstallée) : l'admin se connectait mais son tableau de bord restait à
+    // 0 (0 patient, 0 consultation…). En les remontant ici, une fois la
+    // session ouverte, le cache se repeuple. mergeStore fusionne : aucun
+    // doublon avec l'écoute (morte) du boot. Coût Blaze inchangé (mêmes
+    // écoutes qu'au design d'origine, simplement au bon moment).
+    // Limité aux collections qui alimentent le tableau de bord admin
+    // (admin.js) : mc_accounts (compteurs médecins/pharmaciens/infirmiers),
+    // mc_patients (total patients) et mc_consultations (total consultations).
+    // On n'écoute PAS mc_prescriptions/mc_appointments en collection-entière
+    // ici (inutiles au dashboard, et pour ne pas rouvrir une écoute
+    // collection-entière proscrite).
+    if (user.role === 'admin') {
+      scoped(firebaseDB.collection('mc_patients'), 'mc_patients', 'id');
+      scoped(firebaseDB.collection('mc_accounts'), 'mc_accounts', 'uid');
+      scoped(firebaseDB.collection('mc_consultations'), 'mc_consultations', 'cid');
+    }
+
     if (user.role === 'patient') {
       let ficheId = '';
       try { ficheId = (localStorage.getItem('mc_my_patient_id') || user.patient_id || user.username || '').toUpperCase(); } catch (_) { ficheId = (user.patient_id || '').toUpperCase(); }
@@ -1034,6 +1056,10 @@ const DB = (() => {
     const fns = (typeof firebaseFunctions !== 'undefined' && firebaseFunctions) ? firebaseFunctions
       : (typeof window !== 'undefined' ? window.firebaseFunctions : null);
     if (fns && typeof fns.httpsCallable === 'function') {
+      // authLookup impose un jeton App Check (enforcement côté serveur) : on
+      // attend ce jeton (borné, non bloquant) avant l'appel, sinon sur un
+      // appareil neuf il partirait avant le premier jeton reCAPTCHA → rejeté.
+      try { await window.waitForAppCheckToken?.(8000); } catch (_) {}
       try {
         const res = await fns.httpsCallable('authLookup')({ patientId });
         if (res && res.data) return res.data.exists === true;
