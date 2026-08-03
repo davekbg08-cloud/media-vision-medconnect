@@ -461,6 +461,13 @@ const Auth = (() => {
       ? firebaseFunctions
       : (typeof window !== 'undefined' ? window.firebaseFunctions : null);
     if (!fns || typeof fns.httpsCallable !== 'function') return undefined;
+    // Appareil neuf : s'assurer que le jeton App Check est PRÊT avant
+    // l'appel (authLookup exige enforceAppCheck). Sans cette attente, le
+    // premier login d'une PWA fraîchement réinstallée partait avant le
+    // premier jeton reCAPTCHA → rejet → « compte refusé ». Borné, jamais
+    // bloquant : si le jeton n'arrive pas, l'appel part quand même (il sera
+    // rejeté côté serveur, et le repli prend le relais).
+    try { await window.waitForAppCheckToken?.(8000); } catch (_) {}
     try {
       const callable = fns.httpsCallable('authLookup');
       const res = await callable(payload);
@@ -737,6 +744,31 @@ const Auth = (() => {
     // relit la fiche en tant que propriétaire (_hydratePatientRecordAfterAuth).
     let existing = _findPatientAccount(id) || _mergeAccountLocally(await T(_fetchAccountByDocId(`PAT_${id}`)));
     if (!existing) {
+      // Repli APPAREIL NEUF (PWA réinstallée, nouveau téléphone) : la
+      // résolution de compte a échoué (cache local vide, authLookup non
+      // joignable/App Check pas prêt, lecture mc_accounts fermée). Mais le
+      // compte patient possède un e-mail Firebase Auth DÉTERMINISTE dérivé du
+      // numéro de fiche : on tente donc directement la connexion Firebase Auth
+      // — qui n'est PAS soumise à App Check (Auth en Surveillance). Si le PIN
+      // est correct, le compte existe : on reconstitue une session minimale
+      // et on relit la fiche en propriétaire. Sinon, message couvrant les
+      // deux cas (compte inexistant OU PIN faux), qu'on ne peut pas distinguer
+      // ici sans lecture serveur.
+      if (_hasFirebaseAuth()) {
+        const email = _syntheticPatientEmail(id);
+        const { ok, authUid } = await T(_signInPatientFirebaseAuth(email, _toFirebasePassword(pin)));
+        if (ok) {
+          const fiche = await _hydratePatientRecordAfterAuth(id);
+          const name = fiche ? `${fiche.firstname || ''} ${fiche.lastname || ''}`.trim() || id : id;
+          existing = _upsertAccount({
+            uid: `PAT_${id}`, authUid, username: id, role: 'patient',
+            status: 'approved', name, patient_id: id, email,
+          });
+          localStorage.setItem('mc_my_patient_id', id);
+          _save(existing); _launch(existing);
+          return;
+        }
+      }
       _err('auth-err', '⚠️ Aucun compte trouvé pour cette fiche, ni localement ni dans le cloud.<br>Si c’est votre tout premier accès, utilisez “Premier accès : créer mon PIN”.');
       return;
     }

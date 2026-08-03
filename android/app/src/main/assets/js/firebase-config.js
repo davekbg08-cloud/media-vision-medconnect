@@ -160,6 +160,40 @@ function verifyAppCheckToken() {
 }
 if (typeof window !== 'undefined') { window.verifyAppCheckToken = verifyAppCheckToken; }
 
+// Attend que le jeton App Check soit DISPONIBLE avant un appel soumis à
+// enforceAppCheck (ex. la Cloud Function authLookup, seul chemin de
+// résolution de compte AVANT authentification sur un appareil neuf).
+//
+// Sans cette attente, sur une install FRAÎCHE (PWA réinstallée, nouveau
+// téléphone…) le premier « Se connecter » part AVANT que reCAPTCHA
+// Enterprise ait produit son tout premier jeton (l'activation est lancée
+// en arrière-plan). authLookup rejette alors l'appel (jeton absent) et,
+// la lecture publique de mc_accounts étant fermée (v2.9.42), plus aucun
+// compte n'est trouvé → « compte refusé ». On force donc l'obtention du
+// jeton (getToken) une fois, avec un timeout borné, avant de continuer.
+//
+// Ne bloque JAMAIS durablement : renvoie true si un jeton est prêt, false
+// sinon (domaine non configuré, SDK absent, timeout) — l'appelant continue
+// de toute façon (le repli patient prend le relais). Ne journalise/expose
+// JAMAIS le jeton. Idempotence légère : chaque appel réutilise l'instance
+// et le cache de jeton du SDK (getToken(false) ne renvoie un nouvel appel
+// réseau que si aucun jeton valide n'est en cache).
+function waitForAppCheckToken(timeoutMs = 8000) {
+  return (async () => {
+    const inst = _appCheckInstance;
+    if (!inst || typeof inst.getToken !== 'function') return false;
+    try {
+      const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs));
+      await Promise.race([inst.getToken(false), timeout]);
+      return true;
+    } catch (_) {
+      // Timeout ou échec : on ne journalise pas le jeton ; l'appelant gère.
+      return false;
+    }
+  })();
+}
+if (typeof window !== 'undefined') { window.waitForAppCheckToken = waitForAppCheckToken; }
+
 /* ── Attente de la restauration Firebase Auth ──────────────
    Au chargement, firebaseAuth.currentUser est synchroniquement null
    jusqu'à ce que le SDK ait fini de restaurer une session persistée
@@ -275,8 +309,16 @@ initFirebase();
     }
   }
 
+  // Verrou de module : un seul essai de connexion administrateur à la fois.
+  // C'est LA connexion admin réellement utilisée (elle remplace Auth._doAdmin
+  // plus bas) : elle doit donc porter le même durcissement que les autres
+  // connexions (v2.9.43) — verrou, fermeture du clavier, état de chargement
+  // sur le bouton, et timeout 15 s sur les appels Firebase pour qu'une
+  // connexion qui pend ne fige jamais le bouton.
+  let _adminCloudBusy = false;
   async function login(event) {
     event?.preventDefault?.();
+    if (_adminCloudBusy) return; // un seul appel simultané
     const email = (document.getElementById('adm-cloud-email')?.value || '').trim();
     const pass = (document.getElementById('adm-cloud-pass')?.value || '').trim();
     if (!email || !pass) {
@@ -287,13 +329,21 @@ initFirebase();
       showError('adm-cloud-err', '❌ Firebase indisponible. Vérifiez la connexion internet puis réessayez.');
       return;
     }
+    // Ferme le clavier avant la connexion (viewport stable → premier appui
+    // fiable, comme pour les autres connexions).
+    try { document.activeElement?.blur?.(); } catch (_) {}
+    const btn = event?.submitter ||
+      document.getElementById('adm-cloud-email')?.form?.querySelector('button[type="submit"]') || null;
+    const T = p => (window.App?.withTimeout ? window.App.withTimeout(p, 15000) : p); // timeout 15 s
 
+    _adminCloudBusy = true;
+    window.App?.setBtnLoading?.(btn, true); // spinner + disabled + aria-busy
     try {
-      const credential = await firebaseAuth.signInWithEmailAndPassword(email, pass);
+      const credential = await T(firebaseAuth.signInWithEmailAndPassword(email, pass));
       const uid = credential?.user?.uid;
       if (!uid) throw new Error('admin_uid_missing');
 
-      const doc = await firebaseDB.collection('users').doc(uid).get();
+      const doc = await T(firebaseDB.collection('users').doc(uid).get());
       if (!doc.exists) {
         showError('adm-cloud-err', '❌ Profil administrateur introuvable dans Firestore.');
         return;
@@ -330,7 +380,12 @@ initFirebase();
       App.toast('✅ Administrateur connecté.');
     } catch (error) {
       console.warn('[MedConnect] Connexion administrateur cloud impossible :', error);
-      showError('adm-cloud-err', '❌ Connexion administrateur impossible. Vérifiez email, mot de passe et droits Firestore.');
+      showError('adm-cloud-err', String(error?.message) === 'timeout'
+        ? '⏱️ Délai dépassé (15 s). Vérifiez votre connexion internet puis réessayez.'
+        : '❌ Connexion administrateur impossible. Vérifiez email, mot de passe et droits Firestore.');
+    } finally {
+      _adminCloudBusy = false;
+      window.App?.setBtnLoading?.(btn, false);
     }
   }
 
