@@ -297,13 +297,60 @@ const AdminModule = (() => {
      configuré la clé continue de travailler normalement. */
   function appCheckWarningBanner() {
     const configured = typeof resolveAppCheckSiteKey === 'function' && !!resolveAppCheckSiteKey();
-    if (configured) return '';
+    const st = (typeof window !== 'undefined' && window.MedConnectAppCheckStatus) || null;
+    const host = st?.hostname || (typeof location !== 'undefined' ? location.hostname : '') || 'inconnu';
+    const status = st?.status || (configured ? 'activating' : 'unconfigured_domain');
+    const recheckBtn = `<button class="btn btn-ghost btn-sm" style="margin-top:.6rem"
+      onclick="window.recheckAppCheckToken&&window.recheckAppCheckToken().then(function(){AdminModule.renderDashboard&&AdminModule.renderDashboard();})">🔄 Re-vérifier le jeton</button>`;
+
+    // Domaine non déclaré (tests, dev, origine inattendue) OU clé absente.
+    if (!configured || status === 'unconfigured_domain') {
+      return `
+        <div class="card" style="border-left:3px solid var(--accent);margin-bottom:1rem">
+          <p style="margin:0">⚠️ <strong>App Check non configuré pour ce domaine</strong> (<code>${host}</code>) —
+          les règles Firestore (rôle/établissement/statut) restent la protection réelle et ne sont pas affectées.
+          App Check n'est qu'une couche complémentaire optionnelle. Voir <code>docs/FIREBASE_APP_CHECK_SETUP.md</code>.</p>
+        </div>`;
+    }
+
+    // Jeton bien obtenu : App Check fonctionne côté client.
+    if (status === 'valid') {
+      return `
+        <div class="card" style="border-left:3px solid var(--secondary);margin-bottom:1rem">
+          <p style="margin:0">✅ <strong>App Check actif</strong> — jeton vérifié sur <code>${host}</code>.
+          Le pourcentage « requêtes vérifiées » de la console Firebase se remplit avec le <strong>trafic réel</strong>
+          et peut prendre <strong>jusqu'à 24 h</strong> à s'afficher — un affichage vide au début est normal.
+          L'application reste protégée par les règles Firestore dans tous les cas ; l'activation de l'« Enforcement »
+          reste <strong>optionnelle</strong>.</p>
+          ${recheckBtn}
+        </div>`;
+    }
+
+    // Activation faite, vérification pas encore concluante.
+    if (status === 'activated' || status === 'activating' || status === 'idle') {
+      return `
+        <div class="card" style="border-left:3px solid var(--primary);margin-bottom:1rem">
+          <p style="margin:0">ℹ️ <strong>App Check activé</strong> (<code>${host}</code>) — vérification du jeton en cours.</p>
+          ${recheckBtn}
+        </div>`;
+    }
+
+    // Échecs réels : c'est CE cas qui explique un pourcentage console vide.
+    const codeLabel = {
+      token_failed: 'jeton refusé par reCAPTCHA/App Check',
+      timeout: 'délai dépassé (réseau lent ?)',
+      sdk_missing: 'SDK App Check non chargé',
+      activation_failed: 'échec de l\'activation',
+    }[status] || status;
     return `
-      <div class="card" style="border-left:3px solid var(--accent);margin-bottom:1rem">
-        <p style="margin:0">⚠️ <strong>Firebase App Check non configuré</strong> — les règles Firestore
-        (rôle/établissement/statut) restent la protection réelle et ne sont pas affectées ;
-        App Check n'est qu'une couche complémentaire optionnelle qui vérifie l'origine de
-        l'application. Voir <code>docs/FIREBASE_APP_CHECK_SETUP.md</code> pour l'activer.</p>
+      <div class="card" style="border-left:3px solid var(--danger);margin-bottom:1rem">
+        <p style="margin:0">⚠️ <strong>App Check : jeton NON obtenu</strong> sur <code>${host}</code> — ${codeLabel}.
+        reCAPTCHA Enterprise ne renvoie pas de jeton pour ce domaine : <strong>c'est pourquoi le pourcentage
+        « vérifié » de la console reste vide</strong>. À vérifier côté Google Cloud / Firebase :
+        (1) le domaine <code>${host}</code> figure bien dans les <em>domaines autorisés</em> de la clé reCAPTCHA Enterprise ;
+        (2) l'app web est <em>enregistrée</em> dans App Check avec cette clé.
+        Les règles Firestore protègent l'application indépendamment.</p>
+        ${recheckBtn}
       </div>`;
   }
 

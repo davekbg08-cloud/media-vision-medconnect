@@ -26,9 +26,13 @@ test('appCheckWarningBanner() résout la clé par domaine sans jamais lever (typ
   assert.match(body, /typeof resolveAppCheckSiteKey === 'function'/);
 });
 
-test("appCheckWarningBanner() ne bloque aucune action (retourne une chaîne vide quand configuré, jamais une modale/redirection)", () => {
+test("appCheckWarningBanner() ne bloque aucune action (jamais de modale/redirection) et affiche l'état réel App Check", () => {
   const body = fnBody();
-  assert.match(body, /if \(configured\) return '';/);
+  // v2.9.46 — la bannière n'est plus vide quand configuré : elle affiche
+  // l'état réel du jeton (window.MedConnectAppCheckStatus) pour que l'admin
+  // n'ait plus à dépendre du pourcentage console. Elle reste purement
+  // informative : jamais de modale, de navigation ni de redirection.
+  assert.match(body, /window\.MedConnectAppCheckStatus/);
   assert.doesNotMatch(body, /App\.openModal|navigate\(|window\.location/);
 });
 
