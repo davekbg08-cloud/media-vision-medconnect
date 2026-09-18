@@ -81,7 +81,11 @@ jobs:
           java-version: '17'
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        # v4 : abandonne l'installation du paquet SDK « tools » obsolète, que
+        # Google a retiré de son dépôt — avec @v3 l'étape échouait désormais
+        # sur « Failed to find package 'tools' » (sdkmanager exit 1), bloquant
+        # tout le build APK. Aucun changement fonctionnel du build lui-même.
+        uses: android-actions/setup-android@v4
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v3
