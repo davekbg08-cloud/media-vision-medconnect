@@ -1,8 +1,15 @@
 {
-  "version": "2.9.45",
-  "build": "2026.08.02.1",
-  "buildDate": "2026-08-02",
+  "version": "2.9.46",
+  "build": "2026.09.18.1",
+  "buildDate": "2026-09-18",
   "changelog": [
+    {
+      "version": "2.9.46",
+      "date": "2026-09-18",
+      "notes": [
+        "Administration — diagnostic App Check visible : le tableau de bord affiche désormais l'état réel de la protection anti-abus sur cet appareil (jeton vérifié ✅, en cours, ou non obtenu ⚠️ avec la cause), au lieu de dépendre uniquement du pourcentage de la console Firebase (qui se remplit avec le trafic réel et peut prendre jusqu'à 24 h). Un bouton « Re-vérifier le jeton » permet de retester immédiatement. Rappel affiché : les règles Firestore restent la protection réelle et l'activation de l'« Enforcement » reste optionnelle. Aucune donnée sensible, jamais de jeton exposé."
+      ]
+    },
     {
       "version": "2.9.45",
       "date": "2026-08-02",

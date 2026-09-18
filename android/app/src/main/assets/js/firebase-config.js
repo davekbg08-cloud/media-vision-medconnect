@@ -194,6 +194,36 @@ function waitForAppCheckToken(timeoutMs = 8000) {
 }
 if (typeof window !== 'undefined') { window.waitForAppCheckToken = waitForAppCheckToken; }
 
+// Re-vérification À LA DEMANDE (bouton « Re-vérifier » du tableau de bord
+// admin). Contrairement à verifyAppCheckToken() — une seule fois par
+// chargement — celle-ci peut être rappelée pour retenter l'obtention du jeton
+// (utile si la première tentative a échoué/timeout sur un réseau lent au
+// démarrage). Met à jour window.MedConnectAppCheckStatus. Ne journalise/expose
+// JAMAIS le jeton.
+function recheckAppCheckToken(timeoutMs = 10000) {
+  return (async () => {
+    const inst = _appCheckInstance;
+    if (!inst || typeof inst.getToken !== 'function') {
+      const code = _appCheckStatus.status === 'unconfigured_domain' ? 'unconfigured_domain'
+        : _appCheckStatus.status === 'sdk_missing' ? 'sdk_missing'
+        : 'activation_failed';
+      _publishAppCheckStatus({ status: code, tokenVerified: false, lastCheckedAt: new Date().toISOString(), errorCode: code });
+      return code;
+    }
+    try {
+      const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs));
+      await Promise.race([inst.getToken(false), timeout]);
+      _publishAppCheckStatus({ status: 'valid', tokenVerified: true, lastCheckedAt: new Date().toISOString(), errorCode: null });
+      return 'valid';
+    } catch (err) {
+      const code = String(err && err.message) === 'timeout' ? 'timeout' : 'token_failed';
+      _publishAppCheckStatus({ status: code, tokenVerified: false, lastCheckedAt: new Date().toISOString(), errorCode: code });
+      return code;
+    }
+  })();
+}
+if (typeof window !== 'undefined') { window.recheckAppCheckToken = recheckAppCheckToken; }
+
 /* ── Attente de la restauration Firebase Auth ──────────────
    Au chargement, firebaseAuth.currentUser est synchroniquement null
    jusqu'à ce que le SDK ait fini de restaurer une session persistée

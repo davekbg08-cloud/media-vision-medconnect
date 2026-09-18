@@ -7,6 +7,16 @@ jour) et l'écran **Paramètres → À propos**.
 La source unique de la version en cours est `config/app-version.json` —
 ce fichier doit rester cohérent avec elle.
 
+## 2.9.46 — 2026-09-18
+
+Chantier **diagnostic App Check visible (admin)**. Le pourcentage « requêtes vérifiées » de la console Firebase est lent (jusqu'à 24 h) et opaque, et l'ancienne bannière admin ne s'affichait **que** si App Check n'était pas configuré — l'admin n'avait donc aucun signal en état normal. On expose désormais l'état réel du jeton directement dans le tableau de bord. **100 % client, additif** (aucune règle, aucun réglage console, aucun `enforceAppCheck` modifiés ; compat 9.22.0). Suite JS 1014/1014.
+
+- **Bannière App Check enrichie** (`js/admin.js`, `appCheckWarningBanner`) : lit `window.MedConnectAppCheckStatus` et affiche l'état réel sur cet appareil — ✅ *jeton vérifié* (avec rappel que le pourcentage console se remplit avec le trafic réel, jusqu'à 24 h, et que l'Enforcement reste **optionnel**), ℹ️ *vérification en cours*, ou ⚠️ *jeton NON obtenu* (avec la cause : `token_failed`/`timeout`/`sdk_missing`/`activation_failed`) — ce dernier cas **explique un pourcentage console vide** et oriente vers la config reCAPTCHA Enterprise (domaine autorisé, app enregistrée). Purement informative : jamais de modale, de navigation ni de blocage.
+- **Re-vérification à la demande** (`js/firebase-config.js`, `recheckAppCheckToken`) : bouton « Re-vérifier le jeton » qui retente l'obtention (contrairement à `verifyAppCheckToken`, limité à une fois par chargement) et rafraîchit le tableau de bord. **Jamais** de jeton ni de clé journalisé/exposé.
+- **Tests** : `tests/app-check-admin-diagnostic-v2946.test.js` (3 cas) ; `tests/admin-app-check-warning.test.js` mis à jour (la bannière n'est plus vide quand configuré, reste non bloquante).
+
+Version **2.9.46** (build 2026.09.18.1, versionCode 47, cache `medconnect-v4.47`). Miroirs Android resynchronisés octet pour octet.
+
 ## 2.9.45 — 2026-08-02
 
 Chantier correctif **appareil neuf / PWA réinstallée** : après réinstallation de l'application (ou sur un nouveau téléphone), la connexion pouvait être refusée (« aucun compte trouvé ») et le tableau de bord rester vide alors que toutes les données étaient bien présentes en ligne. **100 % client** — aucune règle Firestore, aucun réglage de la console App Check, aucun `enforceAppCheck`, aucune migration modifiés (compat 9.22.0 conservée). Additif, sans régression (suite JS 1009/1009).
