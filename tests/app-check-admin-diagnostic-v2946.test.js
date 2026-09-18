@@ -32,6 +32,24 @@ test('firebase-config expose recheckAppCheckToken, rappelable et sans fuite de j
   assert.ok(!/console\.[a-z]+\([^)]*token/i.test(fn), 'ne journalise jamais le jeton');
 });
 
+test('les vérifications App Check sont protégées contre la course (garde de séquence)', () => {
+  // Codex P2 : deux rechecks concurrents pouvaient publier dans le désordre
+  // (une tentative ancienne écrasant « valid » par un faux « timeout »).
+  assert.match(firebaseConfig, /let _appCheckCheckSeq = 0;/, 'compteur de tentative monotone');
+  assert.match(firebaseConfig, /function _publishAppCheckIfLatest\(seq, patch\)/, 'publication conditionnée à la dernière tentative');
+  const verify = firebaseConfig.slice(
+    firebaseConfig.indexOf('function verifyAppCheckToken'),
+    firebaseConfig.indexOf('window.verifyAppCheckToken ='));
+  const recheck = firebaseConfig.slice(
+    firebaseConfig.indexOf('function recheckAppCheckToken'),
+    firebaseConfig.indexOf('window.recheckAppCheckToken ='));
+  for (const [name, body] of [['verify', verify], ['recheck', recheck]]) {
+    assert.match(body, /const mySeq = \+\+_appCheckCheckSeq;/, `${name} capture un numéro de tentative`);
+    assert.ok(!/_publishAppCheckStatus\(\{/.test(body), `${name} ne publie que via la garde _publishAppCheckIfLatest`);
+    assert.match(body, /_publishAppCheckIfLatest\(mySeq,/, `${name} publie via la garde`);
+  }
+});
+
 test('la bannière admin lit l’état RÉEL App Check (MedConnectAppCheckStatus) et couvre tous les états', () => {
   const fn = admin.slice(admin.indexOf('function appCheckWarningBanner'), admin.indexOf('/* ══ DASHBOARD'));
   assert.match(fn, /window\.MedConnectAppCheckStatus/, 'lit l’état publié');
