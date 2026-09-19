@@ -703,7 +703,7 @@ const HospitalAuth = (() => {
         return;
       }
       if (!precheck.authUid || !precheck.email) {
-        msg.innerHTML = `<div class="auth-register-info" style="border-color:var(--danger)">❌ Ce compte ne possède pas d'identité Firebase valide. Contactez l'administration.</div>`;
+        msg.innerHTML = `<div class="auth-register-info" style="border-color:var(--danger)">❌ Ce compte n'est pas un compte valide. Contactez l'administration.</div>`;
         return;
       }
     }

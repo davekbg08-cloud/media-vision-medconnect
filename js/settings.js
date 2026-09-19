@@ -296,7 +296,7 @@ const Settings = (() => {
           <tr><td>Version</td><td>${esc(v.version || '—')}</td></tr>
           <tr><td>Build</td><td style="font-family:monospace">${esc(v.build || '—')}</td></tr>
           <tr><td>Date du build</td><td>${esc(v.buildDate || '—')}</td></tr>
-          <tr><td>État Firebase</td><td style="color:${firebaseOk ? 'var(--secondary)' : 'var(--danger)'}">${firebaseOk ? '✅ Connecté' : '❌ Indisponible'}</td></tr>
+          <tr><td>État de la connexion</td><td style="color:${firebaseOk ? 'var(--secondary)' : 'var(--danger)'}">${firebaseOk ? '✅ Connecté' : '❌ Indisponible'}</td></tr>
           <tr><td>État synchronisation</td><td style="color:${pending ? 'var(--accent)' : 'var(--secondary)'}">${pending ? `⏳ ${pending} en attente` : '☁️ À jour'}</td></tr>
           <tr><td>Dernière synchronisation</td><td>${lastSync ? esc(new Date(lastSync).toLocaleString('fr-FR')) : '—'}</td></tr>
         </table>

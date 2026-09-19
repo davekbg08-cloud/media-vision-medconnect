@@ -369,7 +369,7 @@ initFirebase();
       return;
     }
     if (!hasFirebase()) {
-      showError('adm-cloud-err', '❌ Firebase indisponible. Vérifiez la connexion internet puis réessayez.');
+      showError('adm-cloud-err', '❌ Connexion au serveur indisponible. Vérifiez votre connexion internet puis réessayez.');
       return;
     }
     // Ferme le clavier avant la connexion (viewport stable → premier appui
@@ -386,9 +386,22 @@ initFirebase();
       const uid = credential?.user?.uid;
       if (!uid) throw new Error('admin_uid_missing');
 
-      const doc = await T(firebaseDB.collection('users').doc(uid).get());
+      // Lecture SERVEUR forcée du profil admin. Sur un appareil neuf (PWA
+      // fraîchement installée), un get() par défaut peut répondre depuis le
+      // cache local VIDE au tout premier chargement et renvoyer « document
+      // absent » à tort — alors que le profil admin existe bien côté serveur.
+      // On lit donc explicitement au serveur ; si le réseau est réellement
+      // indisponible, on retombe sur le cache pour ne pas verrouiller un
+      // admin hors-ligne légitime.
+      let doc;
+      try {
+        doc = await T(firebaseDB.collection('users').doc(uid).get({ source: 'server' }));
+      } catch (readErr) {
+        if (String(readErr?.message) === 'timeout') throw readErr;
+        doc = await T(firebaseDB.collection('users').doc(uid).get());
+      }
       if (!doc.exists) {
-        showError('adm-cloud-err', '❌ Profil administrateur introuvable dans Firestore.');
+        showError('adm-cloud-err', '❌ Votre compte est bien connecté, mais son profil administrateur n’est pas encore configuré. Contactez le support technique. (réf. : users/' + uid + ' → role:"admin", status:"approved")');
         return;
       }
 
@@ -425,7 +438,7 @@ initFirebase();
       console.warn('[MedConnect] Connexion administrateur cloud impossible :', error);
       showError('adm-cloud-err', String(error?.message) === 'timeout'
         ? '⏱️ Délai dépassé (15 s). Vérifiez votre connexion internet puis réessayez.'
-        : '❌ Connexion administrateur impossible. Vérifiez email, mot de passe et droits Firestore.');
+        : '❌ Connexion administrateur impossible. Vérifiez votre e-mail et votre mot de passe, puis votre connexion internet.');
     } finally {
       _adminCloudBusy = false;
       window.App?.setBtnLoading?.(btn, false);

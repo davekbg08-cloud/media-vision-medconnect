@@ -296,7 +296,7 @@
       return;
     }
     if (!hasFirebaseAuth() || !hasFirestore()) {
-      showError('❌ Firebase indisponible. Vérifiez la connexion internet puis réessayez.');
+      showError('❌ Connexion au serveur indisponible. Vérifiez votre connexion internet puis réessayez.');
       return;
     }
 

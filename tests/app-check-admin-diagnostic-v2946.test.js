@@ -70,3 +70,16 @@ test('la bannière n’expose jamais le jeton ni la clé', () => {
   assert.ok(!/getToken|siteKey|APP_CHECK_SITE_KEYS|tokenVerified\s*\+/.test(fn),
     'la bannière ne manipule ni jeton ni clé (seulement le statut publié)');
 });
+
+test('connexion admin : lecture du profil forcée côté serveur (anti faux « introuvable » sur appareil neuf)', () => {
+  // Sur une PWA neuve, get() par défaut peut répondre du cache vide et
+  // conclure à tort que users/{uid} est absent. La lecture doit être forcée
+  // au serveur, avec repli cache seulement si le réseau est indisponible.
+  const login = firebaseConfig.slice(
+    firebaseConfig.indexOf('async function login(event)'),
+    firebaseConfig.indexOf('function installCloudAdminTrigger'));
+  assert.match(login, /\.get\(\{ source: 'server' \}\)/, 'profil admin lu au serveur');
+  assert.match(login, /catch \(readErr\)/, 'repli en cas d’échec de la lecture serveur');
+  assert.ok(login.includes('profil administrateur') && login.includes("users/' + uid"),
+    'le message d’erreur mentionne le profil admin et le doc users/{uid} à configurer');
+});

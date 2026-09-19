@@ -1,8 +1,16 @@
 {
-  "version": "2.9.46",
-  "build": "2026.09.18.1",
-  "buildDate": "2026-09-18",
+  "version": "2.9.47",
+  "build": "2026.09.19.1",
+  "buildDate": "2026-09-19",
   "changelog": [
+    {
+      "version": "2.9.47",
+      "date": "2026-09-19",
+      "notes": [
+        "Correctif — connexion administrateur sur appareil neuf : sur une PWA fraîchement installée, la connexion admin pouvait afficher « Profil administrateur introuvable » alors que le compte existe bien. En cause : au tout premier chargement, Firestore répondait depuis son cache local encore vide et concluait à tort que le profil était absent. La lecture du profil administrateur est désormais forcée côté serveur (avec repli hors-ligne), et le message d'erreur indique l'identifiant du compte pour faciliter la vérification.",
+        "Messages d'erreur plus clairs : les messages de connexion, d'inscription et de validation ont été réécrits en langage courant (plus de mentions techniques « Firebase » / « Firestore » / « jeton » visibles par l'utilisateur), tout en gardant l'information utile pour agir."
+      ]
+    },
     {
       "version": "2.9.46",
       "date": "2026-09-18",
