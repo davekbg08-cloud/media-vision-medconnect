@@ -129,13 +129,28 @@ test('la connexion admin cloud (celle qui remplace _doAdmin) est durcie : verrou
   assert.match(firebaseConfig, /let _adminCloudBusy = false;/, 'verrou de module admin cloud');
   assert.match(login, /if \(_adminCloudBusy\) return;/, 'un seul appel simultané');
   assert.match(login, /document\.activeElement\?\.blur/, 'clavier fermé avant connexion');
-  assert.match(login, /window\.App\?\.setBtnLoading\?\.\(btn, true\)/, 'état de chargement sur le bouton');
-  assert.match(login, /window\.App\.withTimeout\(p, 15000\)/, 'timeout 15 s partagé');
+  assert.match(login, /_setBtnBusy\(btn, true\)/, 'état de chargement sur le bouton (avec repli)');
+  assert.match(login, /_withTimeoutSafe\(p, 15000\)/, 'délai maximal 15 s auto-suffisant');
   assert.match(login, /await T\(firebaseAuth\.signInWithEmailAndPassword/, 'signIn borné par le timeout');
   assert.match(login, /await T\(firebaseDB\.collection\('users'\)\.doc\(uid\)\.get\(\)\)/, 'lecture du rôle bornée');
-  assert.match(login, /finally \{[\s\S]*_adminCloudBusy = false;[\s\S]*setBtnLoading\?\.\(btn, false\)/,
+  assert.match(login, /finally \{[\s\S]*_adminCloudBusy = false;[\s\S]*_setBtnBusy\(btn, false\)/,
     'verrou + chargement relâchés dans finally');
   assert.match(login, /Délai dépassé \(15 s\)/, 'message clair au timeout');
+});
+
+test('robustesse admin : timeout et bouton sont AUTO-SUFFISANTS (aucune attente/blocage infini si App pas prêt)', () => {
+  // _withTimeoutSafe doit appliquer un timeout LOCAL quand App.withTimeout
+  // n'est pas disponible (sinon un appel réseau qui pend n'est jamais borné).
+  const wt = firebaseConfig.slice(
+    firebaseConfig.indexOf('function _withTimeoutSafe'),
+    firebaseConfig.indexOf('function _setBtnBusy'));
+  assert.match(wt, /Promise\.race/, 'repli timeout local (Promise.race)');
+  assert.match(wt, /new Error\('timeout'\)/, 'rejette avec Error(timeout)');
+  // _setBtnBusy doit ré-armer le bouton même sans App.setBtnLoading.
+  const sb = firebaseConfig.slice(
+    firebaseConfig.indexOf('function _setBtnBusy'),
+    firebaseConfig.indexOf('function _setBtnBusy') + 500);
+  assert.match(sb, /btn\.disabled = !!busy/, 'repli direct : réactive/désactive le bouton lui-même');
 });
 
 test('adminCloudOnlyPatch remplace bien Auth._doAdmin par la connexion cloud durcie', () => {

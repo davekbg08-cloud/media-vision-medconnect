@@ -314,6 +314,32 @@ initFirebase();
     el.style.display = message ? 'block' : 'none';
   }
 
+  // Robustesse (v2.9.48) : délai maximal AUTO-SUFFISANT — ne dépend pas du
+  // chargement complet de l'app. Si App.withTimeout est prêt on le réutilise,
+  // sinon on applique un timeout LOCAL. La connexion admin étant déclenchée
+  // très tôt (tap sur le logo, avant qu'App soit forcément initialisée), sans
+  // ce repli un appel réseau qui pend pouvait ne JAMAIS être borné → blocage.
+  function _withTimeoutSafe(promise, ms) {
+    if (window.App && typeof window.App.withTimeout === 'function') {
+      try { return window.App.withTimeout(promise, ms); } catch (_) { /* repli local ci-dessous */ }
+    }
+    return Promise.race([
+      Promise.resolve(promise),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
+    ]);
+  }
+  // Robustesse (v2.9.48) : état de chargement du bouton, avec repli direct si
+  // App n'est pas prêt — le bouton est TOUJOURS ré-armé (jamais de spinner ou
+  // d'état « disabled » figé, même si App.setBtnLoading est indisponible).
+  function _setBtnBusy(btn, busy) {
+    if (window.App && typeof window.App.setBtnLoading === 'function') {
+      try { window.App.setBtnLoading(btn, busy); return; } catch (_) { /* repli direct ci-dessous */ }
+    }
+    if (btn) {
+      try { btn.disabled = !!busy; btn.setAttribute('aria-busy', busy ? 'true' : 'false'); } catch (_) {}
+    }
+  }
+
   function openCloudAdminModal() {
     if (!window.App?.openModal) return;
     App.openModal('⚙️ Connexion Administrateur', `
@@ -377,10 +403,10 @@ initFirebase();
     try { document.activeElement?.blur?.(); } catch (_) {}
     const btn = event?.submitter ||
       document.getElementById('adm-cloud-email')?.form?.querySelector('button[type="submit"]') || null;
-    const T = p => (window.App?.withTimeout ? window.App.withTimeout(p, 15000) : p); // timeout 15 s
+    const T = p => _withTimeoutSafe(p, 15000); // délai maximal auto-suffisant
 
     _adminCloudBusy = true;
-    window.App?.setBtnLoading?.(btn, true); // spinner + disabled + aria-busy
+    _setBtnBusy(btn, true); // spinner + disabled + aria-busy (avec repli)
     try {
       const credential = await T(firebaseAuth.signInWithEmailAndPassword(email, pass));
       const uid = credential?.user?.uid;
@@ -441,7 +467,7 @@ initFirebase();
         : '❌ Connexion administrateur impossible. Vérifiez votre e-mail et votre mot de passe, puis votre connexion internet.');
     } finally {
       _adminCloudBusy = false;
-      window.App?.setBtnLoading?.(btn, false);
+      _setBtnBusy(btn, false);
     }
   }
 

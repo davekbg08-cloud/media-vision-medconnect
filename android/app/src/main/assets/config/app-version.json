@@ -1,8 +1,15 @@
 {
-  "version": "2.9.47",
-  "build": "2026.09.19.1",
+  "version": "2.9.48",
+  "build": "2026.09.19.2",
   "buildDate": "2026-09-19",
   "changelog": [
+    {
+      "version": "2.9.48",
+      "date": "2026-09-19",
+      "notes": [
+        "Connexion administrateur plus robuste : le bouton ne peut plus rester bloqué. Un délai maximal (15 s) s'applique désormais à la connexion et à la lecture du profil même si l'application n'est pas encore totalement chargée (plus d'attente infinie possible), et le bouton est toujours réactivé après coup, même en cas d'erreur imprévue. Messages distincts selon la cause (délai réseau, identifiants, profil non configuré, serveur indisponible)."
+      ]
+    },
     {
       "version": "2.9.47",
       "date": "2026-09-19",
