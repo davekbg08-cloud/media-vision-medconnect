@@ -7,6 +7,16 @@ jour) et l'écran **Paramètres → À propos**.
 La source unique de la version en cours est `config/app-version.json` —
 ce fichier doit rester cohérent avec elle.
 
+## 2.9.48 — 2026-09-19
+
+Chantier **robustesse des connexions (priorité administrateur)** : garantir qu'aucune connexion ne reste bloquée (jamais de spinner figé, toujours une issue claire). **100 % client, additif.** Suite JS 1017/1017.
+
+- **Délai maximal auto-suffisant** (`js/firebase-config.js`, connexion admin cloud) : le `T`/timeout 15 s de la connexion admin ne dépend plus de `App.withTimeout` (donc du chargement complet de l'app). Nouveau helper `_withTimeoutSafe` : réutilise `App.withTimeout` si présent, sinon applique un `Promise.race` local. La connexion admin étant déclenchée très tôt (tap sur le logo), un appel réseau qui pendait pouvait auparavant n'être **jamais** borné → blocage ; corrigé.
+- **Bouton toujours ré-armé** : nouveau helper `_setBtnBusy` — utilise `App.setBtnLoading` si dispo, sinon bascule directement `btn.disabled`/`aria-busy`. Le bouton « Connexion » n'est plus jamais laissé désactivé, même si `App` n'est pas prêt ou en cas d'erreur imprévue (relâché dans `finally`).
+- **Tests** : `tests/fresh-device-login-rehydration-v2945.test.js` étendu (timeout + bouton auto-suffisants).
+
+Version **2.9.48** (build 2026.09.19.2, versionCode 49, cache `medconnect-v4.49`). Miroir Android resynchronisé.
+
 ## 2.9.47 — 2026-09-19
 
 Correctif ciblé : **connexion administrateur sur appareil neuf**. Sur une PWA fraîchement installée, la connexion admin affichait « Profil administrateur introuvable dans Firestore » alors que le compte existe : au premier chargement, `users/{uid}.get()` (source par défaut) pouvait répondre depuis le **cache local vide** et renvoyer un faux « document absent ». **100 % client, additif.**
