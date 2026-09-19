@@ -495,7 +495,7 @@ const AdminModule = (() => {
         // des fantômes. Un compte inexistant ne peut JAMAIS être approuvé
         // (requestId n'est jamais utilisé comme uid) — seule la suppression
         // de la demande obsolète est proposée (voir deleteRequest/openDetail).
-        App.toast('Cette demande ne possède aucun compte Firebase valide. Elle peut être supprimée, mais elle ne peut pas être approuvée.', 'error');
+        App.toast('Cette demande ne correspond à aucun compte valide. Elle peut être supprimée, mais elle ne peut pas être approuvée.', 'error');
         return;
       }
       const acc = accounts[idx];
@@ -503,7 +503,7 @@ const AdminModule = (() => {
       // approbation — sans elle, le compte ne pourra jamais se connecter
       // (voir js/auth.js loginProfessionalSilently, qui exige authUid).
       if (!acc.authUid || acc.uid !== acc.authUid) {
-        App.toast('Ce compte ne possède pas d\'identité Firebase valide. Supprimez la demande et demandez une nouvelle inscription.', 'error');
+        App.toast('Ce compte n’a pas d’accès valide. Supprimez la demande et demandez une nouvelle inscription.', 'error');
         return;
       }
       if (!acc.email) {
@@ -523,7 +523,7 @@ const AdminModule = (() => {
 
       const result = await pushRegistrationCloudDetailed(uid, nextAccount, 'approved');
       if (!result.ok) {
-        App.toast('❌ La validation n\'a pas été confirmée par Firestore. Vérifiez votre connexion puis réessayez.', 'error');
+        App.toast('❌ La validation n\'a pas été confirmée par le serveur. Vérifiez votre connexion puis réessayez.', 'error');
         return;
       }
 
@@ -569,7 +569,7 @@ const AdminModule = (() => {
 
       const result = await pushRegistrationCloudDetailed(uid, nextAccount, 'rejected');
       if (!result.ok) {
-        App.toast('❌ Le refus n\'a pas été confirmé par Firestore. Vérifiez votre connexion puis réessayez.', 'error');
+        App.toast('❌ Le refus n\'a pas été confirmé par le serveur. Vérifiez votre connexion puis réessayez.', 'error');
         return;
       }
 
@@ -616,7 +616,7 @@ const AdminModule = (() => {
       // règles) pouvait rester inchangé côté serveur.
       const result = await pushRegistrationCloudDetailed(uid, nextAccount, 'suspended');
       if (!result.ok) {
-        App.toast('❌ La suspension n\'a pas été confirmée par Firestore. Vérifiez votre connexion puis réessayez.', 'error');
+        App.toast('❌ La suspension n\'a pas été confirmée par le serveur. Vérifiez votre connexion puis réessayez.', 'error');
         return;
       }
 
@@ -673,7 +673,7 @@ const AdminModule = (() => {
         return `
       ${isGhost ? `
       <div class="auth-register-info" style="margin-top:1rem;border-color:var(--danger)">
-        Cette demande ne possède aucun compte Firebase valide. Elle peut être supprimée, mais elle ne peut pas être approuvée.
+        Cette demande ne correspond à aucun compte valide. Elle peut être supprimée, mais elle ne peut pas être approuvée.
       </div>` : ''}
       <div class="form-actions" style="margin-top:1rem">
         ${a.status === 'pending' ? (
@@ -963,7 +963,7 @@ const AdminModule = (() => {
       if (perm) {
         const uid = window.firebaseAuth?.currentUser?.uid || Auth.getUser?.()?.uid || '(inconnu)';
         console.warn('[Admin] Activation refusée. Vérifiez users/' + uid + '.role == "admin" dans Firestore.');
-        App.toast('❌ Droits insuffisants. Votre compte doit avoir role:"admin" dans Firestore (users/' + uid + '). Vérifiez aussi que les règles sont déployées.', 'error');
+        App.toast('❌ Droits administrateur insuffisants pour ce compte. Contactez le support technique (réf. ' + uid + ').', 'error');
       } else {
         App.toast('❌ Activation impossible : ' + (e.message || e), 'error');
       }

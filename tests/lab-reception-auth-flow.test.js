@@ -273,7 +273,7 @@ for (const role of ROLES) {
     assert.strictEqual(win.DB.getAccounts().length, 0);
     assert.ok(toasts.length === 0 || true); // message affiché via reg-err, pas toast — pas de crash suffit ici
     const errEl = getEl('reg-err');
-    assert.match(errEl.innerHTML, /Firebase indisponible/);
+    assert.match(errEl.innerHTML, /Connexion au serveur indisponible/);
   });
 
   test(`[${role}] 15. une panne Firestore critique déclenche le rollback du compte Firebase créé`, async () => {
@@ -379,7 +379,7 @@ for (const role of ROLES) {
     await win.AdminModule.approve(`${role}-noauth-1`);
     const acc = win.DB.getAccounts().find(a => a.uid === `${role}-noauth-1`);
     assert.strictEqual(acc.status, 'pending', 'le statut ne doit pas passer à approved sans authUid');
-    assert.ok(adminApp.toasts.some(t => /identité Firebase valide/.test(t.msg)));
+    assert.ok(adminApp.toasts.some(t => /accès valide/.test(t.msg)));
   });
 }
 
@@ -953,7 +953,7 @@ test('14.I.11-12. une demande sans compte mc_accounts (fantôme) ne peut pas êt
   const { win, App: adminApp } = setupAdmin({ accounts: [] });
   await win.AdminModule.approve('REQ-GHOST-1');
   assert.strictEqual(win.DB.getAccounts().find(a => a.uid === 'REQ-GHOST-1'), undefined, 'requestId ne doit jamais devenir un uid utilisateur');
-  assert.ok(adminApp.toasts.some(t => /aucun compte Firebase valide/.test(t.msg)));
+  assert.ok(adminApp.toasts.some(t => /aucun compte valide/.test(t.msg)));
 });
 
 test('14.I : reject() conserve le statut et n\'affiche pas de succès en cas d\'échec', async () => {

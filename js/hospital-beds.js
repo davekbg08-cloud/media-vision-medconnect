@@ -292,7 +292,7 @@ const HospitalBedsModule = (() => {
           return;
         }
         console.error('[Beds] saveAdmission — transaction :', txErr);
-        App.toast("L'admission n'a pas pu être confirmée par Firestore. Vérifiez la connexion puis réessayez.", 'error');
+        App.toast("L'admission n'a pas pu être confirmée par le serveur. Vérifiez la connexion puis réessayez.", 'error');
         return;
       }
       const bed = txResult.bed;
@@ -402,7 +402,7 @@ const HospitalBedsModule = (() => {
           return;
         }
         console.error('[Beds] confirmAdmission — transaction :', txErr);
-        App.toast("L'admission n'a pas pu être confirmée par Firestore. Vérifiez la connexion puis réessayez.", 'error');
+        App.toast("L'admission n'a pas pu être confirmée par le serveur. Vérifiez la connexion puis réessayez.", 'error');
         return;
       }
       const bed = txResult.bed;

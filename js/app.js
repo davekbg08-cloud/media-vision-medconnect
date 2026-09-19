@@ -280,7 +280,7 @@ const App = (() => {
       <br><small style="color:var(--text-muted)">${Auth.getRoleLabel(role)}</small>
       ${role === 'admin' ? `
         <br><small style="color:${user.cloudSynced ? 'var(--secondary)' : 'var(--danger)'}">
-          ${user.cloudSynced ? '☁️ Synchronisé Firestore' : '⚠️ Local uniquement — non synchronisé'}
+          ${user.cloudSynced ? '☁️ Synchronisé (cloud)' : '⚠️ Local uniquement — non synchronisé'}
         </small>` : ''}`;
 
     const slc = document.getElementById('sidebar-lang-container');

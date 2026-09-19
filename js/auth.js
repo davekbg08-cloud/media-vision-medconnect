@@ -660,7 +660,7 @@ const Auth = (() => {
   async function _signInFirebaseForAccount(account, pass, errorId = 'auth-err') {
     if (!account?.email) return true;
     if (!_hasFirebaseAuth()) {
-      _err(errorId, '❌ Firebase Auth indisponible. Réessayez avec une connexion internet.');
+      _err(errorId, '❌ Connexion au serveur indisponible. Vérifiez votre connexion internet puis réessayez.');
       return false;
     }
     try {
@@ -672,7 +672,7 @@ const Auth = (() => {
       return true;
     } catch (e) {
       console.warn('[MedConnect] Connexion Firebase impossible :', e);
-      _err(errorId, '❌ Connexion Firebase impossible. Vérifiez votre email/mot de passe.');
+      _err(errorId, '❌ Connexion impossible. Vérifiez votre mot de passe, puis votre connexion internet.');
       return false;
     }
   }
@@ -808,7 +808,7 @@ const Auth = (() => {
       // d'être vérifié avec succès, la connexion continue normalement ;
       // la migration réessaiera à la prochaine connexion réussie en ligne.
     } else {
-      _err('auth-err', '❌ Connexion Firebase impossible. Réessayez avec une connexion internet.');
+      _err('auth-err', '❌ Connexion impossible. Réessayez une fois connecté à internet.');
       return;
     }
 
@@ -1261,7 +1261,7 @@ const Auth = (() => {
       }
       if (!_isOnline()) { _err('reg-err', '❌ Connexion internet requise pour créer ce compte.'); return; }
       if (!_hasFirebaseAuth() || !_hasFirebaseDB()) {
-        _err('reg-err', '❌ Firebase indisponible. Vérifiez la connexion internet puis réessayez.');
+        _err('reg-err', '❌ Connexion au serveur indisponible. Vérifiez votre connexion internet puis réessayez.');
         return;
       }
 
@@ -1309,7 +1309,7 @@ const Auth = (() => {
       }
       const authUid = credential?.user?.uid || null;
       if (!authUid) {
-        _err('reg-err', '❌ Création du compte impossible — identité Firebase non confirmée.');
+        _err('reg-err', '❌ Création du compte impossible — le compte n’a pas pu être confirmé par le serveur. Vérifiez votre connexion puis réessayez.');
         return;
       }
 
@@ -1361,7 +1361,7 @@ const Auth = (() => {
       if (!criticalOk) {
         try { await firebaseAuth.currentUser?.delete(); }
         catch (e) { console.warn('[MedConnect] Nettoyage compte Firebase après échec critique labo/réception :', e); }
-        _err('reg-err', '❌ Création du compte impossible — la confirmation Firestore a échoué. Vérifiez la connexion puis réessayez.');
+        _err('reg-err', '❌ Création du compte impossible — la confirmation par le serveur a échoué. Vérifiez votre connexion puis réessayez.');
         return;
       }
 
@@ -1544,7 +1544,7 @@ const Auth = (() => {
     try { document.activeElement?.blur?.(); } catch (_) {}
 
     if (!email || !pass) { showAdminError('Veuillez remplir l\'email et le mot de passe administrateur.'); return; }
-    if (!_hasFirebaseAuth() || !_hasFirebaseDB()) { showAdminError('❌ Firebase indisponible. Vérifiez la connexion internet puis réessayez.'); return; }
+    if (!_hasFirebaseAuth() || !_hasFirebaseDB()) { showAdminError('❌ Connexion au serveur indisponible. Vérifiez votre connexion internet puis réessayez.'); return; }
 
     const submitBtn = e.target?.querySelector?.('button[type="submit"]');
     _adminBusy = true;
@@ -1571,7 +1571,7 @@ const Auth = (() => {
       // Vérifie le rôle administrateur dans Firestore AVANT d'ouvrir le tableau
       // de bord (aucune auto-promotion possible côté client).
       const doc = await withTimeout(firebaseDB.collection('users').doc(uid).get(), 15000);
-      if (!doc.exists) { showAdminError('❌ Profil administrateur introuvable dans Firestore.'); return; }
+      if (!doc.exists) { showAdminError('❌ Votre compte est connecté, mais son profil administrateur n’est pas encore configuré. Contactez le support technique.'); return; }
 
       const profile = doc.data() || {};
       const status  = String(profile.status || '').toLowerCase();
@@ -1586,12 +1586,12 @@ const Auth = (() => {
       App.closeModal(); _save(session);
       document.getElementById('auth-screen').style.display = 'none';
       App.afterLogin(getUser());
-      App.toast('✅ Administrateur connecté — synchronisé avec Firestore.');
+      App.toast('✅ Administrateur connecté.');
     } catch (error) {
       console.warn('[MedConnect] Connexion administrateur cloud impossible :', error);
       showAdminError(String(error?.message) === 'timeout'
         ? '⏱️ Délai dépassé (15 s). Vérifiez votre connexion internet puis réessayez.'
-        : '❌ Connexion administrateur impossible. Vérifiez email, mot de passe et droits Firestore.');
+        : '❌ Connexion administrateur impossible. Vérifiez votre e-mail et votre mot de passe, puis votre connexion internet.');
     } finally {
       // Échec/refus : bouton réutilisable immédiatement. Succès : modal fermé,
       // la réactivation est sans effet.
@@ -1883,7 +1883,7 @@ const Auth = (() => {
     const user = getUser();
     if (!user) { showErr('❌ Session introuvable — reconnectez-vous.'); return; }
     const current = firebaseAuth.currentUser;
-    if (!current || !current.email) { showErr('❌ Session Firebase introuvable — reconnectez-vous puis réessayez.'); return; }
+    if (!current || !current.email) { showErr('❌ Session expirée — reconnectez-vous puis réessayez.'); return; }
     if (typeof firebase === 'undefined' || !firebase.auth?.EmailAuthProvider) {
       showErr('❌ Ré-authentification indisponible. Rechargez la page puis réessayez.');
       return;

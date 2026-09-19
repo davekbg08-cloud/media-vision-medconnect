@@ -13,6 +13,7 @@ Correctif ciblé : **connexion administrateur sur appareil neuf**. Sur une PWA f
 
 - **`js/firebase-config.js` (`MedConnectAdminCloud.login`)** : lecture du profil admin **forcée côté serveur** (`get({ source: 'server' })`), avec repli sur le cache uniquement si le réseau est réellement indisponible (pour ne pas verrouiller un admin hors-ligne légitime). Le message d'erreur « introuvable » indique désormais l'**UID** du compte et le document `users/{uid}` à créer (role:"admin", status:"approved") si le profil manque vraiment.
 - **Tests** : `tests/app-check-admin-diagnostic-v2946.test.js` étendu (lecture serveur forcée + UID dans le message).
+- **Messages plus clairs** : les messages d'erreur/avertissement de connexion, d'inscription et de validation administrative ont été réécrits en langage courant — plus aucune mention technique visible par l'utilisateur (« Firebase », « Firestore », « jeton », « identité Firebase »…), remplacées par « connexion au serveur », « cloud », « compte valide », etc., tout en conservant l'information nécessaire pour agir. Les deux assertions de test couplées à ces libellés ont été mises à jour.
 
 Version **2.9.47** (build 2026.09.19.1, versionCode 48, cache `medconnect-v4.48`). Miroirs Android resynchronisés octet pour octet.
 

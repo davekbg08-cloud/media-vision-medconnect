@@ -80,5 +80,6 @@ test('connexion admin : lecture du profil forcée côté serveur (anti faux « i
     firebaseConfig.indexOf('function installCloudAdminTrigger'));
   assert.match(login, /\.get\(\{ source: 'server' \}\)/, 'profil admin lu au serveur');
   assert.match(login, /catch \(readErr\)/, 'repli en cas d’échec de la lecture serveur');
-  assert.match(login, /Profil administrateur introuvable[^']*UID/, 'le message d’erreur indique l’UID à vérifier');
+  assert.ok(login.includes('profil administrateur') && login.includes("users/' + uid"),
+    'le message d’erreur mentionne le profil admin et le doc users/{uid} à configurer');
 });
