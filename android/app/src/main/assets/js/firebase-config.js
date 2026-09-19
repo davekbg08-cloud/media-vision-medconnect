@@ -386,9 +386,22 @@ initFirebase();
       const uid = credential?.user?.uid;
       if (!uid) throw new Error('admin_uid_missing');
 
-      const doc = await T(firebaseDB.collection('users').doc(uid).get());
+      // Lecture SERVEUR forcée du profil admin. Sur un appareil neuf (PWA
+      // fraîchement installée), un get() par défaut peut répondre depuis le
+      // cache local VIDE au tout premier chargement et renvoyer « document
+      // absent » à tort — alors que le profil admin existe bien côté serveur.
+      // On lit donc explicitement au serveur ; si le réseau est réellement
+      // indisponible, on retombe sur le cache pour ne pas verrouiller un
+      // admin hors-ligne légitime.
+      let doc;
+      try {
+        doc = await T(firebaseDB.collection('users').doc(uid).get({ source: 'server' }));
+      } catch (readErr) {
+        if (String(readErr?.message) === 'timeout') throw readErr;
+        doc = await T(firebaseDB.collection('users').doc(uid).get());
+      }
       if (!doc.exists) {
-        showError('adm-cloud-err', '❌ Profil administrateur introuvable dans Firestore.');
+        showError('adm-cloud-err', '❌ Profil administrateur introuvable dans Firestore (UID : ' + uid + '). Créez le document users/' + uid + ' avec role:"admin" et status:"approved".');
         return;
       }
 

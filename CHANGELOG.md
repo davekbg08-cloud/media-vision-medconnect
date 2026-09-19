@@ -7,6 +7,15 @@ jour) et l'écran **Paramètres → À propos**.
 La source unique de la version en cours est `config/app-version.json` —
 ce fichier doit rester cohérent avec elle.
 
+## 2.9.47 — 2026-09-19
+
+Correctif ciblé : **connexion administrateur sur appareil neuf**. Sur une PWA fraîchement installée, la connexion admin affichait « Profil administrateur introuvable dans Firestore » alors que le compte existe : au premier chargement, `users/{uid}.get()` (source par défaut) pouvait répondre depuis le **cache local vide** et renvoyer un faux « document absent ». **100 % client, additif.**
+
+- **`js/firebase-config.js` (`MedConnectAdminCloud.login`)** : lecture du profil admin **forcée côté serveur** (`get({ source: 'server' })`), avec repli sur le cache uniquement si le réseau est réellement indisponible (pour ne pas verrouiller un admin hors-ligne légitime). Le message d'erreur « introuvable » indique désormais l'**UID** du compte et le document `users/{uid}` à créer (role:"admin", status:"approved") si le profil manque vraiment.
+- **Tests** : `tests/app-check-admin-diagnostic-v2946.test.js` étendu (lecture serveur forcée + UID dans le message).
+
+Version **2.9.47** (build 2026.09.19.1, versionCode 48, cache `medconnect-v4.48`). Miroirs Android resynchronisés octet pour octet.
+
 ## 2.9.46 — 2026-09-18
 
 Chantier **diagnostic App Check visible (admin)**. Le pourcentage « requêtes vérifiées » de la console Firebase est lent (jusqu'à 24 h) et opaque, et l'ancienne bannière admin ne s'affichait **que** si App Check n'était pas configuré — l'admin n'avait donc aucun signal en état normal. On expose désormais l'état réel du jeton directement dans le tableau de bord. **100 % client, additif** (aucune règle, aucun réglage console, aucun `enforceAppCheck` modifiés ; compat 9.22.0). Suite JS 1014/1014.
