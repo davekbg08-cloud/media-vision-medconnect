@@ -7,6 +7,15 @@ jour) et l'écran **Paramètres → À propos**.
 La source unique de la version en cours est `config/app-version.json` —
 ce fichier doit rester cohérent avec elle.
 
+## 2.9.49 — 2026-09-20
+
+Correctif UX ciblé : **bouton « Re-vérifier le jeton »** (bannière diagnostic App Check, tableau de bord admin) paraissait « buggé » — il relançait bien la vérification mais, le jeton échouant encore (reCAPTCHA non configuré pour le domaine), il réaffichait la **même** bannière sans aucun retour. **100 % client, additif.** Suite JS 1017/1017.
+
+- **`js/admin.js`** : nouveau handler dédié `AdminModule.recheckAppCheck(btn)` (remplace l'`onclick` inline). Retour visible garanti : état **« ⏳ Vérification… »** immédiat sur le bouton, puis **toast de résultat** clair (✅ jeton obtenu / ⚠️ toujours refusé → corriger la config reCAPTCHA / ⚠️ domaine non configuré), puis rafraîchissement du tableau de bord.
+- **Tests** : `tests/app-check-admin-diagnostic-v2946.test.js` mis à jour (câblage `recheckAppCheck`, état de chargement, toast, rafraîchissement).
+
+Version **2.9.49** (build 2026.09.20.1, versionCode 50, cache `medconnect-v4.50`). Miroir Android resynchronisé.
+
 ## 2.9.48 — 2026-09-19
 
 Chantier **robustesse des connexions (priorité administrateur)** : garantir qu'aucune connexion ne reste bloquée (jamais de spinner figé, toujours une issue claire). **100 % client, additif.** Suite JS 1017/1017.

@@ -1,8 +1,15 @@
 {
-  "version": "2.9.48",
-  "build": "2026.09.19.2",
-  "buildDate": "2026-09-19",
+  "version": "2.9.49",
+  "build": "2026.09.20.1",
+  "buildDate": "2026-09-20",
   "changelog": [
+    {
+      "version": "2.9.49",
+      "date": "2026-09-20",
+      "notes": [
+        "Bouton « Re-vérifier le jeton » (diagnostic App Check, admin) plus clair : il affiche désormais un état « Vérification… » pendant le contrôle, puis un message de résultat explicite (jeton obtenu, ou toujours refusé avec la marche à suivre reCAPTCHA), avant de rafraîchir le tableau de bord. Il ne semblait « rien faire » car il se contentait de réafficher la même bannière."
+      ]
+    },
     {
       "version": "2.9.48",
       "date": "2026-09-19",

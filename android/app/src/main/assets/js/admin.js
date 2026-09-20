@@ -301,7 +301,7 @@ const AdminModule = (() => {
     const host = st?.hostname || (typeof location !== 'undefined' ? location.hostname : '') || 'inconnu';
     const status = st?.status || (configured ? 'activating' : 'unconfigured_domain');
     const recheckBtn = `<button class="btn btn-ghost btn-sm" style="margin-top:.6rem"
-      onclick="window.recheckAppCheckToken&&window.recheckAppCheckToken().then(function(){AdminModule.renderDashboard&&AdminModule.renderDashboard();})">🔄 Re-vérifier le jeton</button>`;
+      onclick="AdminModule.recheckAppCheck(this)">🔄 Re-vérifier le jeton</button>`;
 
     // Domaine non déclaré (tests, dev, origine inattendue) OU clé absente.
     if (!configured || status === 'unconfigured_domain') {
@@ -352,6 +352,33 @@ const AdminModule = (() => {
         Les règles Firestore protègent l'application indépendamment.</p>
         ${recheckBtn}
       </div>`;
+  }
+
+  /* Bouton « Re-vérifier le jeton » — retour visible GARANTI. Le bouton
+     paraissait « buggé » car il se contentait de réafficher la bannière à
+     l'identique quand le jeton échouait encore (aucun retour). Ici : état de
+     chargement immédiat sur le bouton, message de résultat clair (toast),
+     puis rafraîchissement du tableau de bord (le bouton est alors recréé). */
+  async function recheckAppCheck(btn) {
+    const label = btn ? btn.innerHTML : '';
+    try { if (btn) { btn.disabled = true; btn.setAttribute('aria-busy', 'true'); btn.innerHTML = '⏳ Vérification…'; } } catch (_) {}
+    let code = 'sdk_missing';
+    try {
+      if (typeof window !== 'undefined' && window.recheckAppCheckToken) code = await window.recheckAppCheckToken();
+    } catch (_) { code = 'token_failed'; }
+    try {
+      if (code === 'valid') {
+        App.toast?.('✅ Jeton App Check obtenu — protection anti-abus active.');
+      } else if (code === 'unconfigured_domain') {
+        App.toast?.('⚠️ App Check non configuré pour ce domaine.', 'error');
+      } else {
+        App.toast?.('⚠️ Jeton toujours non obtenu — à corriger côté reCAPTCHA (domaine autorisé + clé enregistrée dans App Check).', 'error');
+      }
+    } catch (_) {}
+    // Restaure le bouton si la vue n'est pas encore reconstruite, puis
+    // rafraîchit le tableau de bord (le bouton y sera recréé avec le nouvel état).
+    try { if (btn) { btn.disabled = false; btn.removeAttribute('aria-busy'); btn.innerHTML = label; } } catch (_) {}
+    try { renderDashboard(document.getElementById('main-content')); } catch (_) {}
   }
 
   /* ══ DASHBOARD ══════════════════════════════════════ */
@@ -1030,6 +1057,7 @@ const AdminModule = (() => {
 
   return {
     renderDashboard, approve, reject, suspend, openDetail, deleteRequest,
+    recheckAppCheck,
     openBroadcast, sendBroadcast,
     openRegistryManager, openAddToRegistry, saveToRegistry,
     activateSubscription, deactivateSubscription, openSubscriptionActivator, confirmActivate,

@@ -25,8 +25,8 @@ android {
         applicationId "com.mediavision.medconnect"
         minSdk 24
         targetSdk 35
-        versionCode 49
-        versionName "2.9.48"
+        versionCode 50
+        versionName "2.9.49"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
