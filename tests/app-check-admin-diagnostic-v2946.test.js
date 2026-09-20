@@ -60,9 +60,14 @@ test('la bannière admin lit l’état RÉEL App Check (MedConnectAppCheckStatus
   // Échec explicite qui EXPLIQUE un pourcentage vide.
   assert.match(fn, /jeton NON obtenu/, 'état échec affiché');
   assert.match(fn, /domaines autoris/, 'oriente vers la config reCAPTCHA/App Check');
-  // Bouton de re-vérification câblé sur la fonction exposée.
-  assert.match(fn, /window\.recheckAppCheckToken/, 'bouton re-vérifier câblé');
-  assert.match(fn, /AdminModule\.renderDashboard/, 'rafraîchit le tableau de bord après re-vérification');
+  // Bouton de re-vérification : câblé sur AdminModule.recheckAppCheck, qui
+  // donne un retour visible (chargement + toast) puis rafraîchit le dashboard.
+  assert.match(fn, /onclick="AdminModule\.recheckAppCheck\(this\)"/, 'bouton câblé sur recheckAppCheck');
+  assert.match(fn, /async function recheckAppCheck\(btn\)/, 'handler dédié avec retour visible');
+  assert.match(fn, /window\.recheckAppCheckToken/, 're-vérification réelle du jeton');
+  assert.match(fn, /Vérification…/, 'état de chargement sur le bouton');
+  assert.match(fn, /App\.toast/, 'message de résultat (succès/échec)');
+  assert.match(fn, /renderDashboard\(document\.getElementById\('main-content'\)\)/, 'rafraîchit le tableau de bord après re-vérification');
 });
 
 test('la bannière n’expose jamais le jeton ni la clé', () => {
