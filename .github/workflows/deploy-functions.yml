@@ -1,0 +1,46 @@
+name: Déploiement des Cloud Functions
+
+# Déclenchement manuel UNIQUEMENT (modifie la production en direct).
+# Réutilise le secret FIREBASE_SERVICE_ACCOUNT_JSON déjà configuré.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-functions:
+    name: firebase deploy --only functions
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Vérifier le secret requis
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          test -n "$FIREBASE_SERVICE_ACCOUNT_JSON" || (echo "Secret manquant : FIREBASE_SERVICE_ACCOUNT_JSON" && exit 1)
+
+      - name: Installer les dépendances des Functions
+        run: npm ci
+        working-directory: functions
+
+      - name: Écrire la clé de compte de service
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+        run: echo "$FIREBASE_SERVICE_ACCOUNT_JSON" > /tmp/firebase-service-account.json
+
+      - name: Déployer les Functions
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: /tmp/firebase-service-account.json
+        run: npx firebase-tools@latest deploy --only functions --project medconnect-e81ba --non-interactive --force
+
+      - name: Supprimer la clé décodée
+        if: always()
+        run: rm -f /tmp/firebase-service-account.json
