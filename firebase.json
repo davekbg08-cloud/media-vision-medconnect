@@ -5,9 +5,10 @@
   },
   "functions": {
     "source": "functions",
-    "runtime": "nodejs20"
+    "runtime": "nodejs24"
   },
   "hosting": {
+    "site": "medconnect-e81ba",
     "public": ".",
     "ignore": [
       "firebase.json",
@@ -21,7 +22,26 @@
       "downloads/**",
       "tests/**",
       "scripts/**",
-      "*.md"
+      "*.md",
+      ".venv/**",
+      "dist/**",
+      ".firebase/**",
+      ".github/**",
+      ".agents/**",
+      ".codex/**",
+      ".vscode/**",
+      "package.json",
+      "package-lock.json",
+      "netlify.toml",
+      "sync-assets.ps1",
+      "**/*.exe",
+      "**/*.bat",
+      "**/*.ps1",
+      "**/*.pyc",
+      "**/__pycache__/**",
+      ".git/**",
+      "firebase-debug.log",
+      "**/*.log"
     ],
     "headers": [
       {
