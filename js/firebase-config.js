@@ -450,6 +450,9 @@ initFirebase();
         role: 'admin',
         name: profile.name || profile.displayName || 'Administrateur',
         restoredFromCloud: true,
+        // v2.9.50 : session réellement authentifiée côté cloud — sans ce
+        // drapeau, le menu affichait à tort « Local uniquement ».
+        cloudSynced: true,
         loggedAt: new Date().toISOString(),
       };
       sessionStorage.setItem('mc_user', JSON.stringify(session));

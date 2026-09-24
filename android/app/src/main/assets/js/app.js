@@ -185,6 +185,14 @@ const App = (() => {
       console.warn('[App] navigation initiale :', e);
     }
     startExchangeSync(user);
+    // v2.9.50 : admin plateforme — migration unique des identifiants
+    // d'affiliation hérités (voir HospitalsRegistry). Différée et non
+    // bloquante : n'impacte jamais l'ouverture de la session.
+    if (user.role === 'admin') {
+      setTimeout(() => {
+        try { window.HospitalsRegistry?.migrateLegacyAffiliationIds?.(); } catch (e) { console.warn('[App] migration affiliations (ignorée) :', e); }
+      }, 4000);
+    }
   }
 
   /* ── ÉCOUTE DU CONTRAT D'ÉCHANGE mobile ↔ desktop ──

@@ -211,12 +211,15 @@ const Settings = (() => {
     if (!window.ActionFeedback?.start?.(btn, '⏳ Vérification…')) return;
     try {
       const r = await window.DB?.retryBlockedOutbox?.() || { attempted: 0, succeeded: 0, failed: 0 };
+      const others = r.skippedOtherUser
+        ? ` ${r.skippedOtherUser} opération(s) d'un autre compte ignorée(s) : seul leur auteur peut les rejouer.`
+        : '';
       if (!r.attempted) {
-        window.ActionFeedback?.confirmed?.('Aucune opération bloquée à vérifier.');
+        window.ActionFeedback?.confirmed?.((others ? 'Aucune de vos opérations bloquées à vérifier.' : 'Aucune opération bloquée à vérifier.') + others);
       } else if (r.failed === 0) {
-        window.ActionFeedback?.confirmed?.(`✅ ${r.succeeded} opération(s) bloquée(s) synchronisée(s) avec succès.`);
+        window.ActionFeedback?.confirmed?.(`✅ ${r.succeeded} opération(s) bloquée(s) synchronisée(s) avec succès.${others}`);
       } else {
-        window.ActionFeedback?.failed?.(`${r.succeeded} réussie(s), ${r.failed} toujours bloquée(s) — la cause n'est pas résolue.`);
+        window.ActionFeedback?.failed?.(`${r.succeeded} réussie(s), ${r.failed} toujours bloquée(s) — la cause n'est pas résolue.${others}`);
       }
     } finally {
       window.ActionFeedback?.reset?.(btn);
@@ -235,6 +238,8 @@ const Settings = (() => {
         window.ActionFeedback?.confirmed?.('✅ Opération synchronisée avec succès.');
       } else if (r?.reason === 'offline') {
         window.ActionFeedback?.queued?.('📡 Hors ligne — réessayez une fois connecté.');
+      } else if (r?.reason === 'not_owner') {
+        window.ActionFeedback?.failed?.('🔒 Cette opération a été créée par un autre compte : seul son auteur peut la rejouer (reconnectez-vous avec ce compte), ou supprimez-la de la file.');
       } else if (r?.reason === 'not_found') {
         window.ActionFeedback?.confirmed?.('Opération déjà synchronisée ou retirée.');
       } else {

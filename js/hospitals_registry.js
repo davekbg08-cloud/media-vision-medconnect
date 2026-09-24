@@ -451,6 +451,70 @@ const HospitalsRegistry = (() => {
       .forEach(a => writeHospitalMemberDoc(a.establishmentId, uid, a.requesterRole || account?.role, 'active'));
   }
 
+  /* v2.9.50 — MIGRATION des identifiants d'affiliation hérités.
+     Les règles Firestore (hasApprovedAffiliation) ne retrouvent une
+     affiliation approuvée QUE sous l'identifiant canonique
+     affiliation_requests/AFF_{uid}_{établissement}. Les demandes créées
+     par d'anciennes versions portent un identifiant aléatoire
+     (ex. AFF1781974823303) : l'auto-guérison hospitalMembers de ces
+     agents était alors refusée à CHAQUE connexion (écriture bloquée en
+     file) et l'agent pouvait être mal reconnu comme membre.
+     Exécutée par l'admin plateforme uniquement (seul autorisé à écrire/
+     supprimer ces documents), une fois par session : copie vers l'ID
+     canonique puis suppression de l'ancien, en un batch atomique. Si un
+     document canonique existe déjà, on n'écrase RIEN (il fait foi). */
+  let _legacyAffMigrationDone = false;
+  function canonicalAffiliationId(a) {
+    return (a?.requesterUid && a?.establishmentId) ? `AFF_${a.requesterUid}_${a.establishmentId}` : null;
+  }
+  async function migrateLegacyAffiliationIds() {
+    if (_legacyAffMigrationDone) return { migrated: 0, skipped: 0 };
+    let user = null;
+    try { user = window.Auth?.getUser?.(); } catch (_) {}
+    if (user?.role !== 'admin' || typeof firebaseDB === 'undefined' || !firebaseDB) return { migrated: 0, skipped: 0 };
+    _legacyAffMigrationDone = true;
+    let migrated = 0, skipped = 0;
+    try {
+      const snap = await firebaseDB.collection('affiliation_requests').get();
+      const existingIds = new Set(snap.docs.map(d => d.id));
+      const todo = [];
+      snap.docs.forEach(d => {
+        const data = d.data() || {};
+        const canonical = canonicalAffiliationId(data);
+        if (!canonical || canonical === d.id) return;
+        if (existingIds.has(canonical)) { skipped++; return; }
+        existingIds.add(canonical); // deux anciens doublons → un seul migré
+        todo.push({ legacyId: d.id, canonical, data });
+      });
+      for (let i = 0; i < todo.length; i += 200) {
+        const batch = firebaseDB.batch();
+        todo.slice(i, i + 200).forEach(({ legacyId, canonical, data }) => {
+          batch.set(firebaseDB.collection('affiliation_requests').doc(canonical),
+            { ...data, requestId: canonical, migratedFromId: legacyId, updatedAt: data.updatedAt || now() });
+          batch.delete(firebaseDB.collection('affiliation_requests').doc(legacyId));
+        });
+        await batch.commit();
+        migrated += Math.min(200, todo.length - i);
+      }
+      if (todo.length) {
+        const renamed = new Map(todo.map(t => [t.legacyId, t.canonical]));
+        const fix = list => list.map(raw => {
+          const id = raw?.requestId || raw?.afid;
+          return renamed.has(id) ? { ...raw, requestId: renamed.get(id), afid: undefined, migratedFromId: id } : raw;
+        });
+        // Mise à jour du cache LOCAL uniquement (store) : le cloud vient
+        // d'être écrit par le batch, aucune republication nécessaire.
+        store(REQ_KEY, mergeById(fix(load(REQ_KEY)).map(normalizeRequest), 'requestId'));
+        store(LEGACY_REQ_KEY, mergeById(fix(load(LEGACY_REQ_KEY)).map(normalizeRequest), 'requestId'));
+        console.info(`[MedConnect] ${todo.length} affiliation(s) migrée(s) vers l'identifiant canonique.`);
+      }
+    } catch (e) {
+      _legacyAffMigrationDone = false; // nouvelle tentative à la prochaine connexion
+      console.warn('[MedConnect] Migration des identifiants d\'affiliation reportée :', e?.message || e);
+    }
+    return { migrated, skipped };
+  }
+
   /* ── SOURCES DE VÉRITÉ DIRECTES (hospitalMembers / affiliation_requests) ──
      Correctif (bug confirmé) : la connexion ne s'appuyait que sur
      establishments.staff[] (cache local, potentiellement obsolète) —
@@ -1449,6 +1513,7 @@ const HospitalsRegistry = (() => {
     getHospitals, saveHospitals, addHospital, addHospitalAndConfirm, migratePasswordHashToAuth, updateHospital, getHospitalById, cacheHospital,
     getAffiliations, saveAffiliations, requestAffiliation, requestAffiliationAndConfirm, respondAffiliation, removeStaff, validateEstablishment,
     getDoctorHospitals, getPendingAffiliations, refreshAffiliationsForHospital, ensureHospitalMembership,
+    migrateLegacyAffiliationIds,
     getHospitalMemberDirect, getAffiliationRequestDirect, resolveAgentAffiliation,
     getCurrentHospital, setCurrentHospital, clearCurrentHospital,
     getPatientsForContext, getAppointmentsForContext, getPatientsForEstablishment,

@@ -327,6 +327,31 @@ const DB = (() => {
     if (remaining.length) console.warn(`[MedConnect] Outbox : ${remaining.length} écriture(s) toujours en attente.`);
   }
 
+  /* v2.9.50 — Rejeu MANUEL réservé à l'AUTEUR de l'opération.
+     Avant, « Réessayer » / « Vérifier les bloquées » rejouaient l'entrée
+     sous le compte ACTUELLEMENT connecté : sur un poste partagé, un admin
+     rejouait ainsi avec ses droits étendus une écriture qu'un médecin ou
+     une infirmière s'était vu refuser — contournant la règle même qui
+     l'avait bloquée. On exige désormais que l'utilisateur courant soit
+     l'auteur (ownerAuthUid, ou à défaut l'uid applicatif pour les
+     entrées créées avant la v2.9.42). */
+  function _currentIdentity() {
+    let authUid = null, appUid = null;
+    try {
+      authUid = (typeof firebaseAuth !== 'undefined' && firebaseAuth && firebaseAuth.currentUser)
+        ? firebaseAuth.currentUser.uid : null;
+    } catch (_) {}
+    try { appUid = window.Auth?.getUser?.()?.uid || null; } catch (_) {}
+    return { authUid, appUid };
+  }
+  function isOutboxEntryOwnedByCurrentUser(e) {
+    const { authUid, appUid } = _currentIdentity();
+    if (e?.ownerAuthUid) return !!authUid && e.ownerAuthUid === authUid;
+    const legacyUid = e?.accountUid || e?.userUid || null;
+    if (legacyUid) return !!appUid && legacyUid === appUid;
+    return true; // entrée anonyme très ancienne : gardée par les règles Firestore
+  }
+
   /** Rejeu MANUEL d'UNE opération précise (y compris 'blocked') —
       « Réessayer cette opération » dans l'inspecteur. */
   async function retryOutboxOperation(operationId) {
@@ -335,6 +360,7 @@ const DB = (() => {
     const idx = q.findIndex(e => e.operationId === operationId);
     if (idx === -1) return { ok: false, reason: 'not_found' };
     const e = q[idx];
+    if (!isOutboxEntryOwnedByCurrentUser(e)) return { ok: false, reason: 'not_owner' };
     try {
       await _replayEntry(e);
       q.splice(idx, 1);
@@ -355,10 +381,11 @@ const DB = (() => {
   async function retryBlockedOutbox() {
     if (!firebaseReady || !firebaseDB) return { attempted: 0, succeeded: 0, failed: 0 };
     const q = _outboxLoad();
-    let attempted = 0, succeeded = 0;
+    let attempted = 0, succeeded = 0, skippedOtherUser = 0;
     const remaining = [];
     for (const e of q) {
       if (e.classification !== 'blocked') { remaining.push(e); continue; }
+      if (!isOutboxEntryOwnedByCurrentUser(e)) { skippedOtherUser++; remaining.push(e); continue; }
       attempted++;
       try {
         await _replayEntry(e);
@@ -369,7 +396,7 @@ const DB = (() => {
     }
     store(OUTBOX_KEY, remaining);
     try { window.SyncBadge?.render?.(); } catch (_) {}
-    return { attempted, succeeded, failed: attempted - succeeded };
+    return { attempted, succeeded, failed: attempted - succeeded, skippedOtherUser };
   }
 
   /** Suppression MANUELLE d'une opération de la file — jamais appelée
@@ -2288,6 +2315,7 @@ const DB = (() => {
     // rejeu d'une entrée 'blocked'), suppression manuelle confirmée,
     // export de diagnostic expurgé.
     retryOutboxOperation, retryBlockedOutbox, removeOutboxOperation, exportOutboxDiagnostic,
+    isOutboxEntryOwnedByCurrentUser,
     // pushCloud/deleteCloud : wrappers publics sur _push/_delete, à
     // utiliser par tout module (access_control.js, hospitals_registry.js,
     // affiliation-cleanup.js...) au lieu de réimplémenter un mini-push
