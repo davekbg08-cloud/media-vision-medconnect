@@ -64,22 +64,11 @@
     btn.innerHTML = isSubmitting ? '⏳ Envoi de la demande...' : '✅ Soumettre la demande d’inscription';
   }
 
-  function roleRegistryInfo(role, number) {
+  async function roleRegistryInfo(role, number) {
+    // v2.9.50 : recherche unitaire par identifiant (le registre complet
+    // n'est plus téléchargeable par les non-admins).
     try {
-      if (!window.ACL) return { verified: false, data: null };
-      const n = String(number || '').toUpperCase();
-      if (role === 'doctor') {
-        const data = ACL.getVerifiedDoctors?.().find(d => String(d.order_num || '').toUpperCase() === n) || null;
-        return { verified: !!data, data };
-      }
-      if (role === 'pharmacist') {
-        const data = ACL.getVerifiedPharmacists?.().find(p => String(p.matricule || '').toUpperCase() === n) || null;
-        return { verified: !!data, data };
-      }
-      if (role === 'nurse') {
-        const data = ACL.getVerifiedNurses?.().find(x => String(x.matricule || '').toUpperCase() === n) || null;
-        return { verified: !!data, data };
-      }
+      if (window.ACL?.lookupRegistry) return await ACL.lookupRegistry(role, number);
     } catch (e) {
       console.warn('[MedConnect] Vérification registre ignorée :', e);
     }
@@ -340,7 +329,7 @@
         return;
       }
 
-      const registry = roleRegistryInfo(role, number);
+      const registry = await roleRegistryInfo(role, number);
       const result = await writeRegistrationToFirestore({ uid, role, number, email, registry });
       await firebaseAuth.signOut().catch(() => {});
       sessionStorage.removeItem('mc_user');

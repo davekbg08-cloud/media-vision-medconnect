@@ -1020,20 +1020,11 @@ const Auth = (() => {
     // officiels) : lab/reception passent désormais par _regAgentStrict
     // (voir plus bas), qui exige une identité Firebase Auth réelle de
     // bout en bout et ne tolère aucun mode dégradé pour ces 2 rôles.
-    let verified, info;
-    if (role === 'doctor') {
-      verified = ACL.isDoctorVerified(num);
-      info = ACL.getVerifiedDoctors().find(d => d.order_num === num);
-    } else if (role === 'pharmacist') {
-      verified = ACL.isPharmacistVerified(num);
-      info = ACL.getVerifiedPharmacists().find(p => p.matricule === num);
-    } else if (role === 'nurse') {
-      verified = ACL.isNurseVerified(num);
-      info = ACL.getVerifiedNurses().find(n => n.matricule === num);
-    } else {
-      verified = false;
-      info = null;
-    }
+    // v2.9.50 : recherche unitaire (le registre n'est plus lisible en
+    // entier par le public — voir ACL.lookupRegistry).
+    const { verified, data: info } = (role === 'doctor' || role === 'pharmacist' || role === 'nurse')
+      ? await ACL.lookupRegistry(role, num)
+      : { verified: false, data: null };
     if (!verified) {
       _err('reg-err', `❌ Numéro non reconnu dans le registre.\nContactez l'administrateur : +243 856 373 707\nou hello.mediavision.tech@gmail.com`);
       return false;

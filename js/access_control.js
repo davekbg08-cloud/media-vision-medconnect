@@ -55,6 +55,34 @@ const ACL = (() => {
       n.matricule.toUpperCase() === num.trim().toUpperCase());
   }
 
+  /* ── RECHERCHE UNITAIRE DANS LE REGISTRE (v2.9.50) ───
+     Les registres ne sont plus lisibles en entier par le public
+     (règles : get public, list réservé à l'admin). La vérification à
+     l'inscription interroge donc UN document par son identifiant
+     (numéro en majuscules) au lieu de parcourir une liste locale.
+     Repli sur la liste locale (admin, ou Firestore indisponible). */
+  const REGISTRY_BY_ROLE = {
+    doctor:     { col: 'mc_verified_doctors', field: 'order_num', list: () => getVerifiedDoctors() },
+    pharmacist: { col: 'mc_verified_pharms',  field: 'matricule', list: () => getVerifiedPharmacists() },
+    nurse:      { col: 'mc_verified_nurses',  field: 'matricule', list: () => getVerifiedNurses() },
+  };
+  async function lookupRegistry(role, num) {
+    const meta = REGISTRY_BY_ROLE[role];
+    const key  = String(num || '').trim().toUpperCase();
+    if (!meta || !key) return { verified: false, data: null };
+    if (typeof firebaseDB !== 'undefined' && firebaseDB) {
+      try {
+        const snap = await firebaseDB.collection(meta.col).doc(key).get();
+        if (snap.exists) return { verified: true, data: snap.data() };
+        if (!snap.metadata?.fromCache) return { verified: false, data: null };
+      } catch (e) {
+        console.warn('[MedConnect] Recherche registre (cloud) indisponible :', e?.message || e);
+      }
+    }
+    const data = meta.list().find(x => String(x?.[meta.field] || '').toUpperCase() === key) || null;
+    return { verified: !!data, data };
+  }
+
   /* ── AJOUT / SUPPRESSION ──────────────────────────── */
   function addVerifiedDoctor(data) {
     const list = getVerifiedDoctors();
@@ -199,6 +227,7 @@ const ACL = (() => {
 
   return {
     getVerifiedDoctors, getVerifiedPharmacists, getVerifiedNurses,
+    lookupRegistry,
     saveVerifiedDoctors, saveVerifiedPharmacists, saveVerifiedNurses,
     isDoctorVerified, isPharmacistVerified, isNurseVerified,
     addVerifiedDoctor, addVerifiedPharmacist, addVerifiedNurse,

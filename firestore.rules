@@ -1449,17 +1449,29 @@ service cloud.firestore {
     }
 
     match /mc_verified_doctors/{docId} {
-      allow read: if true;
+      // v2.9.50 : lecture UNITAIRE publique (vérification d'un numéro à
+      // l'inscription) ; la liste complète n'est plus énumérable que par
+      // l'admin (les numéros servent de preuve d'identité).
+      allow get: if true;
+      allow list: if isAdmin();
       allow write: if isAdmin();
     }
 
     match /mc_verified_pharms/{docId} {
-      allow read: if true;
+      // v2.9.50 : lecture UNITAIRE publique (vérification d'un numéro à
+      // l'inscription) ; la liste complète n'est plus énumérable que par
+      // l'admin (les numéros servent de preuve d'identité).
+      allow get: if true;
+      allow list: if isAdmin();
       allow write: if isAdmin();
     }
 
     match /mc_verified_nurses/{docId} {
-      allow read: if true;
+      // v2.9.50 : lecture UNITAIRE publique (vérification d'un numéro à
+      // l'inscription) ; la liste complète n'est plus énumérable que par
+      // l'admin (les numéros servent de preuve d'identité).
+      allow get: if true;
+      allow list: if isAdmin();
       allow write: if isAdmin();
     }
 

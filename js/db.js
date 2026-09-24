@@ -720,6 +720,7 @@ const DB = (() => {
     // Chaque collection en parallèle avec un timeout individuel : un
     // réseau lent ou une requête bloquée ne doit jamais figer toute
     // l'app (observé : admin resté sur un sablier vide en LTE faible).
+    const REGISTRY_COLLECTIONS = new Set(['mc_verified_doctors','mc_verified_pharms','mc_verified_nurses']);
     const PER_COLLECTION_TIMEOUT_MS = 6000;
     function withTimeout(promise, ms) {
       return Promise.race([
@@ -736,6 +737,10 @@ const DB = (() => {
         if (!snap.empty) store(col, snap.docs.map(d => d.data()));
         else if (!snap.metadata?.fromCache && EMPTY_WIPE_WHITELIST.has(col)) store(col, []);
       } catch (e) {
+        // v2.9.50 : les registres officiels ne sont listables que par
+        // l'admin. Pour les autres comptes, on purge la copie locale
+        // héritée des versions précédentes (liste complète en clair).
+        if (REGISTRY_COLLECTIONS.has(col) && e?.code === 'permission-denied') { store(col, []); return; }
         console.warn(`[MedConnect] Sync ${col} ignorée (lente/indisponible) :`, e?.message || e);
       }
     }));
