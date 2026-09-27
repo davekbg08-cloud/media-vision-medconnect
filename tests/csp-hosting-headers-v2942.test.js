@@ -10,9 +10,10 @@
  * doit y figurer, sinon la fonctionnalité correspondante casserait en prod.
  *
  * Rappel d'architecture (audité) :
- *  - Scripts externes : Firebase SDK (gstatic), Leaflet + html5-qrcode (unpkg),
+ *  - Scripts externes : Firebase SDK (gstatic) ; Leaflet + html5-qrcode sont
+ *    désormais hébergés dans le dépôt (vendor/), plus aucun script depuis unpkg,
  *    reCAPTCHA Enterprise / App Check (google.com, recaptcha.net).
- *  - Styles externes : Leaflet CSS (unpkg), Google Fonts CSS (fonts.googleapis).
+ *  - Styles externes : Google Fonts CSS (fonts.googleapis) ; Leaflet CSS locale.
  *  - Polices : Google Fonts (fonts.gstatic).
  *  - Images externes : tuiles OpenStreetMap, QR codes (api.qrserver.com).
  *  - connect (fetch/XHR) : Firebase (*.googleapis, *.cloudfunctions, *.run.app),
@@ -81,21 +82,21 @@ test('CSP : script-src couvre les hôtes de scripts réels et garde unsafe-inlin
   assert.ok(s.includes("'unsafe-inline'"), "script-src doit garder 'unsafe-inline' (handlers inline).");
   for (const host of [
     'https://www.gstatic.com',   // Firebase SDK
-    'https://unpkg.com',         // Leaflet / html5-qrcode
     'https://www.google.com',    // reCAPTCHA Enterprise
     'https://www.recaptcha.net'  // reCAPTCHA fallback
   ]) {
     assert.ok(s.includes(host), `script-src doit inclure ${host}.`);
   }
+  assert.ok(!s.includes('https://unpkg.com'), 'script-src ne doit plus autoriser unpkg (bibliothèques auto-hébergées).');
   // Jamais d'unsafe-eval : aucun eval/new Function dans le code.
   assert.ok(!s.includes("'unsafe-eval'"), "script-src ne doit PAS contenir 'unsafe-eval'.");
 });
 
-test('CSP : style-src couvre unpkg + Google Fonts CSS', () => {
+test('CSP : style-src couvre Google Fonts CSS, sans unpkg', () => {
   const d = parseCsp(cspHeader().value);
   const s = d['style-src'];
   assert.ok(s.includes("'self'") && s.includes("'unsafe-inline'"));
-  assert.ok(s.includes('https://unpkg.com'), 'style-src doit inclure unpkg (Leaflet CSS).');
+  assert.ok(!s.includes('https://unpkg.com'), 'style-src ne doit plus autoriser unpkg (Leaflet CSS locale).');
   assert.ok(s.includes('https://fonts.googleapis.com'), 'style-src doit inclure Google Fonts CSS.');
 });
 

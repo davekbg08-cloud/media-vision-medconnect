@@ -313,7 +313,8 @@ window.ShareModule = (() => {
 
     if (!window.Html5Qrcode) {
       const script = document.createElement('script');
-      script.src = "https://unpkg.com/html5-qrcode";
+      // Hébergé dans le dépôt (vendor/) : CSP resserrée, aucun CDN externe.
+      script.src = "./vendor/html5-qrcode/2.3.8/html5-qrcode.min.js";
       script.onload = () => initScanner();
       document.head.appendChild(script);
     } else {

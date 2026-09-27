@@ -55,8 +55,8 @@ const ASSETS = [
   './js/global_back_button.js', './js/patient_edit_guard.js', './js/auth-ui-cleanup.js',
   './js/affiliation-cleanup.js',
   './assets/icon.png',
-  'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
-  'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
+  './vendor/leaflet/1.9.4/leaflet.css',
+  './vendor/leaflet/1.9.4/leaflet.js',
 ];
 
 self.addEventListener('install', event => {

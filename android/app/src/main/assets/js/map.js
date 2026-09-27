@@ -13,8 +13,8 @@ window.MapModule = (() => {
      Le service worker précache toujours ces URLs → carte hors ligne OK.
      Toutes les fonctions qui utilisent `L` passent d'abord par
      ensureLeaflet(). */
-  const LEAFLET_JS  = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-  const LEAFLET_CSS = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+  const LEAFLET_JS  = './vendor/leaflet/1.9.4/leaflet.js';
+  const LEAFLET_CSS = './vendor/leaflet/1.9.4/leaflet.css';
   let _leafletPromise = null;
   function ensureLeaflet() {
     if (window.L) return Promise.resolve(window.L);

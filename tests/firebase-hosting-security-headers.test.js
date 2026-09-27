@@ -77,12 +77,12 @@ test("firebase.json : la CSP est désormais en mode BLOQUANT (Content-Security-P
     'plus de header Report-Only une fois la CSP promue en bloquant');
 });
 
-test('firebase.json : la CSP bloquante autorise réellement tous les domaines externes utilisés par l\'app (Firebase, unpkg/Leaflet, tuiles OpenStreetMap, reCAPTCHA)', () => {
+test('firebase.json : la CSP bloquante autorise réellement tous les domaines externes utilisés par l\'app (Firebase, tuiles OpenStreetMap, reCAPTCHA ; Leaflet auto-hébergé)', () => {
   const config = loadConfig();
   const headers = config.hosting.headers.find(h => h.source === '**').headers;
   const csp = headerValue(headers, 'Content-Security-Policy');
   assert.match(csp, /https:\/\/www\.gstatic\.com/, 'SDK Firebase (js/firebase-config.js, firebase-*.js)');
-  assert.match(csp, /https:\/\/unpkg\.com/, 'Leaflet (js/map.js)');
+  assert.doesNotMatch(csp, /unpkg\.com/, 'Leaflet est auto-hébergé (vendor/) : plus d\'unpkg');
   assert.match(csp, /https:\/\/\*\.tile\.openstreetmap\.org/, 'tuiles de carte (js/map.js)');
   assert.match(csp, /https:\/\/\*\.googleapis\.com/, 'Firestore/Auth/App Check');
   assert.match(csp, /https:\/\/\*\.firebaseio\.com/, 'Realtime Database éventuel/legacy');
