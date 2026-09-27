@@ -79,8 +79,8 @@ test('map.js : les 3 entrées async gardent ensureLeaflet() avant d\'utiliser L'
 
 /* ── sw.js (hors ligne préservé) ────────────────────── */
 test('sw.js précache toujours Leaflet (CSS + JS) → carte hors ligne préservée', () => {
-  assert.match(swSrc, /unpkg\.com\/leaflet@1\.9\.4\/dist\/leaflet\.css/);
-  assert.match(swSrc, /unpkg\.com\/leaflet@1\.9\.4\/dist\/leaflet\.js/);
+  assert.match(swSrc, /'\.\/vendor\/leaflet\/1\.9\.4\/leaflet\.css'/);
+  assert.match(swSrc, /'\.\/vendor\/leaflet\/1\.9\.4\/leaflet\.js'/);
 });
 
 test('sw.js précache le nouveau js/lazy-loader.js', () => {
