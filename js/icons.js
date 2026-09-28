@@ -8,7 +8,7 @@
    ===================================================== */
 (function () {
   'use strict';
-  const SPRITE = './vendor/icons/medconnect-icons-v4.svg';
+  const SPRITE = './vendor/icons/medconnect-icons-v5.svg';
 
   /** Icône par nom Tabler (ex. 'stethoscope'). */
   function icon(name, extraClass) {
@@ -111,15 +111,59 @@
     });
   }
 
+  /* Boutons : l'emoji (ou le « + ») en tête du libellé devient une icône
+     au trait. Le libellé et l'action du bouton ne changent pas. */
+  const BUTTON_EMOJI = {
+    '+': 'plus', '➕': 'plus', '🆕': 'plus', '✅': 'check', '☑️': 'checkbox',
+    '🗑️': 'trash', '❌': 'circle-x', '✕': 'x', '📤': 'send', '✉️': 'mail',
+    '🔐': 'lock', '🔑': 'key', '🔄': 'refresh', '←': 'arrow-left', '🔍': 'search',
+    '🔎': 'search', '🖨️': 'printer', '💾': 'device-floppy', '📍': 'map-pin',
+    '⬇️': 'download', '📋': 'clipboard-list', '🩺': 'stethoscope', '🚑': 'ambulance',
+    '🛒': 'shopping-cart', '🚫': 'ban', '⛔': 'ban', '🛏️': 'bed', '🧪': 'flask',
+    '👤': 'user', '🏥': 'building-hospital', '💊': 'pill', '🚨': 'alert-triangle',
+    '🗓️': 'calendar-event', '📅': 'calendar-event', '📷': 'camera', '📱': 'device-mobile',
+    '🌙': 'moon', '☀️': 'sun', '🚪': 'door-exit', '📄': 'file-text',
+  };
+  const BUTTON_PREFIX = /^\s*(\+|\p{Extended_Pictographic}(?:\uFE0F)?|←|✕)\s*/u;
+
+  function decorateButtons(root) {
+    root?.querySelectorAll?.('.btn:not([data-mc-btn])').forEach((btn) => {
+      btn.setAttribute('data-mc-btn', '1');
+      const first = btn.firstChild;
+      if (!first || first.nodeType !== 3) return;
+      const m = first.textContent.match(BUTTON_PREFIX);
+      const name = m && BUTTON_EMOJI[m[1]];
+      if (!name) return;
+      const rest = first.textContent.slice(m[0].length);
+      if (!rest.trim() && !btn.getAttribute('aria-label') && btn.title) btn.setAttribute('aria-label', btn.title);
+      first.textContent = rest ? ` ${rest}` : '';
+      btn.insertAdjacentHTML('afterbegin', icon(name, 'mc-btn-icon'));
+      btn.classList.add('mc-btn-with-icon');
+    });
+  }
+
+  function decorateAll(root) {
+    decoratePageHeader(root);
+    decorateStatIcons(root);
+    decorateButtons(root);
+  }
+
   function watchMainContent() {
-    const main = document.getElementById('main-content');
-    if (!main || typeof MutationObserver === 'undefined') return;
-    let scheduled = false;
-    new MutationObserver(() => {
-      if (scheduled) return;
-      scheduled = true;
-      requestAnimationFrame(() => { scheduled = false; decoratePageHeader(main); decorateStatIcons(main); });
-    }).observe(main, { childList: true, subtree: true });
+    if (typeof MutationObserver === 'undefined') return;
+    const targets = [document.getElementById('main-content'), document.getElementById('global-modal')]
+      .filter(Boolean);
+    for (const target of targets) {
+      let scheduled = false;
+      new MutationObserver(() => {
+        if (scheduled) return;
+        scheduled = true;
+        requestAnimationFrame(() => {
+          scheduled = false;
+          if (target.id === 'main-content') decorateAll(target);
+          else decorateButtons(target);
+        });
+      }).observe(target, { childList: true, subtree: true });
+    }
   }
 
   if (typeof document !== 'undefined' && document.addEventListener) {
@@ -127,5 +171,5 @@
     else watchMainContent();
   }
 
-  window.McIcons = { icon, sectionIcon, roleIcon, decoratePageHeader, decorateStatIcons, SECTIONS, ROLES, STAT_EMOJI };
+  window.McIcons = { icon, sectionIcon, roleIcon, decoratePageHeader, decorateStatIcons, decorateButtons, SECTIONS, ROLES, STAT_EMOJI, BUTTON_EMOJI };
 })();

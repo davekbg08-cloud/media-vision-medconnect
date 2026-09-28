@@ -7,6 +7,12 @@ jour) et l'écran **Paramètres → À propos**.
 La source unique de la version en cours est `config/app-version.json` —
 ce fichier doit rester cohérent avec elle.
 
+## 2.10.1 — 2026-09-28
+
+**Refonte (2e vague)** — icônes au trait dans tous les boutons (pages et fenêtres, décoration automatique sans changer les actions), cartes, listes, recherche et puces harmonisées. Sprite v5.
+
+Version **2.10.1** (build 2026.09.28.2, versionCode 52, cache `medconnect-v4.52`). Miroir Android resynchronisé.
+
 ## 2.10.0 — 2026-09-28
 
 **Refonte visuelle (première vague)** — thème clair par défaut, icônes au trait colorées par service (sous-ensemble Tabler Icons, MIT, auto-hébergé), nouvel accueil, connexion avec menu déroulant de rôle et langue compacte, tableau de bord d'établissement et dossier patient repensés, cartes de statistiques colorées. Sécurité : CSP en balise meta (GitHub Pages / APK), Leaflet et html5-qrcode auto-hébergés.
