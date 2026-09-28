@@ -136,3 +136,23 @@ test('boutons : les emojis de tête ont tous une icône dans le sprite', () => {
   }
   assert.match(read('js/icons.js'), /document\.getElementById\('global-modal'\)/, 'les fenêtres sont aussi décorées');
 });
+
+test('espace patient : carte santé, alertes, repères et suivi cliquable', () => {
+  const src = read('js/patient.js');
+  const fn = src.slice(src.indexOf('function buildCard('), src.indexOf('/* ── EDIT'));
+  assert.match(fn, /class="mc-health-card"/);
+  assert.match(fn, /\$\{allergies \? `<div class="mc-alert mc-alert-danger">/);
+  for (const sec of ['history', 'prescriptions', 'lab', 'vaccinations']) {
+    assert.match(fn, new RegExp(`counter\\('${sec}'`), `compteur ${sec}`);
+  }
+  assert.match(fn, /PatientPortal\.resetRecord\(\)/, 'réinitialisation toujours disponible');
+});
+
+test('pharmacie : bandeau vert, indicateurs cliquables et alertes de stock', () => {
+  const src = read('js/pharmacy.js');
+  const start = src.indexOf('function renderDashboard(');
+  const fn = src.slice(start, src.indexOf('/* ── POS', start));
+  assert.match(fn, /class="mc-hero mc-hero-green"/);
+  assert.match(fn, /PharmacyPortal\._nav\('pos'\)/);
+  assert.match(fn, /mc-alert mc-alert-danger/);
+});

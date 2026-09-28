@@ -1,8 +1,16 @@
 {
-  "version": "2.10.1",
-  "build": "2026.09.28.2",
+  "version": "2.10.2",
+  "build": "2026.09.28.3",
   "buildDate": "2026-09-28",
   "changelog": [
+    {
+      "version": "2.10.2",
+      "date": "2026-09-28",
+      "notes": [
+        "Espace patient repensé : une « carte santé » avec nom, numéro MedConnect et boutons Partager / Imprimer / Modifier, alerte allergie bien visible, repères colorés (âge, groupe sanguin, poids, taille) et un suivi cliquable (consultations, ordonnances, analyses, vaccins).",
+        "Tableau de bord pharmacie repensé : bandeau avec les ventes du jour, indicateurs colorés et cliquables, alertes de stock (expirés, bientôt expirés, stock bas) claires et en couleur."
+      ]
+    },
     {
       "version": "2.10.1",
       "date": "2026-09-28",

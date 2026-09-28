@@ -68,38 +68,48 @@ const PharmacyPortal = (() => {
     const expSn = meds.filter(m=>m.expiry && m.expiry >= today() && m.expiry <= soon());
     const inbox = DB.getMessages().filter(m=>m.to_role==='pharmacist' && !m.read);
 
+    // ── Refonte : tableau de bord pharmacie ──
+    const user = (typeof window !== 'undefined' && window.Auth?.getUser?.()) || {};
+    const ic = (name) => window.McIcons?.icon(name) || '';
+    const dateLabel = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+    const alerts = exp.length + expSn.length + low.length;
     main.innerHTML = `
-      <div class="page-header">
-        <h2>📊 ${t('nav_dashboard')}</h2>
-        <button class="btn btn-primary btn-sm" onclick="PharmacyPortal._nav('pos')">🛒 ${t('nav_pos')}</button>
-      </div>
-      <div class="stats-grid">
-        <div class="stat-card" style="border-top:3px solid #A855F7">
-          <div class="stat-icon">💰</div><div class="stat-value">${s.totalSales.toFixed(2)}</div>
+      <section class="mc-hero mc-hero-green">
+        <div class="mc-hero-meta">
+          <span>${esc(user.pharmacy_name || user.name || 'Pharmacie')}</span>
+          <span class="mc-hero-date">${esc(dateLabel)}</span>
+        </div>
+        <h2 class="mc-hero-title">${s.todaySales.toFixed(2)} ${esc(cur)} aujourd'hui</h2>
+        <p class="mc-hero-text">${inbox.length} ordonnance(s) reçue(s) · ${alerts} alerte(s) de stock</p>
+        <button class="btn mc-hero-btn" onclick="PharmacyPortal._nav('pos')">${ic('shopping-cart')} ${t('nav_pos')}</button>
+      </section>
+      <div class="stats-grid mc-kpis">
+        <div class="stat-card" onclick="PharmacyPortal._nav('sales')">
+          <div class="stat-icon">📈</div><div class="stat-value">${s.totalSales.toFixed(2)}</div>
           <div class="stat-label">${t('stat_sales')} (${cur})</div>
           <div class="stat-sub">${s.todaySales.toFixed(2)} ${t('stat_today')}</div>
         </div>
-        <div class="stat-card" style="border-top:3px solid var(--accent)">
+        <div class="stat-card" onclick="PharmacyPortal._nav('inventory')">
           <div class="stat-icon">📦</div><div class="stat-value">${meds.length}</div>
           <div class="stat-label">${t('nav_inventory')}</div>
           <div class="stat-sub">${low.length} bas stock · ${exp.length} expirés</div>
         </div>
-        <div class="stat-card" style="border-top:3px solid var(--danger)">
+        <div class="stat-card" onclick="PharmacyPortal._nav('inventory')">
           <div class="stat-icon">⚠️</div><div class="stat-value">${exp.length + expSn.length}</div>
           <div class="stat-label">Alertes expiration</div>
           <div class="stat-sub">${exp.length} expirés · ${expSn.length} bientôt</div>
         </div>
-        <div class="stat-card" style="border-top:3px solid var(--primary)">
+        <div class="stat-card" onclick="PharmacyPortal._nav('inbox')">
           <div class="stat-icon">📨</div><div class="stat-value">${inbox.length}</div>
           <div class="stat-label">Ordonnances reçues</div>
-          <div class="stat-sub"><button class="btn btn-ghost btn-xs" onclick="PharmacyPortal._nav('inbox')">Voir →</button></div>
+          <div class="stat-sub">Ouvrir →</div>
         </div>
       </div>
-      ${exp.length ? `<div class="alert-box">🔴 Médicaments EXPIRÉS : ${exp.map(m=>esc(m.name)).join(', ')}</div>` : ''}
-      ${expSn.length ? `<div class="alert-box" style="background:rgba(245,158,11,.08);border-color:rgba(245,158,11,.3);color:var(--accent)">⚠️ Expirent dans 30 jours : ${expSn.map(m=>esc(m.name)+' ('+m.expiry+')').join(', ')}</div>` : ''}
-      ${low.length ? `<div class="alert-box">📦 Stock bas : ${low.map(m=>esc(m.name)).join(', ')}</div>` : ''}
-      <div class="page-header" style="margin-top:1rem">
-        <h3>Inventaire récent</h3>
+      ${exp.length ? `<div class="mc-alert mc-alert-danger">${ic('alert-triangle')}<span><strong>Expirés :</strong> ${exp.map(m=>esc(m.name)).join(', ')}</span></div>` : ''}
+      ${expSn.length ? `<div class="mc-alert mc-alert-warning">${ic('clock')}<span><strong>Expirent dans 30 jours :</strong> ${expSn.map(m=>esc(m.name)+' ('+m.expiry+')').join(', ')}</span></div>` : ''}
+      ${low.length ? `<div class="mc-alert mc-alert-warning">${ic('package')}<span><strong>Stock bas :</strong> ${low.map(m=>esc(m.name)).join(', ')}</span></div>` : ''}
+      <div class="mc-section-head">
+        <h3 class="mc-section-title">Inventaire récent</h3>
         <button class="btn btn-ghost btn-sm" onclick="PharmacyPortal._nav('inventory')">Tout voir →</button>
       </div>
       ${inventoryTable(meds.slice(0,6))}`;
