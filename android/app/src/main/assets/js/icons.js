@@ -69,7 +69,7 @@
      colorée de sa rubrique, à la place de l'emoji du titre. Fonctionne
      pour toutes les pages sans modifier chaque module : un observateur
      décore le premier titre `.page-header h2` à chaque rendu. */
-  const EMOJI_PREFIX = /^[\s\p{Extended_Pictographic}\u200D\uFE0F]+/u;
+  const EMOJI_PREFIX = /^(?:\s|\p{Extended_Pictographic}|\u200D|\uFE0F)+/u;
 
   function currentSection() {
     return document.querySelector('.nav-item.active')?.dataset?.section || null;
