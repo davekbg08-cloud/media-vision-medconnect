@@ -7,6 +7,12 @@ jour) et l'écran **Paramètres → À propos**.
 La source unique de la version en cours est `config/app-version.json` —
 ce fichier doit rester cohérent avec elle.
 
+## 2.10.3 — 2026-09-28
+
+**Refonte (4e vague, finitions)** — tableau de bord administrateur (bandeau ardoise, indicateurs, diffusion, bannière App Check conservée), sous-titres décorés, tableaux, formulaires, alertes et fenêtres harmonisés (feuille mobile préservée).
+
+Version **2.10.3** (build 2026.09.28.4, versionCode 54, cache `medconnect-v4.54`). Miroir Android resynchronisé.
+
 ## 2.10.2 — 2026-09-28
 
 **Refonte (3e vague)** — espace patient (carte santé, alertes, repères, suivi cliquable, raccourcis Timeline / Rendez-vous / Pharmacies) et tableau de bord pharmacie (bandeau vert, indicateurs cliquables, alertes de stock colorées).

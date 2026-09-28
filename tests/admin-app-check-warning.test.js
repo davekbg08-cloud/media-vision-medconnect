@@ -44,6 +44,6 @@ test("appCheckWarningBanner() ne présente jamais App Check comme un remplacemen
 
 test('renderDashboard() insère bien le bandeau App Check dans le rendu', () => {
   const start = src.indexOf('function renderDashboard(');
-  const section = src.slice(start, start + 2000);
+  const section = src.slice(start, start + 4000); // fonction agrandie par le bandeau de la refonte 2.10.3
   assert.match(section, /\$\{appCheckWarningBanner\(\)\}/);
 });

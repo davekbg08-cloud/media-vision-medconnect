@@ -412,17 +412,23 @@ const AdminModule = (() => {
       const pharms    = safeList(() => ACL.getVerifiedPharmacists());
       const nurses    = safeList(() => ACL.getVerifiedNurses());
 
+      // ── Refonte : bandeau d'administration ──
+      const ic = (name) => window.McIcons?.icon(name) || '';
+      const dateLabel = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
       main.innerHTML = `
-        <div class="page-header">
-          <h2>⚙️ Administration</h2>
-          <button class="btn btn-primary btn-sm" onclick="AdminModule.openBroadcast()">
-            📢 Informer les utilisateurs
-          </button>
-        </div>
+        <section class="mc-hero mc-hero-slate">
+          <div class="mc-hero-meta">
+            <span>${ic('shield-lock')} Administration MedConnect</span>
+            <span class="mc-hero-date">${esc(dateLabel)}</span>
+          </div>
+          <h2 class="mc-hero-title">${pending.length ? `${pending.length} demande(s) à vérifier` : 'Tout est à jour'}</h2>
+          <p class="mc-hero-text">${approved.length} utilisateurs actifs · ${stats.totalPatients || 0} patients · ${stats.totalConsults || 0} consultations</p>
+          <button class="btn mc-hero-btn" onclick="AdminModule.openBroadcast()">${ic('send')} Informer les utilisateurs</button>
+        </section>
 
         ${appCheckWarningBanner()}
 
-        <div class="stats-grid">
+        <div class="stats-grid mc-kpis mc-kpis-6">
           <div class="stat-card" style="border-top:3px solid var(--secondary)">
             <div class="stat-icon">👨‍⚕️</div><div class="stat-value">${byRole('doctor').length}</div><div class="stat-label">Médecins actifs</div>
           </div>
@@ -452,8 +458,8 @@ const AdminModule = (() => {
           </div>
           <div class="records-list">${pending.map(renderPendingRow).join('')}</div>
         ` : `
-          <div class="card" style="text-align:center;padding:1.25rem;color:var(--text-muted);margin-top:1rem">
-            ✅ Aucune demande d'inscription en attente
+          <div class="mc-alert mc-alert-success" style="margin-top:1rem">
+            ${ic('check')}<span>Aucune demande d'inscription en attente</span>
           </div>`}
 
         <div class="page-header" style="margin-top:1.5rem"><h3>👥 Utilisateurs actifs (${approved.length})</h3></div>

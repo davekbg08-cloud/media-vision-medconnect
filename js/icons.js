@@ -99,6 +99,8 @@
     '🛒': ['shopping-cart', 'green'], '🩹': ['heartbeat', 'magenta'], '📍': ['map-pin', 'aqua'],
     '⚠️': ['alert-triangle', 'red'], '🛏️': ['bed', 'aqua'], '👶': ['baby-carriage', 'magenta'],
     '🔬': ['microscope', 'orange'], '⚙️': ['settings', 'gray'],
+    '💰': ['chart-line', 'violet'], '🧾': ['file-text', 'gray'], '✅': ['check', 'green'],
+    '📊': ['chart-line', 'violet'], '🏨': ['building-hospital', 'aqua'], '🧑\u200d⚕️': ['stethoscope', 'violet'],
   };
 
   function decorateStatIcons(root) {
@@ -142,8 +144,27 @@
     });
   }
 
+  /* Sous-titres (h3) des pages : emoji de tête → petite icône colorée. */
+  function decorateSubTitles(root) {
+    root?.querySelectorAll?.('.page-header h3:not([data-mc]), .mc-section-title:not([data-mc])').forEach((h) => {
+      h.setAttribute('data-mc', '1');
+      const first = h.firstChild;
+      if (!first || first.nodeType !== 3) return;
+      const m = first.textContent.match(BUTTON_PREFIX);
+      if (!m) return;
+      const stat = STAT_EMOJI[m[1]];
+      const name = stat ? stat[0] : BUTTON_EMOJI[m[1]];
+      if (!name) return;
+      const tint = stat ? stat[1] : 'blue';
+      first.textContent = first.textContent.slice(m[0].length);
+      h.insertAdjacentHTML('afterbegin', `<span class="mc-tint mc-tint-${tint} mc-sub-icon">${icon(name)}</span> `);
+      h.classList.add('mc-page-title');
+    });
+  }
+
   function decorateAll(root) {
     decoratePageHeader(root);
+    decorateSubTitles(root);
     decorateStatIcons(root);
     decorateButtons(root);
   }
