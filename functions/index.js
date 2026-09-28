@@ -237,3 +237,10 @@ exports.onAffiliationWritten = notificationTriggers.onAffiliationWritten;
 const notificationDelivery = require('./notification-delivery');
 exports.deliverNotificationTask = notificationDelivery.deliverNotificationTask;
 exports.cleanupStalePushRegistrations = notificationDelivery.cleanupStalePushRegistrations;
+
+// Abonnement des établissements par Mobile Money (pawaPay).
+const pawapaySubscriptions = require('./pawapay');
+exports.startSubscriptionPayment = pawapaySubscriptions.startSubscriptionPayment;
+exports.checkSubscriptionPayment = pawapaySubscriptions.checkSubscriptionPayment;
+exports.reconcileSubscriptionDeposits = pawapaySubscriptions.reconcileSubscriptionDeposits;
+exports.expirePawapaySubscriptions = pawapaySubscriptions.expirePawapaySubscriptions;

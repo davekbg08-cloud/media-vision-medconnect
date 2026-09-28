@@ -1942,6 +1942,17 @@ service cloud.firestore {
        vérifié côté serveur (hospitalCanWrite), pas seulement en JS.
        L'admin garde un accès de secours pour la maintenance.
     ══════════════════════════════════════════════════ */
+    // Configuration publique (ex. payments.pawapayMode) : lecture seule.
+    match /appConfig/{configId} {
+      allow read: if signedIn();
+      allow write: if false;
+    }
+
+    // Paiements pawaPay des abonnements : exclusivement serveur.
+    match /pawapayDeposits/{depositId} {
+      allow read, write: if false;
+    }
+
     match /subscriptions/{hospitalId} {
       allow read: if signedIn();
       allow write: if isAdmin();
