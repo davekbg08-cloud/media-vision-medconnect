@@ -19,7 +19,7 @@ function loadIcons() {
 
 test('chaque rubrique de navigation a une icône présente dans le sprite', () => {
   const icons = loadIcons();
-  const sprite = read('vendor/icons/medconnect-icons.svg');
+  const sprite = read('vendor/icons/medconnect-icons-v3.svg');
   for (const [section, [name, tint]] of Object.entries(icons.SECTIONS)) {
     assert.ok(sprite.includes(`id="i-${name}"`), `${section} : icône ${name} absente du sprite`);
     assert.match(read('css/style.css'), new RegExp(`\\.mc-tint-${tint}\\s*\\{`), `couleur ${tint} non définie`);
@@ -44,7 +44,7 @@ test('icons.js est chargé avant app.js et mis en cache hors ligne', () => {
   assert.ok(html.indexOf('js/icons.js') > 0 && html.indexOf('js/icons.js') < html.indexOf('js/app.js'));
   const sw = read('sw.js');
   assert.match(sw, /'\.\/js\/icons\.js'/);
-  assert.match(sw, /'\.\/vendor\/icons\/medconnect-icons\.svg'/);
+  assert.match(sw, /'\.\/vendor\/icons\/medconnect-icons-v3\.svg'/);
 });
 
 test("les couleurs de catégorie existent en thème clair et sombre", () => {
@@ -77,4 +77,32 @@ test("les titres de page reçoivent l'icône colorée de leur rubrique", () => {
   assert.match(icons, /function decoratePageHeader\(root\)/);
   assert.match(icons, /new MutationObserver/);
   assert.match(read('css/style.css'), /\.mc-page-icon \{/);
+});
+
+test('langue : pastille compacte sur la connexion et l\'accueil', () => {
+  assert.match(read('js/i18n.js'), /function renderCompactSelector\(\)/);
+  assert.match(read('js/auth.js'), /I18n\.renderCompactSelector \? I18n\.renderCompactSelector\(\)/);
+  assert.match(read('js/app.js'), /I18n\.renderCompactSelector \? I18n\.renderCompactSelector\(\)/);
+});
+
+test('connexion : onglets Connexion / Inscription placés en bas du formulaire', () => {
+  const auth = read('js/auth.js');
+  assert.ok(auth.indexOf('auth-tabs auth-tabs-bottom') > auth.indexOf('id="tab-register"'));
+});
+
+test('cartes de statistiques : emoji remplacé par une icône colorée', () => {
+  const ctx = { window: {} };
+  require('vm').createContext(ctx);
+  require('vm').runInContext(read('js/icons.js'), ctx);
+  const { STAT_EMOJI } = ctx.window.McIcons;
+  for (const emoji of ['👥', '🩺', '📅', '📨', '💊', '🚑']) {
+    assert.ok(STAT_EMOJI[emoji], `${emoji} doit avoir une icône`);
+  }
+  assert.ok(STAT_EMOJI['👨\u200d⚕️'], 'médecin (séquence ZWJ)');
+});
+
+test('le sprite est versionné (nouvelles icônes jamais bloquées par le cache hors ligne)', () => {
+  assert.ok(fs.existsSync(path.join(root, 'vendor/icons/medconnect-icons-v3.svg')));
+  assert.match(read('js/icons.js'), /medconnect-icons-v3\.svg/);
+  assert.match(read('sw.js'), /medconnect-icons-v3\.svg/);
 });

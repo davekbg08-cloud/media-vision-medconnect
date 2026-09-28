@@ -1749,3 +1749,35 @@ body.rtl .tl-connector { left: auto; right: -1.1rem; }
   padding: .7rem; font-size: .84rem;
 }
 .landing-v2-trust { margin-top: 1.5rem; font-size: .76rem; color: var(--text-muted); display: flex; align-items: center; gap: .35rem; }
+
+/* ── REFONTE (3) : langue compacte, onglets en bas, cartes colorées ── */
+.lang-compact {
+  position: relative; display: inline-flex; align-items: center; gap: .2rem;
+  font-size: .75rem; font-weight: 600; padding: .25rem .6rem; border-radius: 999px;
+  background: rgba(255,255,255,.18); color: inherit; cursor: pointer;
+  border: 1px solid rgba(255,255,255,.35);
+}
+.lang-compact select { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.lang-compact-code::after { content: ' ▾'; }
+#landing .lang-compact { background: var(--bg-2); border-color: var(--border); color: var(--text); }
+.auth-hero { position: relative; }
+.auth-hero-lang { position: absolute; top: .75rem; right: .75rem; }
+.auth-tabs-bottom { margin-top: 1.2rem; }
+.mc-stat-tile { width: 2.6rem; height: 2.6rem; border-radius: 12px; }
+.mc-stat-tile .mc-icon { width: 1.35rem; height: 1.35rem; }
+.stat-icon:has(.mc-stat-tile) { font-size: 1rem; margin-bottom: .6rem; }
+.stat-card[class*="mc-stat-"] { border-top-width: 1px; }
+.mc-stat-blue    { background: linear-gradient(180deg, var(--tint-blue-bg) 0, var(--surface) 70%); }
+.mc-stat-violet  { background: linear-gradient(180deg, var(--tint-violet-bg) 0, var(--surface) 70%); }
+.mc-stat-green   { background: linear-gradient(180deg, var(--tint-green-bg) 0, var(--surface) 70%); }
+.mc-stat-orange  { background: linear-gradient(180deg, var(--tint-orange-bg) 0, var(--surface) 70%); }
+.mc-stat-magenta { background: linear-gradient(180deg, var(--tint-magenta-bg) 0, var(--surface) 70%); }
+.mc-stat-aqua    { background: linear-gradient(180deg, var(--tint-aqua-bg) 0, var(--surface) 70%); }
+.mc-stat-red     { background: linear-gradient(180deg, var(--tint-red-bg) 0, var(--surface) 70%); }
+.mc-stat-yellow  { background: linear-gradient(180deg, var(--tint-yellow-bg) 0, var(--surface) 70%); }
+.mc-stat-gray    { background: linear-gradient(180deg, var(--tint-gray-bg) 0, var(--surface) 70%); }
+.stat-label { text-transform: none; letter-spacing: 0; font-size: .82rem; }
+@media (max-width: 768px) {
+  /* Le bouton ☰ flottant ne recouvre plus l'en-tête des pages. */
+  .main-content { padding-top: 4.4rem !important; }
+}

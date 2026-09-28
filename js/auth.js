@@ -80,23 +80,23 @@ const Auth = (() => {
     scr.innerHTML = `
       <div class="auth-card auth-card-v2">
         <div class="auth-hero">
+          <div class="auth-hero-lang" id="auth-lang"></div>
           <div class="auth-hero-logo" id="auth-logo-clicks">${ic('heart-rate-monitor') || '🏥'}</div>
           <h1 class="auth-title">MedConnect</h1>
           <p class="auth-sub">La santé connectée, en toute sécurité</p>
         </div>
         <div class="auth-body">
-          <div class="auth-tabs">
+          <div id="tab-login">${_htmlLogin()}</div>
+          <div id="tab-register" style="display:none">${_htmlRegister()}</div>
+          <div class="auth-tabs auth-tabs-bottom">
             <button id="tbtn-login" class="auth-tab active" onclick="Auth._tab('login')">${ic('login-2')} Connexion</button>
             <button id="tbtn-register" class="auth-tab" onclick="Auth._tab('register')">${ic('user-plus')} Inscription</button>
           </div>
-          <div id="tab-login">${_htmlLogin()}</div>
-          <div id="tab-register" style="display:none">${_htmlRegister()}</div>
           <div class="auth-trust">
             <span class="mc-badge mc-tint-green">${ic('lock')} Chiffré</span>
             <span class="mc-badge mc-tint-blue">${ic('shield-check')} Identités vérifiées</span>
             <span class="mc-badge mc-tint-violet">${ic('file-certificate')} Confidentialité</span>
           </div>
-          <div id="auth-lang" style="margin-top:1rem;display:flex;justify-content:center"></div>
           <p style="font-size:.68rem;color:var(--text-dim);text-align:center;margin-top:.5rem">
             +243 856 373 707 · MedConnect v2.0 © 2026
           </p>
@@ -104,7 +104,7 @@ const Auth = (() => {
       </div>`;
 
     const lc = document.getElementById('auth-lang');
-    if (lc) lc.innerHTML = I18n.renderSelector();
+    if (lc) lc.innerHTML = I18n.renderCompactSelector ? I18n.renderCompactSelector() : I18n.renderSelector();
 
     let clicks = 0, t;
     document.getElementById('auth-logo-clicks')?.addEventListener('click', () => {

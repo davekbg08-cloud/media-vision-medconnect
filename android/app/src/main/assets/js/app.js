@@ -346,7 +346,7 @@ const App = (() => {
 
   function refresh() {
     const lc = document.getElementById('lang-selector-container');
-    if (lc) lc.innerHTML = I18n.renderSelector();
+    if (lc) lc.innerHTML = I18n.renderCompactSelector ? I18n.renderCompactSelector() : I18n.renderSelector();
     const user = Auth.getUser();
     if (user) {
       buildNav(user);

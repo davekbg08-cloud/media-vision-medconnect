@@ -8,7 +8,7 @@
    ===================================================== */
 (function () {
   'use strict';
-  const SPRITE = './vendor/icons/medconnect-icons.svg';
+  const SPRITE = './vendor/icons/medconnect-icons-v3.svg';
 
   /** Icône par nom Tabler (ex. 'stethoscope'). */
   function icon(name, extraClass) {
@@ -87,6 +87,30 @@
     return true;
   }
 
+  /* Cartes de statistiques : l'emoji de `.stat-icon` devient une icône
+     colorée (même correspondance que la navigation). */
+  const STAT_EMOJI = {
+    '👥': ['users', 'blue'], '👤': ['user', 'blue'], '🩺': ['stethoscope', 'violet'],
+    '👨\u200d⚕️': ['stethoscope', 'violet'], '👩\u200d⚕️': ['stethoscope', 'violet'],
+    '📅': ['calendar-event', 'aqua'], '🗓️': ['calendar-event', 'aqua'], '📨': ['mail', 'yellow'],
+    '💊': ['pill', 'green'], '🧪': ['flask', 'orange'], '💉': ['vaccine', 'magenta'],
+    '🚑': ['ambulance', 'red'], '🏥': ['building-hospital', 'aqua'], '📋': ['history', 'violet'],
+    '⏳': ['clock', 'yellow'], '📦': ['package', 'orange'], '📈': ['chart-line', 'violet'],
+    '🛒': ['shopping-cart', 'green'], '🩹': ['heartbeat', 'magenta'], '📍': ['map-pin', 'aqua'],
+    '⚠️': ['alert-triangle', 'red'], '🛏️': ['bed', 'aqua'], '👶': ['baby-carriage', 'magenta'],
+    '🔬': ['microscope', 'orange'], '⚙️': ['settings', 'gray'],
+  };
+
+  function decorateStatIcons(root) {
+    root?.querySelectorAll?.('.stat-icon:not([data-mc])').forEach((el) => {
+      el.setAttribute('data-mc', '1');
+      const entry = STAT_EMOJI[el.textContent.trim()];
+      if (!entry) return;
+      el.innerHTML = `<span class="mc-tint mc-tint-${entry[1]} mc-stat-tile">${icon(entry[0])}</span>`;
+      el.closest('.stat-card')?.classList.add(`mc-stat-${entry[1]}`);
+    });
+  }
+
   function watchMainContent() {
     const main = document.getElementById('main-content');
     if (!main || typeof MutationObserver === 'undefined') return;
@@ -94,7 +118,7 @@
     new MutationObserver(() => {
       if (scheduled) return;
       scheduled = true;
-      requestAnimationFrame(() => { scheduled = false; decoratePageHeader(main); });
+      requestAnimationFrame(() => { scheduled = false; decoratePageHeader(main); decorateStatIcons(main); });
     }).observe(main, { childList: true, subtree: true });
   }
 
@@ -103,5 +127,5 @@
     else watchMainContent();
   }
 
-  window.McIcons = { icon, sectionIcon, roleIcon, decoratePageHeader, SECTIONS, ROLES };
+  window.McIcons = { icon, sectionIcon, roleIcon, decoratePageHeader, decorateStatIcons, SECTIONS, ROLES, STAT_EMOJI };
 })();
