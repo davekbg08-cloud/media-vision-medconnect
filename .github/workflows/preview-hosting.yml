@@ -1,0 +1,39 @@
+name: Aperçu Firebase Hosting (branche)
+
+# Publie une branche sur un canal d'aperçu Firebase Hosting (30 jours),
+# SANS toucher au site principal ni à l'APK. Lancement manuel, en
+# choisissant la branche dans « Run workflow ».
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "Nom du canal d'aperçu"
+        default: refonte
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Écrire la clé de compte de service
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          test -n "$FIREBASE_SERVICE_ACCOUNT_JSON" || (echo "Secret manquant" && exit 1)
+          echo "$FIREBASE_SERVICE_ACCOUNT_JSON" > /tmp/firebase-service-account.json
+      - name: Déployer l'aperçu
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: /tmp/firebase-service-account.json
+        run: |
+          npx firebase-tools@latest hosting:channel:deploy "${{ inputs.channel }}" --expires 30d --project medconnect-e81ba --non-interactive --json > preview.json || (cat preview.json; exit 1)
+          python3 -c "import json;d=json.load(open('preview.json'));[print('URL APERCU:',v.get('url')) for v in d.get('result',{}).values()]"
+      - name: Supprimer la clé décodée
+        if: always()
+        run: rm -f /tmp/firebase-service-account.json
