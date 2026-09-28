@@ -98,36 +98,64 @@ const PatientPortal = (() => {
   }
 
   function buildCard(p) {
+    // ── Refonte : carte santé du patient ──
     const age = calcAge(p.dob);
     const nc  = DB.getPatientConsultations(p.id).length;
+    const np  = (DB.getPatientPrescriptions?.(p.id) || []).length;
+    const nl  = (DB.getPatientLabResults?.(p.id) || []).length;
+    const nv  = (DB.getPatientVaccinations?.(p.id) || []).length;
+    const ic = (name) => window.McIcons?.icon(name) || '';
+    const initials = (((p.firstname || '?')[0] || '?') + ((p.lastname || '')[0] || '')).toUpperCase();
+    const allergies = String(p.allergies || '').trim();
+    const chronic = String(p.chronic || '').trim();
+    const tile = (tint, icon, label, value) => `
+      <div class="mc-vital mc-tint-${tint}">${ic(icon)}<span class="mc-vital-label">${label}</span><strong>${value}</strong></div>`;
+    const counter = (section, tint, icon, n, label) => `
+      <button class="mc-counter mc-tint-${tint}" onclick="App.navigateTo('${section}')">
+        ${ic(icon)}<strong>${n}</strong><span>${label}</span>
+      </button>`;
     return `
-      <div class="page-header">
-        <h2>🪪 ${esc(p.firstname)} ${esc(p.lastname)}</h2>
-        <div class="header-actions">
-          <button class="btn btn-ghost btn-sm" onclick="PatientPortal.printRecord('${p.id}')">${t('btn_print')}</button>
-          <button class="btn btn-ghost btn-sm" onclick="PatientPortal.openEdit('${p.id}')">${t('btn_edit')}</button>
+      <section class="mc-health-card">
+        <div class="mc-health-top">
+          <span class="mc-health-kicker">${ic('heart-rate-monitor')} Carte santé MedConnect</span>
+          <span class="mc-badge mc-health-badge">${ic('shield-lock')} Sécurisé</span>
         </div>
-      </div>
-      <div class="id-card-display">
-        <div class="id-card-top">
-          <div class="id-avatar">${p.gender==='F'?'👩':'👨'}</div>
-          <div class="id-info">
-            <h3>${esc(p.firstname)} ${esc(p.lastname)}</h3>
-            <div class="id-number">${p.id}</div>
-            <small style="color:var(--text-muted)">${t('patient_id')}</small>
+        <div class="mc-health-id">
+          <div class="mc-avatar mc-avatar-lg mc-health-avatar">${esc(initials)}</div>
+          <div>
+            <h2 class="mc-health-name">${esc(p.firstname)} ${esc(p.lastname)}</h2>
+            <div class="mc-health-number">${p.id}</div>
           </div>
         </div>
-        <div class="id-card-chips">
-          <span class="chip">🎂 ${age} ${t('years')}</span>
-          <span class="chip">🩸 ${p.blood_type||'—'}</span>
-          <span class="chip">⚖️ ${p.weight?p.weight+' kg':'—'}</span>
-          <span class="chip">📏 ${p.height?p.height+' cm':'—'}</span>
-          <span class="chip">📋 ${nc} ${t('stat_consults')}</span>
+        <div class="mc-health-actions">
+          <button class="btn btn-sm mc-health-btn" onclick="ShareModule.sharePatient('${p.id}')">${ic('send')} ${t('btn_share')}</button>
+          <button class="btn btn-sm mc-health-btn" onclick="PatientPortal.printRecord('${p.id}')">${ic('printer')} ${t('btn_print')}</button>
+          <button class="btn btn-sm mc-health-btn" onclick="PatientPortal.openEdit('${p.id}')">${ic('file-text')} ${t('btn_edit')}</button>
         </div>
+      </section>
+      ${allergies ? `<div class="mc-alert mc-alert-danger">${ic('alert-triangle')}<span><strong>Allergie :</strong> ${esc(allergies)}</span></div>` : ''}
+      ${chronic ? `<div class="mc-alert mc-alert-warning">${ic('heartbeat')}<span><strong>${t('form_chronic')} :</strong> ${esc(chronic)}</span></div>` : ''}
+      <div class="mc-vitals mc-vitals-4">
+        ${tile('blue', 'calendar-event', 'Âge', `${age} ${t('years')}`)}
+        ${tile('red', 'droplet', t('form_blood_type'), esc(p.blood_type || '—'))}
+        ${tile('orange', 'scale', t('weight'), p.weight ? `${esc(p.weight)} kg` : '—')}
+        ${tile('aqua', 'temperature', t('height'), p.height ? `${esc(p.height)} cm` : '—')}
+      </div>
+      <h3 class="mc-section-title">Mon suivi</h3>
+      <div class="mc-counters mc-counters-4">
+        ${counter('history', 'violet', 'stethoscope', nc, t('stat_consults'))}
+        ${counter('prescriptions', 'green', 'pill', np, 'ordonnances')}
+        ${counter('lab', 'orange', 'flask', nl, 'analyses')}
+        ${counter('vaccinations', 'magenta', 'vaccine', nv, 'vaccins')}
+      </div>
+      <div class="mc-quick-grid mc-quick-3">
+        <button class="mc-quick" onclick="App.navigateTo('timeline')">${window.McIcons?.sectionIcon('timeline') || ''}<span>Timeline</span></button>
+        <button class="mc-quick" onclick="App.navigateTo('appointments')">${window.McIcons?.sectionIcon('appointments') || ''}<span>Rendez-vous</span></button>
+        <button class="mc-quick" onclick="App.navigateTo('pharmacy_map')">${window.McIcons?.sectionIcon('pharmacy_map') || ''}<span>Pharmacies</span></button>
       </div>
       <div class="info-grid">
         <div class="info-card">
-          <h4>📋 Informations</h4>
+          <h4>${ic('user')} Informations</h4>
           <table class="info-table">
             <tr><td>${t('form_dob')}</td><td>${p.dob||'—'}</td></tr>
             <tr><td>${t('form_country')}</td><td>${p.country_code||'—'}</td></tr>
@@ -137,7 +165,7 @@ const PatientPortal = (() => {
           </table>
         </div>
         <div class="info-card">
-          <h4>⚕️ Médical</h4>
+          <h4>${ic('stethoscope')} Médical</h4>
           <table class="info-table">
             <tr><td>${t('form_allergies')}</td><td>${esc(p.allergies)||'—'}</td></tr>
             <tr><td>${t('form_chronic')}</td><td>${esc(p.chronic)||'—'}</td></tr>
@@ -145,11 +173,8 @@ const PatientPortal = (() => {
           </table>
         </div>
       </div>
-      <div style="display:flex;gap:.75rem;flex-wrap:wrap;margin-top:.5rem">
-        <button class="btn btn-ghost btn-sm" onclick="App.navigateTo('timeline')">🗓️ Timeline médicale</button>
-        <button class="btn btn-ghost btn-sm" onclick="App.navigateTo('appointments')">📅 Rendez-vous</button>
-        <button class="btn btn-ghost btn-sm" onclick="ShareModule.sharePatient('${p.id}')">📤 ${t('btn_share')}</button>
-        <button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="PatientPortal.resetRecord()">🔄 Réinitialiser</button>
+      <div class="mc-footer-link">
+        <button class="btn btn-ghost btn-sm mc-danger-text" onclick="PatientPortal.resetRecord()">🔄 Réinitialiser</button>
       </div>`;
   }
 

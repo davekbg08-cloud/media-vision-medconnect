@@ -7,6 +7,12 @@ jour) et l'écran **Paramètres → À propos**.
 La source unique de la version en cours est `config/app-version.json` —
 ce fichier doit rester cohérent avec elle.
 
+## 2.10.2 — 2026-09-28
+
+**Refonte (3e vague)** — espace patient (carte santé, alertes, repères, suivi cliquable, raccourcis Timeline / Rendez-vous / Pharmacies) et tableau de bord pharmacie (bandeau vert, indicateurs cliquables, alertes de stock colorées).
+
+Version **2.10.2** (build 2026.09.28.3, versionCode 53, cache `medconnect-v4.53`). Miroir Android resynchronisé.
+
 ## 2.10.1 — 2026-09-28
 
 **Refonte (2e vague)** — icônes au trait dans tous les boutons (pages et fenêtres, décoration automatique sans changer les actions), cartes, listes, recherche et puces harmonisées. Sprite v5.

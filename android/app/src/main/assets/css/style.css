@@ -1859,3 +1859,29 @@ body.rtl .tl-connector { left: auto; right: -1.1rem; }
 }
 .page-header { margin-bottom: 1.1rem; }
 .empty-state { border-style: dashed; color: var(--text-muted); }
+
+/* ── REFONTE (7) : espace patient — carte santé ───── */
+.mc-health-card {
+  background: var(--primary); color: #fff; border-radius: 18px;
+  padding: 1.1rem 1.2rem 1rem; margin-bottom: .9rem;
+}
+.mc-health-top { display: flex; justify-content: space-between; align-items: center; gap: .5rem; font-size: .78rem; }
+.mc-health-kicker { display: inline-flex; align-items: center; gap: .35rem; opacity: .92; }
+.mc-health-badge { background: rgba(255,255,255,.18); color: #fff; }
+.mc-health-id { display: flex; align-items: center; gap: .85rem; margin: .9rem 0; }
+.mc-health-avatar { background: #fff; color: var(--primary); }
+.mc-health-name { color: #fff; font-size: 1.3rem; margin: 0; }
+.mc-health-number { font-family: ui-monospace, monospace; letter-spacing: .04em; font-size: .9rem; opacity: .95; margin-top: .15rem; }
+.mc-health-actions { display: flex; gap: .45rem; flex-wrap: wrap; }
+.mc-health-btn { background: rgba(255,255,255,.16); color: #fff; border: 1px solid rgba(255,255,255,.3); display: inline-flex; align-items: center; gap: .35rem; }
+.mc-vitals-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (min-width: 900px) { .mc-vitals-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.mc-counters-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+button.mc-counter { border: none; cursor: pointer; font: inherit; font-size: .7rem; }
+.mc-quick-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); margin: .8rem 0 1rem; }
+.info-card h4 { display: flex; align-items: center; gap: .4rem; }
+.mc-footer-link { display: flex; justify-content: center; margin-top: 1rem; }
+
+/* Variante verte (pharmacie) du bandeau d'accueil */
+.mc-hero-green { background: #0F6E56; }
+.mc-hero-green .mc-hero-btn { color: #0F6E56; }
