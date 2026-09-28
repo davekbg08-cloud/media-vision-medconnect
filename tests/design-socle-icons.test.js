@@ -156,3 +156,17 @@ test('pharmacie : bandeau vert, indicateurs cliquables et alertes de stock', () 
   assert.match(fn, /PharmacyPortal\._nav\('pos'\)/);
   assert.match(fn, /mc-alert mc-alert-danger/);
 });
+
+test('administration : bandeau, diffusion et bannière App Check conservés', () => {
+  const src = read('js/admin.js');
+  const start = src.indexOf('function renderDashboard(');
+  const fn = src.slice(start, start + 4000);
+  assert.match(fn, /class="mc-hero mc-hero-slate"/);
+  assert.match(fn, /AdminModule\.openBroadcast\(\)/);
+  assert.match(fn, /\$\{appCheckWarningBanner\(\)\}/);
+});
+
+test('mobile : les fenêtres gardent leur forme de feuille (coins arrondis desktop seulement)', () => {
+  const css = read('css/style.css');
+  assert.match(css, /@media \(min-width: 769px\) \{ \.modal \{ border-radius: 18px; \} \}/);
+});

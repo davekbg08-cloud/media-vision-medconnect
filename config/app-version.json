@@ -1,8 +1,16 @@
 {
-  "version": "2.10.2",
-  "build": "2026.09.28.3",
+  "version": "2.10.3",
+  "build": "2026.09.28.4",
   "buildDate": "2026-09-28",
   "changelog": [
+    {
+      "version": "2.10.3",
+      "date": "2026-09-28",
+      "notes": [
+        "Tableau de bord administrateur repensé : bandeau avec le nombre de demandes à vérifier et le résumé de la plateforme, indicateurs colorés, bouton « Informer les utilisateurs » intégré.",
+        "Finitions sur toute l’application : sous-titres avec icônes colorées, tableaux plus lisibles, champs de formulaire arrondis avec un contour bleu à la saisie, alertes et fenêtres harmonisées."
+      ]
+    },
     {
       "version": "2.10.2",
       "date": "2026-09-28",
