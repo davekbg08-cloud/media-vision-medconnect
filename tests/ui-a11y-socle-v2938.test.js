@@ -112,7 +112,6 @@ test('③ la LIMITE DE SÉCURITÉ CONNUE reste documentée dans firestore.rules'
 });
 
 /* ── ③ Thème auto ─────────────────────────────────── */
-test('③ le thème suit prefers-color-scheme quand aucun choix explicite n\'est enregistré', () => {
-  assert.match(appSrc, /prefers-color-scheme: light/);
-  assert.match(appSrc, /savedTheme === 'light' \|\| \(!savedTheme && prefersLight\)/);
+test('③ refonte : thème clair par défaut, un choix explicite « sombre » est respecté', () => {
+  assert.match(appSrc, /if \(savedTheme !== 'dark'\) document\.body\.classList\.add\('light-theme'\);/);
 });

@@ -31,21 +31,43 @@
   --shadow:        0 8px 32px rgba(0,0,0,.35);
   --shadow-sm:     0 2px 10px rgba(0,0,0,.2);
   --font:          'DM Sans', system-ui, sans-serif;
+  /* Couleurs de catégorie (services), thème sombre par défaut. */
+  --tint-blue-bg:rgba(55,138,221,.18);    --tint-blue-fg:#85B7EB;
+  --tint-violet-bg:rgba(127,119,221,.18); --tint-violet-fg:#AFA9EC;
+  --tint-green-bg:rgba(99,153,34,.2);     --tint-green-fg:#97C459;
+  --tint-orange-bg:rgba(216,90,48,.2);    --tint-orange-fg:#F0997B;
+  --tint-magenta-bg:rgba(212,83,126,.2);  --tint-magenta-fg:#ED93B1;
+  --tint-aqua-bg:rgba(29,158,117,.2);     --tint-aqua-fg:#5DCAA5;
+  --tint-red-bg:rgba(226,75,74,.2);       --tint-red-fg:#F09595;
+  --tint-yellow-bg:rgba(186,117,23,.22);  --tint-yellow-fg:#EF9F27;
+  --tint-gray-bg:rgba(136,135,128,.2);    --tint-gray-fg:#B4B2A9;
   --font-h:        'Outfit', 'DM Sans', sans-serif;
 }
 
 .light-theme {
-  --bg:        #EFF6FF;
-  --bg-2:      #DBEAFE;
-  --bg-3:      #BFDBFE;
-  --surface:   rgba(255,255,255,.75);
-  --surface-h: rgba(255,255,255,.95);
-  --border:    rgba(14,165,233,.13);
+  /* Refonte « socle visuel » : clair, sobre, professionnel. */
+  --primary:   #1D6FE0;
+  --primary-d: #1558B8;
+  --bg:        #F4F7FB;
+  --bg-2:      #FFFFFF;
+  --bg-3:      #EAF0F7;
+  --surface:   #FFFFFF;
+  --surface-h: #F1F5FA;
+  --border:    rgba(15,23,42,.09);
   --text:      #0F172A;
   --text-muted:#475569;
-  --text-dim:  #94A3B8;
-  --shadow:    0 8px 32px rgba(14,165,233,.08);
-  --shadow-sm: 0 2px 10px rgba(14,165,233,.06);
+  --text-dim:  #8792A2;
+  --shadow:    0 6px 24px rgba(15,23,42,.06);
+  --shadow-sm: 0 1px 4px rgba(15,23,42,.06);
+  --tint-blue-bg:#E6F1FB;    --tint-blue-fg:#0C447C;
+  --tint-violet-bg:#EEEDFE;  --tint-violet-fg:#3C3489;
+  --tint-green-bg:#EAF3DE;   --tint-green-fg:#27500A;
+  --tint-orange-bg:#FAECE7;  --tint-orange-fg:#712B13;
+  --tint-magenta-bg:#FBEAF0; --tint-magenta-fg:#72243E;
+  --tint-aqua-bg:#E1F5EE;    --tint-aqua-fg:#085041;
+  --tint-red-bg:#FCEBEB;     --tint-red-fg:#791F1F;
+  --tint-yellow-bg:#FAEEDA;  --tint-yellow-fg:#633806;
+  --tint-gray-bg:#F1EFE8;    --tint-gray-fg:#444441;
 }
 
 /* ── RESET ─────────────────────────────────────────── */
@@ -1637,3 +1659,27 @@ body.rtl .tl-connector { left: auto; right: -1.1rem; }
 .mc-notif-foot { padding: 10px 14px; border-top: 1px solid var(--border, #eaecef); text-align: center; position: sticky; bottom: 0; background: var(--card, #fff); }
 #mc-notif-push:disabled { color: var(--text-muted, #8b949e); cursor: default; }
 @media (prefers-color-scheme: dark) { .mc-notif-foot { background: var(--card, #1c2128); } }
+
+
+/* ── SOCLE VISUEL : icônes et couleurs de catégorie ───── */
+.mc-icon {
+  width: 1.15em; height: 1.15em; flex-shrink: 0;
+  stroke: currentColor; fill: none; stroke-width: 1.8;
+  stroke-linecap: round; stroke-linejoin: round;
+  vertical-align: -0.2em;
+}
+.mc-tint {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 1.9rem; height: 1.9rem; border-radius: 9px;
+}
+.mc-tint .mc-icon { width: 1.1rem; height: 1.1rem; }
+.mc-tint-blue    { background: var(--tint-blue-bg);    color: var(--tint-blue-fg); }
+.mc-tint-violet  { background: var(--tint-violet-bg);  color: var(--tint-violet-fg); }
+.mc-tint-green   { background: var(--tint-green-bg);   color: var(--tint-green-fg); }
+.mc-tint-orange  { background: var(--tint-orange-bg);  color: var(--tint-orange-fg); }
+.mc-tint-magenta { background: var(--tint-magenta-bg); color: var(--tint-magenta-fg); }
+.mc-tint-aqua    { background: var(--tint-aqua-bg);    color: var(--tint-aqua-fg); }
+.mc-tint-red     { background: var(--tint-red-bg);     color: var(--tint-red-fg); }
+.mc-tint-yellow  { background: var(--tint-yellow-bg);  color: var(--tint-yellow-fg); }
+.mc-tint-gray    { background: var(--tint-gray-bg);    color: var(--tint-gray-fg); }
+.nav-icon:has(.mc-tint) { width: auto; }

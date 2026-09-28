@@ -269,7 +269,7 @@ const App = (() => {
 
     document.getElementById('sidebar-nav').innerHTML = items.map(item => `
       <li class="nav-item" data-section="${item.s}" onclick="App.navigateTo('${item.s}')">
-        <span class="nav-icon">${item.icon}</span>
+        <span class="nav-icon">${window.McIcons?.sectionIcon(item.s) || item.icon}</span>
         <span>${item.label}</span>
         ${item.s==='inbox' && unread>0 ? `<span class="badge-dot">${unread}</span>` : ''}
       </li>`).join('');
@@ -508,11 +508,10 @@ const App = (() => {
 
   async function init() {
     I18n.init();
-    // Thème : un choix explicite (mc_theme) prime ; sinon on suit la
-    // préférence système (prefers-color-scheme). Sombre reste le défaut.
+    // Thème (refonte) : CLAIR par défaut, norme des logiciels médicaux
+    // professionnels. Un choix explicite « sombre » (mc_theme) est respecté.
     const savedTheme = localStorage.getItem('mc_theme');
-    const prefersLight = window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches;
-    if (savedTheme === 'light' || (!savedTheme && prefersLight)) document.body.classList.add('light-theme');
+    if (savedTheme !== 'dark') document.body.classList.add('light-theme');
 
     const lc = document.getElementById('lang-selector-container');
     if (lc) lc.innerHTML = I18n.renderSelector();
