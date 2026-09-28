@@ -33,7 +33,7 @@ jobs:
           GOOGLE_APPLICATION_CREDENTIALS: /tmp/firebase-service-account.json
         run: |
           npx firebase-tools@latest hosting:channel:deploy "${{ inputs.channel }}" --expires 30d --project medconnect-e81ba --non-interactive --json > preview.json || (cat preview.json; exit 1)
-          python3 -c "import json;d=json.load(open('preview.json'));[print('URL APERCU:',v.get('url')) for v in d.get('result',{}).values()]"
+          python3 -c "import json;d=json.load(open('preview.json'));[print('::notice title=Apercu::'+str(v.get('url'))) for v in d.get('result',{}).values()]"
       - name: Supprimer la clé décodée
         if: always()
         run: rm -f /tmp/firebase-service-account.json
