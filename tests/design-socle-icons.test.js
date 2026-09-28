@@ -19,7 +19,7 @@ function loadIcons() {
 
 test('chaque rubrique de navigation a une icône présente dans le sprite', () => {
   const icons = loadIcons();
-  const sprite = read('vendor/icons/medconnect-icons-v4.svg');
+  const sprite = read('vendor/icons/medconnect-icons-v5.svg');
   for (const [section, [name, tint]] of Object.entries(icons.SECTIONS)) {
     assert.ok(sprite.includes(`id="i-${name}"`), `${section} : icône ${name} absente du sprite`);
     assert.match(read('css/style.css'), new RegExp(`\\.mc-tint-${tint}\\s*\\{`), `couleur ${tint} non définie`);
@@ -44,7 +44,7 @@ test('icons.js est chargé avant app.js et mis en cache hors ligne', () => {
   assert.ok(html.indexOf('js/icons.js') > 0 && html.indexOf('js/icons.js') < html.indexOf('js/app.js'));
   const sw = read('sw.js');
   assert.match(sw, /'\.\/js\/icons\.js'/);
-  assert.match(sw, /'\.\/vendor\/icons\/medconnect-icons-v4\.svg'/);
+  assert.match(sw, /'\.\/vendor\/icons\/medconnect-icons-v5\.svg'/);
 });
 
 test("les couleurs de catégorie existent en thème clair et sombre", () => {
@@ -102,9 +102,9 @@ test('cartes de statistiques : emoji remplacé par une icône colorée', () => {
 });
 
 test('le sprite est versionné (nouvelles icônes jamais bloquées par le cache hors ligne)', () => {
-  assert.ok(fs.existsSync(path.join(root, 'vendor/icons/medconnect-icons-v4.svg')));
-  assert.match(read('js/icons.js'), /medconnect-icons-v4\.svg/);
-  assert.match(read('sw.js'), /medconnect-icons-v4\.svg/);
+  assert.ok(fs.existsSync(path.join(root, 'vendor/icons/medconnect-icons-v5.svg')));
+  assert.match(read('js/icons.js'), /medconnect-icons-v5\.svg/);
+  assert.match(read('sw.js'), /medconnect-icons-v5\.svg/);
 });
 
 test('tableau de bord : bandeau d\'accueil, indicateurs et raccourcis de services', () => {
@@ -124,4 +124,15 @@ test('dossier patient : alerte allergie seulement si renseignée, sans emoji dan
   assert.match(fn, /\$\{allergies \? `<div class="mc-alert mc-alert-danger">/);
   assert.match(fn, /App\.openModal\(`\$\{p\.firstname\} \$\{p\.lastname\}`/);
   assert.match(fn, /canTransfer \?/, 'transfert réservé aux rôles autorisés');
+});
+
+test('boutons : les emojis de tête ont tous une icône dans le sprite', () => {
+  const ctx = { window: {} };
+  require('vm').createContext(ctx);
+  require('vm').runInContext(read('js/icons.js'), ctx);
+  const sprite = read('vendor/icons/medconnect-icons-v5.svg');
+  for (const [emoji, name] of Object.entries(ctx.window.McIcons.BUTTON_EMOJI)) {
+    assert.ok(sprite.includes(`id="i-${name}"`), `${emoji} → ${name} absent du sprite`);
+  }
+  assert.match(read('js/icons.js'), /document\.getElementById\('global-modal'\)/, 'les fenêtres sont aussi décorées');
 });
