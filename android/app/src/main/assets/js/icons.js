@@ -48,5 +48,60 @@
     return `<span class="mc-tint mc-tint-${entry[1]}">${icon(entry[0])}</span>`;
   }
 
-  window.McIcons = { icon, sectionIcon, SECTIONS };
+  /* Rôles : icône + couleur (écran de connexion, profil). */
+  const ROLES = {
+    patient:    ['user', 'blue'],
+    doctor:     ['stethoscope', 'violet'],
+    pharmacist: ['pill', 'green'],
+    nurse:      ['heartbeat', 'magenta'],
+    lab:        ['microscope', 'orange'],
+    reception:  ['building-hospital', 'aqua'],
+    admin:      ['shield-lock', 'gray'],
+  };
+
+  function roleIcon(role, extraClass) {
+    const entry = ROLES[role] || ['user', 'gray'];
+    const cls = extraClass ? `mc-tint mc-tint-${entry[1]} ${extraClass}` : `mc-tint mc-tint-${entry[1]}`;
+    return `<span class="${cls}">${icon(entry[0])}</span>`;
+  }
+
+  /* En-têtes de page : chaque page affiche automatiquement l'icône
+     colorée de sa rubrique, à la place de l'emoji du titre. Fonctionne
+     pour toutes les pages sans modifier chaque module : un observateur
+     décore le premier titre `.page-header h2` à chaque rendu. */
+  const EMOJI_PREFIX = /^[\s\p{Extended_Pictographic}\u200D\uFE0F]+/u;
+
+  function currentSection() {
+    return document.querySelector('.nav-item.active')?.dataset?.section || null;
+  }
+
+  function decoratePageHeader(root) {
+    const title = root?.querySelector?.('.page-header h2');
+    if (!title || title.querySelector('.mc-page-icon')) return false;
+    const tint = sectionIcon(currentSection());
+    if (!tint) return false;
+    const first = title.firstChild;
+    if (first && first.nodeType === 3) first.textContent = first.textContent.replace(EMOJI_PREFIX, '');
+    title.insertAdjacentHTML('afterbegin', tint.replace('class="mc-tint ', 'class="mc-tint mc-page-icon '));
+    title.classList.add('mc-page-title');
+    return true;
+  }
+
+  function watchMainContent() {
+    const main = document.getElementById('main-content');
+    if (!main || typeof MutationObserver === 'undefined') return;
+    let scheduled = false;
+    new MutationObserver(() => {
+      if (scheduled) return;
+      scheduled = true;
+      requestAnimationFrame(() => { scheduled = false; decoratePageHeader(main); });
+    }).observe(main, { childList: true, subtree: true });
+  }
+
+  if (typeof document !== 'undefined' && document.addEventListener) {
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', watchMainContent);
+    else watchMainContent();
+  }
+
+  window.McIcons = { icon, sectionIcon, roleIcon, decoratePageHeader, SECTIONS, ROLES };
 })();

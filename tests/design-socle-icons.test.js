@@ -54,3 +54,27 @@ test("les couleurs de catégorie existent en thème clair et sombre", () => {
     assert.ok(count >= 2, `--tint-${hue}-bg doit exister en sombre et en clair`);
   }
 });
+
+test('connexion et inscription : rôle choisi dans un menu déroulant', () => {
+  const auth = read('js/auth.js');
+  assert.match(auth, /id="\$\{?login-role-select|id="login-role-select"/);
+  assert.match(auth, /id="register-role-select"/);
+  assert.match(auth, /onchange="Auth\._pickRole\('login', this\.value\)"/);
+  assert.match(auth, /function _pickRole\(kind, role\)/);
+  assert.match(auth, /_tab, _pickRole, _loginRole, _registerRole,/);
+});
+
+test("l'accueil affiche le logo, les atouts et la connexion (sans emoji)", () => {
+  const html = read('index.html');
+  const landing = html.slice(html.indexOf('<div id="landing"'), html.indexOf('<!-- MOBILE MENU -->'));
+  assert.match(landing, /landing-v2-features/);
+  assert.match(landing, /Auth\.showLogin\(\)/);
+  assert.ok(!/[\u{1F300}-\u{1FAFF}]/u.test(landing), "plus d'emoji sur l'accueil");
+});
+
+test("les titres de page reçoivent l'icône colorée de leur rubrique", () => {
+  const icons = read('js/icons.js');
+  assert.match(icons, /function decoratePageHeader\(root\)/);
+  assert.match(icons, /new MutationObserver/);
+  assert.match(read('css/style.css'), /\.mc-page-icon \{/);
+});

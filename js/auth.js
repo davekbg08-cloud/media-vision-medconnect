@@ -76,21 +76,31 @@ const Auth = (() => {
     const scr = document.getElementById('auth-screen');
     if (!scr) return;
     scr.style.display = 'flex';
+    const ic = (name) => window.McIcons?.icon(name) || '';
     scr.innerHTML = `
-      <div class="auth-card">
-        <div class="auth-logo" id="auth-logo-clicks">🏥</div>
-        <h1 class="auth-title">MedConnect</h1>
-        <p class="auth-sub">Plateforme Médicale Sécurisée v2.0</p>
-        <div class="auth-tabs">
-          <button id="tbtn-login" class="auth-tab active" onclick="Auth._tab('login')">🔐 Connexion</button>
-          <button id="tbtn-register" class="auth-tab" onclick="Auth._tab('register')">📝 Inscription</button>
+      <div class="auth-card auth-card-v2">
+        <div class="auth-hero">
+          <div class="auth-hero-logo" id="auth-logo-clicks">${ic('heart-rate-monitor') || '🏥'}</div>
+          <h1 class="auth-title">MedConnect</h1>
+          <p class="auth-sub">La santé connectée, en toute sécurité</p>
         </div>
-        <div id="tab-login">${_htmlLogin()}</div>
-        <div id="tab-register" style="display:none">${_htmlRegister()}</div>
-        <div id="auth-lang" style="margin-top:1rem;display:flex;justify-content:center"></div>
-        <p style="font-size:.68rem;color:var(--text-dim);text-align:center;margin-top:.5rem">
-          📞 +243 856 373 707 · MedConnect v2.0 © 2026
-        </p>
+        <div class="auth-body">
+          <div class="auth-tabs">
+            <button id="tbtn-login" class="auth-tab active" onclick="Auth._tab('login')">${ic('login-2')} Connexion</button>
+            <button id="tbtn-register" class="auth-tab" onclick="Auth._tab('register')">${ic('user-plus')} Inscription</button>
+          </div>
+          <div id="tab-login">${_htmlLogin()}</div>
+          <div id="tab-register" style="display:none">${_htmlRegister()}</div>
+          <div class="auth-trust">
+            <span class="mc-badge mc-tint-green">${ic('lock')} Chiffré</span>
+            <span class="mc-badge mc-tint-blue">${ic('shield-check')} Identités vérifiées</span>
+            <span class="mc-badge mc-tint-violet">${ic('file-certificate')} Confidentialité</span>
+          </div>
+          <div id="auth-lang" style="margin-top:1rem;display:flex;justify-content:center"></div>
+          <p style="font-size:.68rem;color:var(--text-dim);text-align:center;margin-top:.5rem">
+            +243 856 373 707 · MedConnect v2.0 © 2026
+          </p>
+        </div>
       </div>`;
 
     const lc = document.getElementById('auth-lang');
@@ -104,11 +114,15 @@ const Auth = (() => {
   }
 
   function _htmlLogin() { return `
-    <div class="role-selector" id="login-roles">
-      ${['patient','doctor','pharmacist','nurse'].map(r=>`
-        <button class="role-btn" data-role="${r}" onclick="Auth._loginRole('${r}')">
-          <span>${ICONS[r]}</span><span>${LABELS[r]}</span>
-        </button>`).join('')}
+    <label class="role-picker-label" for="login-role-select">Je suis</label>
+    <div class="role-picker">
+      <span class="role-picker-icon" id="login-role-icon">${window.McIcons?.roleIcon() || ''}</span>
+      <select id="login-role-select" class="role-picker-select"
+              onchange="Auth._pickRole('login', this.value)">
+        <option value="" disabled selected>Choisir mon rôle…</option>
+        ${['patient','doctor','pharmacist','nurse'].map(r=>`<option value="${r}">${LABELS[r]}</option>`).join('')}
+      </select>
+      <span class="role-picker-chevron">${window.McIcons?.icon('chevron-down') || '▾'}</span>
     </div>
     <div id="login-form"></div>
     <div id="auth-err" class="auth-error" style="display:none"></div>`; }
@@ -130,12 +144,15 @@ const Auth = (() => {
       🩺 <strong>Patient ?</strong> Votre médecin crée votre fiche.
       Connectez-vous avec votre numéro <code style="color:var(--primary)">MC-XXXX-CC-XXXXXXXX</code>.
     </div>
-    <p style="font-size:.8rem;color:var(--text-muted);margin:.75rem 0 .5rem">Choisissez votre rôle :</p>
-    <div class="role-selector" id="register-roles">
-      ${_registerRolesForDevice().map(r=>`
-        <button class="role-btn" data-role="${r}" onclick="Auth._registerRole('${r}')">
-          <span>${ICONS[r]}</span><span>${LABELS[r]}</span>
-        </button>`).join('')}
+    <label class="role-picker-label" for="register-role-select">Je suis</label>
+    <div class="role-picker">
+      <span class="role-picker-icon" id="register-role-icon">${window.McIcons?.roleIcon() || ''}</span>
+      <select id="register-role-select" class="role-picker-select"
+              onchange="Auth._pickRole('register', this.value)">
+        <option value="" disabled selected>Choisir mon rôle…</option>
+        ${_registerRolesForDevice().map(r=>`<option value="${r}">${LABELS[r]}</option>`).join('')}
+      </select>
+      <span class="role-picker-chevron">${window.McIcons?.icon('chevron-down') || '▾'}</span>
     </div>
     <div id="register-form" style="margin-top:.75rem"></div>
     <div id="reg-err" class="auth-error" style="display:none"></div>`; }
@@ -153,6 +170,14 @@ const Auth = (() => {
   }
 
   /* ── FORMULAIRES CONNEXION ────────────────────────── */
+  /* Refonte : le rôle se choisit dans un menu déroulant compact (au lieu
+     d'une grille de boutons). L'icône colorée suit le rôle choisi. */
+  function _pickRole(kind, role) {
+    const tile = document.getElementById(`${kind}-role-icon`);
+    if (tile && window.McIcons) tile.innerHTML = window.McIcons.roleIcon(role);
+    if (kind === 'register') _registerRole(role); else _loginRole(role);
+  }
+
   function _loginRole(role) {
     document.querySelectorAll('#login-roles .role-btn').forEach(b =>
       b.classList.toggle('active', b.dataset.role === role));
@@ -1944,7 +1969,7 @@ const Auth = (() => {
     resolveAgentAccountForLogin: _resolveAgentAccountFromFirestore,
     verifyAgentProfileConsistency,
     _setRegistrationContext,
-    _tab, _loginRole, _registerRole,
+    _tab, _pickRole, _loginRole, _registerRole,
     _doPatient, _createPatientPin, _doDoctor, _doPharmacist, _doNurse,
     _regDoctor, _regPharmacist, _regNurse, _regLab, _regReception, _regPharmacistInternal,
     _showAgentStrictRegisterForm,
