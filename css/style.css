@@ -1820,3 +1820,24 @@ body.rtl .tl-connector { left: auto; right: -1.1rem; }
 .mc-list-time small, .mc-list-main small { font-weight: 400; color: var(--text-muted); font-size: .72rem; }
 .mc-list-main { flex: 1; display: flex; flex-direction: column; font-size: .88rem; }
 .mc-avatar { font-weight: 700; font-size: .85rem; border-radius: 50%; }
+
+/* ── REFONTE (5) : dossier patient ───── */
+.mc-patient-head { display: flex; align-items: center; gap: .75rem; margin-bottom: .8rem; }
+.mc-avatar-lg { width: 3.2rem; height: 3.2rem; font-size: 1.05rem; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.mc-patient-id { flex: 1; display: flex; flex-direction: column; gap: .15rem; min-width: 0; }
+.mc-patient-id strong { font-size: 1.05rem; }
+.mc-patient-id > span { font-size: .8rem; color: var(--text-muted); }
+.mc-alert { display: flex; align-items: flex-start; gap: .5rem; padding: .6rem .75rem; border-radius: 10px; font-size: .84rem; margin-bottom: .5rem; }
+.mc-alert .mc-icon { margin-top: .1rem; }
+.mc-alert-danger { background: var(--tint-red-bg); color: var(--tint-red-fg); }
+.mc-alert-warning { background: var(--tint-yellow-bg); color: var(--tint-yellow-fg); }
+.mc-vitals { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; margin: .8rem 0; }
+.mc-vital { display: flex; flex-direction: column; gap: .15rem; padding: .65rem .7rem; border-radius: 12px; }
+.mc-vital-label { font-size: .72rem; opacity: .85; }
+.mc-vital strong { font-size: 1rem; }
+.mc-counters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .5rem; }
+.mc-counter { display: flex; flex-direction: column; align-items: center; gap: .1rem; padding: .6rem .3rem; border-radius: 12px; font-size: .72rem; }
+.mc-counter strong { font-size: 1.15rem; }
+.mc-contact { font-size: .82rem; color: var(--text-muted); margin: .8rem 0 0; display: flex; align-items: center; gap: .35rem; }
+.mc-actions .btn { display: inline-flex; align-items: center; gap: .35rem; }
+.mc-danger-text { color: var(--danger) !important; }

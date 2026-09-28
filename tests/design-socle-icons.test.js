@@ -106,3 +106,22 @@ test('le sprite est versionné (nouvelles icônes jamais bloquées par le cache 
   assert.match(read('js/icons.js'), /medconnect-icons-v4\.svg/);
   assert.match(read('sw.js'), /medconnect-icons-v4\.svg/);
 });
+
+test('tableau de bord : bandeau d\'accueil, indicateurs et raccourcis de services', () => {
+  const src = read('js/hospital.js');
+  const start = src.indexOf('function renderDashboard(');
+  const fn = src.slice(start, src.indexOf('/* ── PATIENTS', start));
+  assert.match(fn, /class="mc-hero"/);
+  assert.match(fn, /HospitalPortal\.openNewPatient\(\)/);
+  assert.match(fn, /class="mc-quick-grid"/);
+  assert.match(fn, /navSections\.has\(sec\)/, 'raccourcis limités au menu du rôle');
+});
+
+test('dossier patient : alerte allergie seulement si renseignée, sans emoji dans le titre', () => {
+  const src = read('js/hospital.js');
+  const start = src.indexOf('function openDetail(');
+  const fn = src.slice(start, src.indexOf('/* ── NEW PATIENT', start));
+  assert.match(fn, /\$\{allergies \? `<div class="mc-alert mc-alert-danger">/);
+  assert.match(fn, /App\.openModal\(`\$\{p\.firstname\} \$\{p\.lastname\}`/);
+  assert.match(fn, /canTransfer \?/, 'transfert réservé aux rôles autorisés');
+});
