@@ -39,7 +39,7 @@ jobs:
       - name: Déployer les Functions
         env:
           GOOGLE_APPLICATION_CREDENTIALS: /tmp/firebase-service-account.json
-        run: npx firebase-tools@latest deploy --only functions --project medconnect-e81ba --non-interactive --force
+        run: npx firebase-tools@latest deploy --only functions,firestore:indexes --project medconnect-e81ba --non-interactive --force
 
       - name: Supprimer la clé décodée
         if: always()
