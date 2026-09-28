@@ -7,6 +7,12 @@ jour) et l'écran **Paramètres → À propos**.
 La source unique de la version en cours est `config/app-version.json` —
 ce fichier doit rester cohérent avec elle.
 
+## 2.10.0 — 2026-09-28
+
+**Refonte visuelle (première vague)** — thème clair par défaut, icônes au trait colorées par service (sous-ensemble Tabler Icons, MIT, auto-hébergé), nouvel accueil, connexion avec menu déroulant de rôle et langue compacte, tableau de bord d'établissement et dossier patient repensés, cartes de statistiques colorées. Sécurité : CSP en balise meta (GitHub Pages / APK), Leaflet et html5-qrcode auto-hébergés.
+
+Version **2.10.0** (build 2026.09.28.1, versionCode 51, cache `medconnect-v4.51`). Miroir Android resynchronisé.
+
 ## 2.9.49 — 2026-09-20
 
 Correctif UX ciblé : **bouton « Re-vérifier le jeton »** (bannière diagnostic App Check, tableau de bord admin) paraissait « buggé » — il relançait bien la vérification mais, le jeton échouant encore (reCAPTCHA non configuré pour le domaine), il réaffichait la **même** bannière sans aucun retour. **100 % client, additif.** Suite JS 1017/1017.
