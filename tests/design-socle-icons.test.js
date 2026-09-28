@@ -19,7 +19,7 @@ function loadIcons() {
 
 test('chaque rubrique de navigation a une icône présente dans le sprite', () => {
   const icons = loadIcons();
-  const sprite = read('vendor/icons/medconnect-icons-v3.svg');
+  const sprite = read('vendor/icons/medconnect-icons-v4.svg');
   for (const [section, [name, tint]] of Object.entries(icons.SECTIONS)) {
     assert.ok(sprite.includes(`id="i-${name}"`), `${section} : icône ${name} absente du sprite`);
     assert.match(read('css/style.css'), new RegExp(`\\.mc-tint-${tint}\\s*\\{`), `couleur ${tint} non définie`);
@@ -44,7 +44,7 @@ test('icons.js est chargé avant app.js et mis en cache hors ligne', () => {
   assert.ok(html.indexOf('js/icons.js') > 0 && html.indexOf('js/icons.js') < html.indexOf('js/app.js'));
   const sw = read('sw.js');
   assert.match(sw, /'\.\/js\/icons\.js'/);
-  assert.match(sw, /'\.\/vendor\/icons\/medconnect-icons-v3\.svg'/);
+  assert.match(sw, /'\.\/vendor\/icons\/medconnect-icons-v4\.svg'/);
 });
 
 test("les couleurs de catégorie existent en thème clair et sombre", () => {
@@ -102,7 +102,7 @@ test('cartes de statistiques : emoji remplacé par une icône colorée', () => {
 });
 
 test('le sprite est versionné (nouvelles icônes jamais bloquées par le cache hors ligne)', () => {
-  assert.ok(fs.existsSync(path.join(root, 'vendor/icons/medconnect-icons-v3.svg')));
-  assert.match(read('js/icons.js'), /medconnect-icons-v3\.svg/);
-  assert.match(read('sw.js'), /medconnect-icons-v3\.svg/);
+  assert.ok(fs.existsSync(path.join(root, 'vendor/icons/medconnect-icons-v4.svg')));
+  assert.match(read('js/icons.js'), /medconnect-icons-v4\.svg/);
+  assert.match(read('sw.js'), /medconnect-icons-v4\.svg/);
 });

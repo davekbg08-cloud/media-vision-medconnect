@@ -1781,3 +1781,42 @@ body.rtl .tl-connector { left: auto; right: -1.1rem; }
   /* Le bouton ☰ flottant ne recouvre plus l'en-tête des pages. */
   .main-content { padding-top: 4.4rem !important; }
 }
+
+/* ── REFONTE (4) : tableau de bord établissement ───── */
+.mc-hero {
+  background: var(--primary); color: #fff; border-radius: 16px;
+  padding: 1.2rem 1.25rem 1.1rem; margin-bottom: 1rem;
+}
+.mc-hero-meta { display: flex; justify-content: space-between; gap: .5rem; font-size: .8rem; opacity: .9; flex-wrap: wrap; }
+.mc-hero-date { text-transform: capitalize; }
+.mc-hero-title { color: #fff; font-size: 1.45rem; margin: .5rem 0 .2rem; display: block; }
+.mc-hero-text { font-size: .85rem; opacity: .92; margin-bottom: .85rem; }
+.mc-hero-btn {
+  background: #fff; color: var(--primary); border: none; font-weight: 600;
+  display: inline-flex; align-items: center; gap: .35rem;
+}
+.mc-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .7rem; }
+@media (min-width: 900px) { .mc-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.mc-kpis .stat-card { cursor: pointer; padding: 1rem; }
+.mc-kpis .stat-sub { color: var(--text-muted); }
+.mc-section-title { font-size: 1rem; margin: 1.1rem 0 .6rem; }
+.mc-section-head { display: flex; align-items: center; justify-content: space-between; }
+.mc-quick-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .55rem; }
+@media (min-width: 900px) { .mc-quick-grid { grid-template-columns: repeat(8, minmax(0, 1fr)); } }
+.mc-quick {
+  display: flex; flex-direction: column; align-items: center; gap: .35rem;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+  padding: .7rem .3rem; font-size: .74rem; color: var(--text); cursor: pointer;
+}
+.mc-quick .mc-tint { width: 2.4rem; height: 2.4rem; border-radius: 12px; }
+.mc-quick .mc-tint .mc-icon { width: 1.25rem; height: 1.25rem; }
+.mc-quick:hover { border-color: var(--primary); }
+.mc-list { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+.mc-list-row { display: flex; align-items: center; gap: .7rem; padding: .7rem .85rem; border-bottom: 1px solid var(--border); }
+.mc-list-row:last-child { border-bottom: none; }
+.mc-list-bar { width: 4px; align-self: stretch; border-radius: 4px; }
+.mc-bar-aqua { background: var(--tint-aqua-fg); }
+.mc-list-time { font-weight: 600; font-size: .85rem; min-width: 3.6rem; display: flex; flex-direction: column; }
+.mc-list-time small, .mc-list-main small { font-weight: 400; color: var(--text-muted); font-size: .72rem; }
+.mc-list-main { flex: 1; display: flex; flex-direction: column; font-size: .88rem; }
+.mc-avatar { font-weight: 700; font-size: .85rem; border-radius: 50%; }

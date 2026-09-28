@@ -110,48 +110,73 @@ const HospitalPortal = (() => {
       unreadMessages,
     };
     const apts = appointments.filter(a=>a.status==='pending' && a.date>=td).slice(0,3);
+    // ── Refonte : en-tête d'accueil, indicateurs colorés, services ──
+    const user = Auth.getUser() || {};
+    const hospital = window.HospitalsRegistry?.getCurrentHospital?.();
+    const dateLabel = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+    const firstName = String(user.name || '').trim().split(/\s+/)[0] || '';
+    const ic = (name) => window.McIcons?.icon(name) || '';
+    const navSections = new Set([...document.querySelectorAll('.nav-item[data-section]')].map(el => el.dataset.section));
+    const QUICK = [
+      ['patients', 'Patients'], ['consultations', 'Consultations'], ['prescriptions', 'Ordonnances'],
+      ['lab', 'Laboratoire'], ['appointments', 'Rendez-vous'], ['transfers', 'Transferts'],
+      ['inbox', 'Messages'], ['map', 'Carte'],
+    ].filter(([sec]) => !navSections.size || navSections.has(sec));
     main.innerHTML = `
-      <div class="page-header">
-        <h2>📊 ${t('nav_dashboard')}</h2>
-        <button class="btn btn-primary btn-sm" onclick="HospitalPortal.openNewPatient()">+ ${t('btn_new_patient')}</button>
-      </div>
-      <div class="stats-grid">
-        <div class="stat-card" style="border-top:3px solid var(--primary)">
+      <section class="mc-hero">
+        <div class="mc-hero-meta">
+          <span>${esc(hospital?.name || 'MedConnect')}</span>
+          <span class="mc-hero-date">${esc(dateLabel)}</span>
+        </div>
+        <h2 class="mc-hero-title">Bonjour${firstName ? `, ${esc(firstName)}` : ''}</h2>
+        <p class="mc-hero-text">${s.pendingApts} RDV en attente · ${s.unreadMessages} messages non lus · ${s.todayConsults} consultations aujourd'hui</p>
+        <button class="btn mc-hero-btn" onclick="HospitalPortal.openNewPatient()">${ic('plus')} ${t('btn_new_patient')}</button>
+      </section>
+      <div class="stats-grid mc-kpis">
+        <div class="stat-card" onclick="navigateMedConnect('patients')">
           <div class="stat-icon">👥</div><div class="stat-value">${s.totalPatients}</div>
           <div class="stat-label">${t('stat_total_patients')}</div>
           <div class="stat-sub">+${s.todayPatients} ${t('stat_today')}</div>
         </div>
-        <div class="stat-card" style="border-top:3px solid var(--secondary)">
+        <div class="stat-card" onclick="navigateMedConnect('consultations')">
           <div class="stat-icon">🩺</div><div class="stat-value">${s.totalConsults}</div>
           <div class="stat-label">${t('stat_consults')}</div>
           <div class="stat-sub">${s.todayConsults} ${t('stat_today')}</div>
         </div>
-        <div class="stat-card" style="border-top:3px solid #F59E0B">
+        <div class="stat-card" onclick="navigateMedConnect('appointments')">
           <div class="stat-icon">📅</div><div class="stat-value">${s.pendingApts}</div>
           <div class="stat-label">RDV en attente</div>
-          <div class="stat-sub"><button class="btn btn-ghost btn-xs" onclick="navigateMedConnect('appointments')">Voir →</button></div>
+          <div class="stat-sub">Voir l'agenda →</div>
         </div>
-        <div class="stat-card" style="border-top:3px solid #A855F7">
+        <div class="stat-card" onclick="navigateMedConnect('inbox')">
           <div class="stat-icon">📨</div><div class="stat-value">${s.unreadMessages}</div>
           <div class="stat-label">Messages non lus</div>
-          <div class="stat-sub"><button class="btn btn-ghost btn-xs" onclick="navigateMedConnect('inbox')">Voir →</button></div>
+          <div class="stat-sub">Ouvrir la messagerie →</div>
         </div>
       </div>
+      <h3 class="mc-section-title">Services</h3>
+      <div class="mc-quick-grid">
+        ${QUICK.map(([sec, label]) => `
+          <button class="mc-quick" onclick="navigateMedConnect('${sec}')">
+            ${window.McIcons?.sectionIcon(sec) || ''}<span>${label}</span>
+          </button>`).join('')}
+      </div>
       ${apts.length ? `
-        <h3 style="margin:.75rem 0 .5rem;color:var(--accent)">📅 RDV à venir</h3>
-        <div class="records-list" style="margin-bottom:1.5rem">
+        <h3 class="mc-section-title">RDV à venir</h3>
+        <div class="mc-list">
           ${apts.map(a=>{const p=DB.getPatientById(a.patient_id); return `
-            <div class="record-card" style="display:flex;align-items:center;gap:.85rem">
-              <span>⏳</span>
-              <div style="flex:1">
-                <strong>${a.date} à ${a.time}</strong> — ${esc(a.reason)||'—'}
-                ${p?`<span class="id-tag" style="margin-left:.4rem">${p.id}</span>`:''}
+            <div class="mc-list-row">
+              <span class="mc-list-bar mc-bar-aqua"></span>
+              <div class="mc-list-time">${esc(a.time || '')}<small>${esc(a.date || '')}</small></div>
+              <div class="mc-list-main">
+                <strong>${p ? `${esc(p.firstname)} ${esc(p.lastname)}` : esc(a.reason) || '—'}</strong>
+                <small>${esc(a.reason) || 'Consultation'}${p ? ` · ${p.id}` : ''}</small>
               </div>
-              <button class="btn btn-ghost btn-xs" onclick="AppointmentsModule.setStatus('${a.aid}','confirmed')">✅</button>
+              <button class="btn btn-ghost btn-xs" onclick="AppointmentsModule.setStatus('${a.aid}','confirmed')" aria-label="Confirmer">${ic('check') || '✅'}</button>
             </div>`}).join('')}
         </div>` : ''}
-      <div class="page-header" style="margin-top:1rem">
-        <h3>Patients récents</h3>
+      <div class="mc-section-head">
+        <h3 class="mc-section-title">Patients récents</h3>
         <button class="btn btn-ghost btn-sm" onclick="navigateMedConnect('patients')">Tous →</button>
       </div>
       <div class="records-list">
@@ -239,7 +264,7 @@ const HospitalPortal = (() => {
     const pending = p.medical_completion_status === 'pending';
     return `
       <div class="record-card patient-row" onclick="HospitalPortal.openDetail('${p.id}')">
-        <div class="patient-row-avatar">${p.gender==='F'?'👩':'👨'}</div>
+        <div class="patient-row-avatar mc-avatar ${p.gender==='F'?'mc-tint-magenta':'mc-tint-blue'}">${esc(((p.firstname||'?')[0]||'?')+((p.lastname||'')[0]||'')).toUpperCase()}</div>
         <div class="patient-row-info">
           <strong>${esc(p.firstname)} ${esc(p.lastname)}</strong>
           <span class="id-tag">${p.id}</span>

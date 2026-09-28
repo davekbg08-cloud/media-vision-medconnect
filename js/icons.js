@@ -8,7 +8,7 @@
    ===================================================== */
 (function () {
   'use strict';
-  const SPRITE = './vendor/icons/medconnect-icons-v3.svg';
+  const SPRITE = './vendor/icons/medconnect-icons-v4.svg';
 
   /** Icône par nom Tabler (ex. 'stethoscope'). */
   function icon(name, extraClass) {
