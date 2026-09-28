@@ -25,16 +25,8 @@ const { randomUUID } = require('crypto');
 const PAWAPAY_TOKEN = defineSecret('PAWAPAY');
 const SANDBOX_URL = 'https://api.sandbox.pawapay.io';
 const REGION = process.env.MEDCONNECT_FUNCTIONS_REGION || 'europe-west1';
-const DAY_MS = 24 * 60 * 60 * 1000;
-const PERIOD_DAYS = 30;
+const { SUBSCRIPTION_PLANS, normalizePhone, nextEndDate, DAY_MS } = require('./pawapay-helpers');
 const GRACE_DAYS = 7;
-
-/** Formules et prix mensuels (USD) — source de vérité unique. */
-const SUBSCRIPTION_PLANS = {
-  essentiel: { name: 'Essentiel', amount: 250 },
-  pro: { name: 'Pro', amount: 500 },
-  institution: { name: 'Institution', amount: 800 },
-};
 
 const PROVIDERS_COD = new Set(['VODACOM_MPESA_COD', 'AIRTEL_COD', 'ORANGE_COD']);
 
@@ -49,21 +41,6 @@ const CALL_OPTS = {
 
 const db = () => getFirestore();
 const baseUrl = () => (process.env.PAWAPAY_BASE_URL || SANDBOX_URL).replace(/\/+$/, '');
-
-/** Numéro RDC au format pawaPay : 243 + 9 chiffres, sans « + ». */
-function normalizePhone(raw) {
-  const digits = String(raw || '').replace(/\D/g, '');
-  const n = digits.startsWith('243') ? digits : digits.startsWith('0') ? `243${digits.slice(1)}` : digits;
-  return /^243\d{9}$/.test(n) ? n : null;
-}
-
-/** Nouvelle date de fin : prolonge un abonnement encore valide, sinon part d'aujourd'hui. */
-function nextEndDate(current, nowMs) {
-  const end = current && current.endDate ? Date.parse(current.endDate) : NaN;
-  const stillValid = current && ['active', 'grace_period'].includes(current.status) && end > nowMs;
-  const base = stillValid ? end : nowMs;
-  return new Date(base + PERIOD_DAYS * DAY_MS).toISOString();
-}
 
 async function pawapay(method, path, body) {
   const response = await fetch(`${baseUrl()}${path}`, {
@@ -261,4 +238,3 @@ exports.expirePawapaySubscriptions = onSchedule(
   }
 );
 
-exports._testables = { normalizePhone, nextEndDate, SUBSCRIPTION_PLANS };

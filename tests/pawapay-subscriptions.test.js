@@ -8,7 +8,7 @@ const path = require('path');
 
 const root = path.resolve(__dirname, '..');
 const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
-const { _testables: t } = require('../functions/pawapay.js');
+const t = require('../functions/pawapay-helpers.js');
 
 test('prix mensuels fixés côté serveur : 250 / 500 / 800 $', () => {
   assert.strictEqual(t.SUBSCRIPTION_PLANS.essentiel.amount, 250);
