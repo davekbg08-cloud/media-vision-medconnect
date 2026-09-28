@@ -1,8 +1,19 @@
 {
-  "version": "2.9.49",
-  "build": "2026.09.20.1",
-  "buildDate": "2026-09-20",
+  "version": "2.10.0",
+  "build": "2026.09.28.1",
+  "buildDate": "2026-09-28",
   "changelog": [
+    {
+      "version": "2.10.0",
+      "date": "2026-09-28",
+      "notes": [
+        "Nouveau design professionnel : thème clair par défaut (le mode sombre reste disponible), palette plus sobre, et de vraies icônes colorées à la place des emojis — chaque service garde sa couleur partout (patients en bleu, consultations en violet, pharmacie en vert, laboratoire en orange, vaccinations en rose, rendez-vous en turquoise, transferts en rouge).",
+        "Nouvel accueil et nouvelle connexion : présentation claire de MedConnect, rôle choisi dans un menu déroulant « Je suis… », langue réduite à une petite pastille, badges de confiance.",
+        "Tableau de bord de l'établissement repensé : bandeau d'accueil avec le résumé du jour, indicateurs colorés et cliquables, raccourcis vers chaque service, rendez-vous à venir en liste claire.",
+        "Dossier patient repensé : en-tête d'identité, alerte allergie bien visible, repères colorés (groupe sanguin, poids, naissance, pays) et compteurs de consultations, vaccins et analyses.",
+        "Sécurité : la politique de sécurité du contenu (CSP) s'applique désormais aussi à l'application Android et au site principal ; la carte et le lecteur de QR code sont hébergés dans l'application (plus de dépendance à un service externe)."
+      ]
+    },
     {
       "version": "2.9.49",
       "date": "2026-09-20",

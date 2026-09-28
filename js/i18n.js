@@ -154,6 +154,20 @@ const I18n = (() => {
     document.body.classList.toggle('rtl', LANGUAGES[currentLang].dir === 'rtl');
   }
 
+  /* Version compacte (refonte) : une petite pastille « FR ▾ » au lieu
+     du grand sélecteur avec drapeaux. */
+  function renderCompactSelector() {
+    return `
+      <label class="lang-compact" title="${t('select_language')}">
+        <select onchange="I18n.setLang(this.value)" aria-label="${t('select_language')}">
+          ${Object.entries(LANGUAGES).map(([code, l]) =>
+            `<option value="${code}"${code===currentLang?' selected':''}>${code.toUpperCase()} · ${l.name}</option>`
+          ).join('')}
+        </select>
+        <span class="lang-compact-code">${currentLang.toUpperCase()}</span>
+      </label>`;
+  }
+
   function renderSelector() {
     return `
       <div class="lang-selector">
@@ -166,7 +180,7 @@ const I18n = (() => {
       </div>`;
   }
 
-  return { t, extend, setLang, getLang, getLanguages, getCurrent, init, renderSelector };
+  return { t, extend, setLang, getLang, getLanguages, getCurrent, init, renderSelector, renderCompactSelector };
 })();
 
 window.I18n = I18n;

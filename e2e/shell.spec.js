@@ -111,16 +111,16 @@ test('modale : Échap la ferme (accessibilité clavier)', async ({ page }) => {
   await expect(page.locator('#global-modal')).not.toHaveClass(/active/);
 });
 
-test('thème : suit prefers-color-scheme quand aucun choix n\'est enregistré', async ({ page }) => {
-  // Aucun choix explicite (localStorage.mc_theme vide, contexte neuf).
-  await page.emulateMedia({ colorScheme: 'light' });
-  await boot(page);
-  expect(await page.evaluate(() => document.body.classList.contains('light-theme')),
-    'OS clair → thème clair appliqué').toBe(true);
-
-  // Nouvelle navigation (pas de reload : plus robuste avec le SW) en OS sombre.
+test('thème (refonte 2.10) : clair par défaut, choix « sombre » explicite respecté', async ({ page }) => {
+  // Aucun choix explicite : clair, quel que soit le thème du système.
   await page.emulateMedia({ colorScheme: 'dark' });
   await boot(page);
   expect(await page.evaluate(() => document.body.classList.contains('light-theme')),
-    'OS sombre → thème sombre (défaut)').toBe(false);
+    'sans choix enregistré → thème clair par défaut').toBe(true);
+
+  // Choix explicite « sombre » : respecté à la navigation suivante.
+  await page.evaluate(() => localStorage.setItem('mc_theme', 'dark'));
+  await boot(page);
+  expect(await page.evaluate(() => document.body.classList.contains('light-theme')),
+    'choix « sombre » enregistré → thème sombre').toBe(false);
 });

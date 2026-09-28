@@ -110,48 +110,73 @@ const HospitalPortal = (() => {
       unreadMessages,
     };
     const apts = appointments.filter(a=>a.status==='pending' && a.date>=td).slice(0,3);
+    // ── Refonte : en-tête d'accueil, indicateurs colorés, services ──
+    const user = Auth.getUser() || {};
+    const hospital = window.HospitalsRegistry?.getCurrentHospital?.();
+    const dateLabel = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+    const firstName = String(user.name || '').trim().split(/\s+/)[0] || '';
+    const ic = (name) => window.McIcons?.icon(name) || '';
+    const navSections = new Set([...document.querySelectorAll('.nav-item[data-section]')].map(el => el.dataset.section));
+    const QUICK = [
+      ['patients', 'Patients'], ['consultations', 'Consultations'], ['prescriptions', 'Ordonnances'],
+      ['lab', 'Laboratoire'], ['appointments', 'Rendez-vous'], ['transfers', 'Transferts'],
+      ['inbox', 'Messages'], ['map', 'Carte'],
+    ].filter(([sec]) => !navSections.size || navSections.has(sec));
     main.innerHTML = `
-      <div class="page-header">
-        <h2>📊 ${t('nav_dashboard')}</h2>
-        <button class="btn btn-primary btn-sm" onclick="HospitalPortal.openNewPatient()">+ ${t('btn_new_patient')}</button>
-      </div>
-      <div class="stats-grid">
-        <div class="stat-card" style="border-top:3px solid var(--primary)">
+      <section class="mc-hero">
+        <div class="mc-hero-meta">
+          <span>${esc(hospital?.name || 'MedConnect')}</span>
+          <span class="mc-hero-date">${esc(dateLabel)}</span>
+        </div>
+        <h2 class="mc-hero-title">Bonjour${firstName ? `, ${esc(firstName)}` : ''}</h2>
+        <p class="mc-hero-text">${s.pendingApts} RDV en attente · ${s.unreadMessages} messages non lus · ${s.todayConsults} consultations aujourd'hui</p>
+        <button class="btn mc-hero-btn" onclick="HospitalPortal.openNewPatient()">${ic('plus')} ${t('btn_new_patient')}</button>
+      </section>
+      <div class="stats-grid mc-kpis">
+        <div class="stat-card" onclick="navigateMedConnect('patients')">
           <div class="stat-icon">👥</div><div class="stat-value">${s.totalPatients}</div>
           <div class="stat-label">${t('stat_total_patients')}</div>
           <div class="stat-sub">+${s.todayPatients} ${t('stat_today')}</div>
         </div>
-        <div class="stat-card" style="border-top:3px solid var(--secondary)">
+        <div class="stat-card" onclick="navigateMedConnect('consultations')">
           <div class="stat-icon">🩺</div><div class="stat-value">${s.totalConsults}</div>
           <div class="stat-label">${t('stat_consults')}</div>
           <div class="stat-sub">${s.todayConsults} ${t('stat_today')}</div>
         </div>
-        <div class="stat-card" style="border-top:3px solid #F59E0B">
+        <div class="stat-card" onclick="navigateMedConnect('appointments')">
           <div class="stat-icon">📅</div><div class="stat-value">${s.pendingApts}</div>
           <div class="stat-label">RDV en attente</div>
-          <div class="stat-sub"><button class="btn btn-ghost btn-xs" onclick="navigateMedConnect('appointments')">Voir →</button></div>
+          <div class="stat-sub">Voir l'agenda →</div>
         </div>
-        <div class="stat-card" style="border-top:3px solid #A855F7">
+        <div class="stat-card" onclick="navigateMedConnect('inbox')">
           <div class="stat-icon">📨</div><div class="stat-value">${s.unreadMessages}</div>
           <div class="stat-label">Messages non lus</div>
-          <div class="stat-sub"><button class="btn btn-ghost btn-xs" onclick="navigateMedConnect('inbox')">Voir →</button></div>
+          <div class="stat-sub">Ouvrir la messagerie →</div>
         </div>
       </div>
+      <h3 class="mc-section-title">Services</h3>
+      <div class="mc-quick-grid">
+        ${QUICK.map(([sec, label]) => `
+          <button class="mc-quick" onclick="navigateMedConnect('${sec}')">
+            ${window.McIcons?.sectionIcon(sec) || ''}<span>${label}</span>
+          </button>`).join('')}
+      </div>
       ${apts.length ? `
-        <h3 style="margin:.75rem 0 .5rem;color:var(--accent)">📅 RDV à venir</h3>
-        <div class="records-list" style="margin-bottom:1.5rem">
+        <h3 class="mc-section-title">RDV à venir</h3>
+        <div class="mc-list">
           ${apts.map(a=>{const p=DB.getPatientById(a.patient_id); return `
-            <div class="record-card" style="display:flex;align-items:center;gap:.85rem">
-              <span>⏳</span>
-              <div style="flex:1">
-                <strong>${a.date} à ${a.time}</strong> — ${esc(a.reason)||'—'}
-                ${p?`<span class="id-tag" style="margin-left:.4rem">${p.id}</span>`:''}
+            <div class="mc-list-row">
+              <span class="mc-list-bar mc-bar-aqua"></span>
+              <div class="mc-list-time">${esc(a.time || '')}<small>${esc(a.date || '')}</small></div>
+              <div class="mc-list-main">
+                <strong>${p ? `${esc(p.firstname)} ${esc(p.lastname)}` : esc(a.reason) || '—'}</strong>
+                <small>${esc(a.reason) || 'Consultation'}${p ? ` · ${p.id}` : ''}</small>
               </div>
-              <button class="btn btn-ghost btn-xs" onclick="AppointmentsModule.setStatus('${a.aid}','confirmed')">✅</button>
+              <button class="btn btn-ghost btn-xs" onclick="AppointmentsModule.setStatus('${a.aid}','confirmed')" aria-label="Confirmer">${ic('check') || '✅'}</button>
             </div>`}).join('')}
         </div>` : ''}
-      <div class="page-header" style="margin-top:1rem">
-        <h3>Patients récents</h3>
+      <div class="mc-section-head">
+        <h3 class="mc-section-title">Patients récents</h3>
         <button class="btn btn-ghost btn-sm" onclick="navigateMedConnect('patients')">Tous →</button>
       </div>
       <div class="records-list">
@@ -239,7 +264,7 @@ const HospitalPortal = (() => {
     const pending = p.medical_completion_status === 'pending';
     return `
       <div class="record-card patient-row" onclick="HospitalPortal.openDetail('${p.id}')">
-        <div class="patient-row-avatar">${p.gender==='F'?'👩':'👨'}</div>
+        <div class="patient-row-avatar mc-avatar ${p.gender==='F'?'mc-tint-magenta':'mc-tint-blue'}">${esc(((p.firstname||'?')[0]||'?')+((p.lastname||'')[0]||'')).toUpperCase()}</div>
         <div class="patient-row-info">
           <strong>${esc(p.firstname)} ${esc(p.lastname)}</strong>
           <span class="id-tag">${p.id}</span>
@@ -298,33 +323,56 @@ const HospitalPortal = (() => {
     const cons = DB.getPatientConsultations(id);
     const vacc = DB.getPatientVaccinations(id);
     const labs = DB.getPatientLabResults(id);
-    App.openModal(`🪪 ${p.firstname} ${p.lastname}`, `
-      <div class="id-badge-large">${p.id}</div>
-      <div style="font-size:.87rem">
-        <p><strong>${t('form_dob')} :</strong> ${p.dob||'—'} (${age} ${t('years')}) · ${p.gender==='F'?'♀':'♂'}</p>
-        <p><strong>${t('form_blood_type')} :</strong> ${p.blood_type||'—'} · <strong>${t('form_country')} :</strong> ${p.country_code||'—'}</p>
-        <p><strong>${t('form_phone')} :</strong> ${p.phone||'—'}</p>
-        <p><strong>${t('form_allergies')} :</strong> <span style="color:var(--danger)">${esc(p.allergies)||'Aucune'}</span></p>
-        <p><strong>${t('form_chronic')} :</strong> ${esc(p.chronic)||'—'}</p>
+    // ── Refonte : dossier patient (en-tête, alertes, repères colorés) ──
+    const ic = (name) => window.McIcons?.icon(name) || '';
+    const initials = (((p.firstname || '?')[0] || '?') + ((p.lastname || '')[0] || '')).toUpperCase();
+    const allergies = String(p.allergies || '').trim();
+    const chronic = String(p.chronic || '').trim();
+    const role = Auth.getUser()?.role;
+    const canConsult = window.HospitalCapabilities?.can?.(role, 'create_consultation');
+    const canTransfer = window.HospitalCapabilities?.can?.(role, 'decide_transfer');
+    const tile = (tint, icon, label, value) => `
+      <div class="mc-vital mc-tint-${tint}">
+        ${ic(icon)}<span class="mc-vital-label">${label}</span><strong>${value}</strong>
+      </div>`;
+    App.openModal(`${p.firstname} ${p.lastname}`, `
+      <div class="mc-patient-head">
+        <div class="mc-avatar mc-avatar-lg ${p.gender==='F'?'mc-tint-magenta':'mc-tint-blue'}">${esc(initials)}</div>
+        <div class="mc-patient-id">
+          <strong>${esc(p.firstname)} ${esc(p.lastname)}</strong>
+          <span>${age} ${t('years')} · ${p.gender==='F'?'F':'M'} · <span class="id-tag">${p.id}</span></span>
+        </div>
+        <span class="mc-badge mc-tint-green">${ic('shield-lock')} Sécurisé</span>
       </div>
-      <div style="display:flex;gap:.5rem;margin:.75rem 0;flex-wrap:wrap">
-        <span class="chip">📋 ${cons.length} consultations</span>
-        <span class="chip">💉 ${vacc.length} vaccins</span>
-        <span class="chip">🧪 ${labs.length} analyses</span>
+      ${allergies ? `<div class="mc-alert mc-alert-danger">${ic('alert-triangle')}<span><strong>Allergie :</strong> ${esc(allergies)}</span></div>` : ''}
+      ${chronic ? `<div class="mc-alert mc-alert-warning">${ic('heartbeat')}<span><strong>${t('form_chronic')} :</strong> ${esc(chronic)}</span></div>` : ''}
+      <div class="mc-vitals">
+        ${tile('red', 'droplet', t('form_blood_type'), esc(p.blood_type || '—'))}
+        ${tile('orange', 'scale', t('weight'), p.weight ? `${esc(p.weight)} kg` : '—')}
+        ${tile('blue', 'calendar-event', t('form_dob'), esc(p.dob || '—'))}
+        ${tile('aqua', 'world', t('form_country'), esc(p.country_code || '—'))}
       </div>
-      <h4 style="margin-bottom:.5rem">📋 Dernières consultations</h4>
-      ${cons.slice(0,3).map(c=>`
-        <div class="mini-record">
-          <span>📅 ${c.date}</span><span>${esc(c.diagnosis)}</span>
-        </div>`).join('')||`<p style="color:var(--text-muted);font-size:.85rem">${t('no_data')}</p>`}
-      <div class="modal-footer">
-        ${window.HospitalCapabilities?.can?.(Auth.getUser()?.role, 'create_consultation')
-          ? `<button class="btn btn-primary btn-sm" onclick="App.closeModal();HospitalPortal.openConsult('${id}')">🩺 ${t('new_consultation')}</button>` : ''}
-        <button class="btn btn-ghost btn-sm" onclick="App.closeModal();LabModule.openNew('${id}')">🧪 Analyse</button>
-        <button class="btn btn-ghost btn-sm" onclick="App.closeModal();AppointmentsModule.openNew('${id}')">📅 RDV</button>
-        <button class="btn btn-ghost btn-sm" onclick="PatientPortal.printRecord('${id}')">🖨️ ${t('btn_print')}</button>
-        ${window.HospitalCapabilities?.can?.(Auth.getUser()?.role, 'decide_transfer')
-          ? `<button class="btn btn-ghost btn-sm" style="color:var(--danger)" onclick="App.closeModal();HospitalPortal.openEmergencyTransfer('${id}')">🚑 Transférer le patient</button>` : ''}
+      <div class="mc-counters">
+        <div class="mc-counter mc-tint-violet">${ic('stethoscope')}<strong>${cons.length}</strong><span>consultations</span></div>
+        <div class="mc-counter mc-tint-magenta">${ic('vaccine')}<strong>${vacc.length}</strong><span>vaccins</span></div>
+        <div class="mc-counter mc-tint-orange">${ic('flask')}<strong>${labs.length}</strong><span>analyses</span></div>
+      </div>
+      <p class="mc-contact">${ic('mail')} ${t('form_phone')} : ${esc(p.phone || '—')}</p>
+      <h4 class="mc-section-title">Dernières consultations</h4>
+      <div class="mc-list">
+        ${cons.slice(0,3).map(c=>`
+          <div class="mc-list-row">
+            <span class="mc-list-bar" style="background:var(--tint-violet-fg)"></span>
+            <div class="mc-list-time">${esc(c.date || '')}</div>
+            <div class="mc-list-main"><strong>${esc(c.diagnosis) || '—'}</strong><small>${esc(c.doctor || '')}</small></div>
+          </div>`).join('') || `<div class="mc-list-row"><div class="mc-list-main"><small>${t('no_data')}</small></div></div>`}
+      </div>
+      <div class="modal-footer mc-actions">
+        ${canConsult ? `<button class="btn btn-primary btn-sm" onclick="App.closeModal();HospitalPortal.openConsult('${id}')">${ic('stethoscope')} ${t('new_consultation')}</button>` : ''}
+        <button class="btn btn-ghost btn-sm" onclick="App.closeModal();LabModule.openNew('${id}')">${ic('flask')} Analyse</button>
+        <button class="btn btn-ghost btn-sm" onclick="App.closeModal();AppointmentsModule.openNew('${id}')">${ic('calendar-event')} RDV</button>
+        <button class="btn btn-ghost btn-sm" onclick="PatientPortal.printRecord('${id}')">${ic('file-certificate')} ${t('btn_print')}</button>
+        ${canTransfer ? `<button class="btn btn-ghost btn-sm mc-danger-text" onclick="App.closeModal();HospitalPortal.openEmergencyTransfer('${id}')">${ic('ambulance')} Transférer le patient</button>` : ''}
       </div>`);
   }
 
