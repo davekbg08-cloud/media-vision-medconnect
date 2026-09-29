@@ -1,8 +1,17 @@
 {
-  "version": "2.10.3",
-  "build": "2026.09.28.4",
-  "buildDate": "2026-09-28",
+  "version": "2.10.4",
+  "build": "2026.09.29.1",
+  "buildDate": "2026-09-29",
   "changelog": [
+    {
+      "version": "2.10.4",
+      "date": "2026-09-29",
+      "notes": [
+        "Espace hôpital sur ordinateur aux couleurs de la refonte : menu avec icônes colorées, tableau de bord avec bandeau, indicateurs colorés et tuile d’abonnement.",
+        "Abonnements : un établissement validé reçoit automatiquement 30 jours d’essai gratuit ; à l’échéance (essai, abonnement manuel ou Mobile Money), l’abonnement passe en période de grâce puis expire. Un bandeau propose « Renouveler » à l’administrateur de l’établissement.",
+        "Correctif : le bouton « Activer » un abonnement (administration) fonctionne à nouveau dans l’application installée."
+      ]
+    },
     {
       "version": "2.10.3",
       "date": "2026-09-28",

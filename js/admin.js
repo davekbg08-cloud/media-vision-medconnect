@@ -825,6 +825,7 @@ const AdminModule = (() => {
 
     const STATUS_LABEL = {
       active:       { t:'✅ Actif',            c:'var(--secondary)' },
+      trial:        { t:'🎁 Essai gratuit',    c:'var(--primary)' },
       grace_period: { t:'⏳ Période de grâce', c:'var(--accent)' },
       expired:      { t:'🔒 Expiré',           c:'var(--danger)' },
       suspended:    { t:'🚫 Suspendu',         c:'var(--danger)' },
@@ -862,7 +863,7 @@ const AdminModule = (() => {
       // et le RESTAIT après clic sur "Activer" — aucun changement visible,
       // source de confusion (le statut ne changeait pas).
       const hasPaidSub = !!(sub.endDate || sub.activatedAt || sub.plan);
-      const subActive = sub.status === 'active' || sub.status === 'grace_period';
+      const subActive = ['active', 'grace_period', 'trial'].includes(sub.status);
       // "Actif" n'est réel que si un abonnement payé existe. Un
       // établissement 'pending' ou validé-sans-abonnement n'est jamais
       // traité comme actif (pas de bouton Désactiver).
@@ -908,12 +909,12 @@ const AdminModule = (() => {
      active ici. Source de vérité : subscriptions/{hospitalId}
      (admin-only côté règles), lue par ExchangeBridge. */
   const SUBSCRIPTION_PAY_NUMBER = '0856373707';
-  const SUB_PLANS = { essentiel:'Essentiel', pro:'Pro', institution:'Institution' };
+  const SUB_PLANS = { trial:'Essai gratuit', essentiel:'Essentiel', pro:'Pro', institution:'Institution' };
 
   // Anti double-appui : actions à plusieurs écritures cloud awaitées —
   // un second clic pendant le traitement relançait tout le flux.
   let _subActionBusy = false;
-  async function activateSubscription(hospitalId, plan = 'pro', months = 1) {
+  async function activateSubscription(hospitalId, plan = 'pro', months = 1, opts = {}) {
     if (_subActionBusy) return;
     if (typeof firebaseDB === 'undefined' || !firebaseDB) {
       App.toast('❌ Connexion requise pour activer un abonnement.', 'error'); return;
@@ -922,7 +923,11 @@ const AdminModule = (() => {
     const start = new Date();
     const end = new Date(); end.setMonth(end.getMonth() + Number(months || 1));
 
-    if (!confirm(`Activer l'abonnement « ${SUB_PLANS[plan] || plan} » pour ${h?.name || hospitalId} pendant ${months} mois ?\n\nÀ ne faire qu'après réception du paiement au ${SUBSCRIPTION_PAY_NUMBER}.`)) return;
+    // La fenêtre « Activer un abonnement » est déjà la confirmation : la
+    // boîte native confirm() en plus était parfois bloquée ou ignorée
+    // (WebView, application installée) — le bouton semblait ne rien faire.
+    if (!opts.skipConfirm && !confirm(`Activer l'abonnement « ${SUB_PLANS[plan] || plan} » pour ${h?.name || hospitalId} pendant ${months} mois ?\n\nÀ ne faire qu'après réception du paiement au ${SUBSCRIPTION_PAY_NUMBER}.`)) return;
+    App.toast('Activation en cours…');
 
     _subActionBusy = true;
     try {
@@ -930,8 +935,9 @@ const AdminModule = (() => {
         hospitalId,
         establishmentId: hospitalId,
         plan,
-        status: 'active',
-        billingCycle: 'monthly',
+        status: plan === 'trial' ? 'trial' : 'active',
+        billingCycle: plan === 'trial' ? 'trial' : 'monthly',
+        paymentMethod: plan === 'trial' ? 'trial' : 'manual',
         startDate: start.toISOString(),
         endDate: end.toISOString(),
         graceUntil: '',
@@ -1058,7 +1064,7 @@ const AdminModule = (() => {
     const plan = document.getElementById('sub-plan')?.value || 'pro';
     const months = document.getElementById('sub-months')?.value || '1';
     App.closeModal();
-    activateSubscription(hospitalId, plan, months);
+    activateSubscription(hospitalId, plan, months, { skipConfirm: true });
   }
 
   return {

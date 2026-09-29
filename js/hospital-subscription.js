@@ -40,6 +40,7 @@ const HospitalSubscriptionModule = (() => {
   const STATUS_LABELS = {
     active: '✅ Actif',
     grace_period: '⏳ Période de grâce',
+    trial: '🎁 Essai gratuit',
     expired: '❌ Expiré',
     suspended: '⛔ Suspendu',
   };

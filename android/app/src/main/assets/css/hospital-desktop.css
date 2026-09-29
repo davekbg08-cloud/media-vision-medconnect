@@ -275,3 +275,22 @@ body.hospital-desktop-open .toast-container {
 }
 .ha-role-btn:hover { background: rgba(47,109,246,.12); border-color: var(--primary, #2f6df6); }
 .ha-role-icon { font-size: 1.6rem; }
+
+
+/* ── Refonte 2.10.4 : espace hôpital sur ordinateur ── */
+.light-theme #hospital-desktop-root { background: var(--bg); color: var(--text); }
+.light-theme .hospital-sidebar { background: var(--surface); }
+.mc-brand-tile {
+  width: 2.3rem; height: 2.3rem; border-radius: 10px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--primary); color: #fff; font-size: 1rem !important;
+}
+.mc-brand-tile .mc-icon { width: 1.3rem; height: 1.3rem; }
+.hospital-nav-item { display: flex; align-items: center; gap: .6rem; border-radius: 10px; }
+.hospital-nav-icon .mc-tint { width: 1.8rem; height: 1.8rem; border-radius: 8px; }
+.hospital-nav-icon .mc-icon { width: 1rem; height: 1rem; }
+.hospital-nav-item.active { background: var(--tint-blue-bg); color: var(--tint-blue-fg); font-weight: 600; }
+.hospital-stats-grid .hospital-stat-card { border-radius: 14px; border: 1px solid var(--border); }
+.hospital-stat-card .mc-stat-tile { margin-bottom: .5rem; }
+.mc-sub-alert { align-items: center; }
+.mc-sub-alert span { flex: 1; }
