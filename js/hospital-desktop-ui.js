@@ -223,7 +223,7 @@ const HospitalDesktopUI = (() => {
     return `
       <aside class="hospital-sidebar">
         <div class="hospital-sidebar-brand">
-          <span>🏥</span>
+          <span class="mc-brand-tile">${window.McIcons?.icon('heart-rate-monitor') || '🏥'}</span>
           <div>
             <strong>${esc(hospital.name || 'Établissement')}</strong>
             <small>${hospital.officialId ? 'Matricule ' + esc(hospital.officialId) : 'Espace hôpital — Desktop'}</small>
@@ -233,7 +233,7 @@ const HospitalDesktopUI = (() => {
           ${menu.map(m => `
             <button class="hospital-nav-item" data-route="${esc(m.key)}"
               onclick="HospitalDesktopUI.navigate('${esc(m.key)}')">
-              <span>${m.icon}</span> ${esc(m.label)}
+              <span class="hospital-nav-icon">${window.McIcons?.desktopRouteIcon(m.key) || m.icon}</span> ${esc(m.label)}
               ${m.key === 'messages' ? '<span id="hd-msg-badge" class="badge-dot" style="display:none;margin-left:.4rem"></span>' : ''}
             </button>`).join('')}
         </nav>
@@ -343,19 +343,55 @@ const HospitalDesktopUI = (() => {
     const occupied = beds.filter(b => b.status === 'occupied').length;
     const admitted = admissions.filter(a => a.status === 'admitted').length;
     const labPending = labRequests.filter(o => o.status !== 'completed').length;
-    const subLabels = { active:'✅ Actif', grace_period:'⏳ Grâce', expired:'❌ Expiré', suspended:'⛔ Suspendu' };
+    // ── Refonte : tableau de bord du bureau hôpital ──
+    const SUB = {
+      active:       ['Actif', 'green', 'check'],
+      trial:        ['Essai gratuit', 'blue', 'file-certificate'],
+      grace_period: ['Période de grâce', 'yellow', 'clock'],
+      expired:      ['Expiré', 'red', 'alert-triangle'],
+      suspended:    ['Suspendu', 'red', 'ban'],
+    };
+    const subInfo = SUB[sub.status] || ['Non défini', 'gray', 'alert-triangle'];
+    const ic = (name) => window.McIcons?.icon(name) || '';
+    const role = HospitalPermissions.getCurrentRole();
+    const canManageSub = HospitalPermissions.canAccess(role, 'subscription');
+    const subEnd = sub.endDate ? String(sub.endDate).slice(0, 10) : '';
+    const needsAction = ['expired', 'suspended', 'grace_period'].includes(sub.status)
+      || (sub.status === 'trial' && subEnd && (Date.parse(subEnd) - Date.now()) < 7 * 86400000);
+    const dateLabel = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+    const kpi = (tint, iconName, value, label) => `
+      <div class="hospital-stat-card mc-stat-${tint}">
+        <span class="mc-tint mc-tint-${tint} mc-stat-tile">${ic(iconName)}</span>
+        <h3>${value}</h3><p>${label}</p>
+      </div>`;
 
     container.innerHTML = `
-      <div class="hospital-page-header">
-        <div><h1>${esc(hospital.name || 'Établissement')}</h1>
-        <p>Vue d'ensemble de l'activité hospitalière</p></div>
-      </div>
+      <section class="mc-hero">
+        <div class="mc-hero-meta"><span>${ic('building-hospital')} Espace établissement</span><span class="mc-hero-date">${esc(dateLabel)}</span></div>
+        <h2 class="mc-hero-title">${esc(hospital.name || 'Établissement')}</h2>
+        <p class="mc-hero-text">${admitted} patient(s) hospitalisé(s) · ${occupied}/${beds.length} lits occupés · ${labPending} analyse(s) en attente</p>
+      </section>
+
+      ${needsAction ? `
+      <div class="mc-alert ${sub.status === 'trial' || sub.status === 'grace_period' ? 'mc-alert-warning' : 'mc-alert-danger'} mc-sub-alert">
+        ${ic('alert-triangle')}
+        <span><strong>Abonnement : ${esc(subInfo[0])}${subEnd ? ` (jusqu'au ${esc(subEnd)})` : ''}.</strong>
+          ${sub.status === 'expired' || sub.status === 'suspended'
+            ? 'La consultation reste possible, mais les nouvelles actions sont bloquées jusqu\'au renouvellement.'
+            : 'Pensez à renouveler pour éviter toute interruption.'}
+          ${canManageSub ? '' : ' Contactez l\'administrateur de votre établissement.'}
+        </span>
+        ${canManageSub ? `<button class="btn btn-primary btn-sm" onclick="HospitalDesktopUI.navigate('subscription')">${ic('file-certificate')} Renouveler</button>` : ''}
+      </div>` : ''}
 
       <div class="hospital-stats-grid">
-        <div class="hospital-stat-card"><h3>${beds.length}</h3><p>🛏️ Lits (${occupied} occupés)</p></div>
-        <div class="hospital-stat-card"><h3>${admitted}</h3><p>👥 Patients hospitalisés</p></div>
-        <div class="hospital-stat-card"><h3>${labPending}</h3><p>🧪 Analyses en attente</p></div>
-        <div class="hospital-stat-card"><h3>${subLabels[sub.status] || esc(sub.status)}</h3><p>💳 Abonnement</p></div>
+        ${kpi('aqua', 'bed', `${occupied}/${beds.length}`, 'Lits occupés')}
+        ${kpi('blue', 'users', admitted, 'Patients hospitalisés')}
+        ${kpi('orange', 'flask', labPending, 'Analyses en attente')}
+        <div class="hospital-stat-card mc-stat-${subInfo[1]}"${canManageSub ? ` style="cursor:pointer" onclick="HospitalDesktopUI.navigate('subscription')"` : ''}>
+          <span class="mc-tint mc-tint-${subInfo[1]} mc-stat-tile">${ic(subInfo[2])}</span>
+          <h3>${esc(subInfo[0])}</h3><p>Abonnement${subEnd ? ` · jusqu'au ${esc(subEnd)}` : ''}</p>
+        </div>
       </div>
 
       <div class="card">

@@ -7,6 +7,12 @@ jour) et l'écran **Paramètres → À propos**.
 La source unique de la version en cours est `config/app-version.json` —
 ce fichier doit rester cohérent avec elle.
 
+## 2.10.4 — 2026-09-29
+
+**Abonnements et bureau hôpital** — essai gratuit de 30 jours à la validation (statut trial accepté par les règles), échéances automatiques pour tous les abonnements datés, activation admin sans confirm() natif, statuts « Essai gratuit » ; espace hôpital desktop aux couleurs de la refonte (menu, tableau de bord, alerte de renouvellement).
+
+Version **2.10.4** (build 2026.09.29.1, versionCode 55, cache `medconnect-v4.55`). Miroir Android resynchronisé.
+
 ## 2.10.3 — 2026-09-28
 
 **Refonte (4e vague, finitions)** — tableau de bord administrateur (bandeau ardoise, indicateurs, diffusion, bannière App Check conservée), sous-titres décorés, tableaux, formulaires, alertes et fenêtres harmonisés (feuille mobile préservée).

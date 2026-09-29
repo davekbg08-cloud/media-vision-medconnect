@@ -1247,6 +1247,28 @@ const HospitalsRegistry = (() => {
       }
     } catch (e) { confirmed = false; console.warn('[Registry] MAJ compte établissement :', e?.message || e); }
 
+    // Essai gratuit de 30 jours à la validation : l'établissement a un
+    // statut d'abonnement réel dès le départ (plus de « validé sans
+    // abonnement » qui passait comme actif), et l'expiration est gérée
+    // par la tâche planifiée côté serveur.
+    if (approve && typeof firebaseDB !== 'undefined' && firebaseDB) {
+      try {
+        const ref = firebaseDB.collection('subscriptions').doc(establishmentId);
+        const existing = await ref.get();
+        if (!existing.exists) {
+          const now = new Date();
+          await ref.set({
+            hospitalId: establishmentId, establishmentId,
+            plan: 'trial', status: 'trial', billingCycle: 'trial',
+            startDate: now.toISOString(),
+            endDate: new Date(now.getTime() + 30 * 86400000).toISOString(),
+            graceUntil: '', activatedAt: now.toISOString(), paymentMethod: 'trial',
+          });
+          window.ExchangeBridge?.invalidateSubscriptionCache?.(establishmentId);
+        }
+      } catch (e) { console.warn('[Registry] Essai gratuit :', e?.message || e); }
+    }
+
     App?.toast?.(!confirmed
       ? '⚠️ Action enregistrée localement, mais non confirmée côté serveur — réessayez.'
       : (approve ? '✅ Établissement validé.' : 'Établissement refusé.'), !confirmed ? 'warning' : undefined);

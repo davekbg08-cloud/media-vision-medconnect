@@ -183,7 +183,7 @@ service cloud.firestore {
         : 'active';
     }
     function hospitalSubscriptionOk(hospitalId) {
-      return subscriptionStatus(hospitalId) in ['active', 'grace_period'];
+      return subscriptionStatus(hospitalId) in ['active', 'grace_period', 'trial'];
     }
     // Utilisée telle quelle uniquement pour /patients : la création
     // de patient reste bloquée par abonnement expiré/suspendu quelle

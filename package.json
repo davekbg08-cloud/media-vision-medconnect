@@ -1,6 +1,6 @@
 {
   "name": "medconnect",
-  "version": "2.10.3",
+  "version": "2.10.4",
   "description": "MedConnect — Application médicale universelle",
   "main": "index.html",
   "scripts": {

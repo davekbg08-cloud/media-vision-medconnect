@@ -42,6 +42,23 @@
   };
 
   /** Icône colorée d'une rubrique, ou null si la rubrique est inconnue. */
+  /* Rubriques de l'espace hôpital sur ordinateur. */
+  const DESKTOP_ROUTES = {
+    dashboard: ['layout-dashboard', 'blue'], reception: ['building-hospital', 'aqua'],
+    patients: ['users', 'blue'], records: ['id-badge-2', 'blue'],
+    consultations: ['stethoscope', 'violet'], prescriptions: ['prescription', 'green'],
+    emergency: ['ambulance', 'red'], maternity: ['baby-carriage', 'magenta'],
+    beds: ['bed', 'aqua'], lab: ['flask', 'orange'], pharmacy: ['pill', 'green'],
+    doctors: ['stethoscope', 'violet'], ai: ['heart-rate-monitor', 'violet'],
+    reporting: ['chart-line', 'violet'], messages: ['mail', 'yellow'],
+    subscription: ['file-certificate', 'yellow'], settings: ['settings', 'gray'],
+  };
+
+  function desktopRouteIcon(route) {
+    const entry = DESKTOP_ROUTES[route];
+    return entry ? `<span class="mc-tint mc-tint-${entry[1]}">${icon(entry[0])}</span>` : null;
+  }
+
   function sectionIcon(section) {
     const entry = SECTIONS[section];
     if (!entry) return null;
@@ -173,6 +190,19 @@
     if (typeof MutationObserver === 'undefined') return;
     const targets = [document.getElementById('main-content'), document.getElementById('global-modal')]
       .filter(Boolean);
+    // Espace hôpital (ordinateur) : ajouté dynamiquement au <body>.
+    const desktopWatch = new MutationObserver(() => {
+      const root = document.getElementById('hospital-desktop-root');
+      if (root && !root.dataset.mcWatched) {
+        root.dataset.mcWatched = '1';
+        let pending = false;
+        const run = () => { pending = false; decorateButtons(root); decorateStatIcons(root); };
+        run();
+        new MutationObserver(() => { if (!pending) { pending = true; requestAnimationFrame(run); } })
+          .observe(root, { childList: true, subtree: true });
+      }
+    });
+    desktopWatch.observe(document.body, { childList: true });
     for (const target of targets) {
       let scheduled = false;
       new MutationObserver(() => {
@@ -192,5 +222,5 @@
     else watchMainContent();
   }
 
-  window.McIcons = { icon, sectionIcon, roleIcon, decoratePageHeader, decorateStatIcons, decorateButtons, SECTIONS, ROLES, STAT_EMOJI, BUTTON_EMOJI };
+  window.McIcons = { icon, sectionIcon, desktopRouteIcon, DESKTOP_ROUTES, roleIcon, decoratePageHeader, decorateStatIcons, decorateButtons, SECTIONS, ROLES, STAT_EMOJI, BUTTON_EMOJI };
 })();

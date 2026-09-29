@@ -199,6 +199,13 @@ const ExchangeBridge = (() => {
     if (status === 'active') {
       return { allowed: true, status, message: null, warning: null };
     }
+    if (status === 'trial') {
+      return {
+        allowed: true, status,
+        message: null,
+        warning: sub.endDate ? `Essai gratuit jusqu'au ${String(sub.endDate).slice(0,10)}.` : null,
+      };
+    }
     if (status === 'grace_period') {
       return {
         allowed: true, status,
@@ -353,6 +360,7 @@ const ExchangeBridge = (() => {
     const labels = {
       active:       { icon: '☁️', text: 'Cloud synchronisé', color: 'var(--secondary)' },
       grace_period: { icon: '⏳', text: 'Période de grâce', color: 'var(--accent)' },
+      trial:        { icon: '🎁', text: 'Essai gratuit', color: 'var(--primary)' },
       expired:      { icon: '🔒', text: 'Lecture seule — abonnement expiré', color: 'var(--danger)' },
       suspended:    { icon: '🚫', text: 'Lecture seule — abonnement suspendu', color: 'var(--danger)' },
     };

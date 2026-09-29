@@ -51,6 +51,6 @@ test('fonctions exportées et règles : dépôts serveur uniquement, config lisi
   assert.match(rules, /match \/appConfig\/\{configId\} \{\s*allow read: if signedIn\(\);\s*allow write: if false;/);
 });
 
-test("l'expiration automatique ne touche que les abonnements payés par pawaPay", () => {
-  assert.match(read('functions/pawapay.js'), /where\('paymentMethod', '==', 'pawapay'\)/);
+test("l'expiration automatique couvre tous les abonnements datés (actif, grâce, essai)", () => {
+  assert.match(read('functions/pawapay.js'), /where\('status', 'in', \['active', 'grace_period', 'trial'\]\)/);
 });

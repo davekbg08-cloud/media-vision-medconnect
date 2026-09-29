@@ -214,18 +214,22 @@ exports.reconcileSubscriptionDeposits = onSchedule(
   }
 );
 
-/* Échéances des abonnements payés par pawaPay (et seulement eux : les
-   abonnements activés à la main gardent leur comportement actuel).
-   active → grace_period (7 jours) → expired. */
+/* Échéances de tous les abonnements datés (payés par pawaPay, activés
+   à la main, ou essai gratuit) :
+   active → grace_period (7 jours) → expired ; trial → expired. */
 exports.expirePawapaySubscriptions = onSchedule(
   { schedule: 'every day 02:00', timeZone: 'Africa/Lubumbashi', region: REGION },
   async () => {
     const now = Date.now();
-    const subs = await db().collection('subscriptions').where('paymentMethod', '==', 'pawapay').get();
+    const subs = await db().collection('subscriptions')
+      .where('status', 'in', ['active', 'grace_period', 'trial']).get();
     for (const doc of subs.docs) {
       const s = doc.data();
       const end = Date.parse(s.endDate || '');
-      if (s.status === 'active' && end < now) {
+      if (!Number.isFinite(end)) continue;
+      if (s.status === 'trial' && end < now) {
+        await doc.ref.set({ status: 'expired', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      } else if (s.status === 'active' && end < now) {
         await doc.ref.set({
           status: 'grace_period',
           graceUntil: new Date(end + GRACE_DAYS * DAY_MS).toISOString(),
