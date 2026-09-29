@@ -58,8 +58,11 @@ test("l'expiration automatique couvre tous les abonnements datés (actif, grâce
   assert.match(read('functions/pawapay.js'), /where\('status', 'in', \['active', 'grace_period', 'trial'\]\)/);
 });
 
-test("paiement : client Cloud Functions créé avec la région sur l'application (SDK compat)", () => {
+test("paiement : appel HTTP direct des fonctions (sans le SDK Messaging)", () => {
   const ui = read('js/hospital-subscription.js');
-  assert.match(ui, /firebase\.app\(\)\.functions\('europe-west1'\)/);
-  assert.ok(!/const fns = firebaseFunctions;/.test(ui), "plus de dépendance au client global resté null");
+  assert.match(ui, /FUNCTIONS_BASE = 'https:\/\/europe-west1-medconnect-e81ba\.cloudfunctions\.net'/);
+  assert.match(ui, /Authorization: `Bearer \$\{await user\.getIdToken\(\)\}`/);
+  assert.match(ui, /headers\['X-Firebase-AppCheck'\] = ac\.token/);
+  assert.match(ui, /body: JSON\.stringify\(\{ data \}\)/);
+  assert.match(read('index.html'), /connect-src[^"]*https:\/\/\*\.cloudfunctions\.net/);
 });

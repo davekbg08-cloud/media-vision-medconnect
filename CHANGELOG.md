@@ -7,6 +7,12 @@ jour) et l'écran **Paramètres → À propos**.
 La source unique de la version en cours est `config/app-version.json` —
 ce fichier doit rester cohérent avec elle.
 
+## 2.10.9 — 2026-09-29
+
+**Correctif paiement (2)** — appel HTTP direct des fonctions callable (jeton Firebase Auth + App Check), sans le SDK compat qui tentait d'enregistrer le service worker Messaging à la racine (404).
+
+Version **2.10.9** (build 2026.09.29.6, versionCode 60, cache `medconnect-v4.60`). Miroir Android resynchronisé.
+
 ## 2.10.8 — 2026-09-29
 
 **Correctif paiement** — client Cloud Functions de l'abonnement créé via firebase.app().functions('europe-west1') (SDK compat), au lieu du client global resté null.
