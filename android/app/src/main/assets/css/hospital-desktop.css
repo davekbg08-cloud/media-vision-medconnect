@@ -295,3 +295,28 @@ body.hospital-desktop-open .toast-container {
 .mc-sub-alert { align-items: center; }
 .mc-alert-info { background: var(--tint-blue-bg); color: var(--tint-blue-fg); }
 .mc-sub-alert span { flex: 1; }
+
+/* ── Refonte 2.10.6 : pages du bureau en profondeur ── */
+.hospital-page-header h1.mc-page-title { display: flex; align-items: center; gap: .65rem; }
+.mc-inline-icon { display: inline-flex; vertical-align: -0.15em; margin-right: .3rem; color: var(--primary); }
+.mc-inline-icon .mc-icon { width: 1em; height: 1em; }
+#hospital-desktop-root .mc-avatar { display: inline-flex; align-items: center; justify-content: center; font-weight: 700; font-size: .85rem; border-radius: 50%; }
+.mrd-avatar.mc-avatar { width: 2.6rem; height: 2.6rem; }
+/* Cartes, listes et mini-statistiques des modules du bureau */
+#hospital-desktop-root .card,
+#hospital-desktop-root .record-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-sm); }
+#hospital-desktop-root .hospital-stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 1rem 1.1rem; }
+#hospital-desktop-root .hospital-stat-card h3 { font-size: 1.6rem; margin: 0 0 .15rem; }
+#hospital-desktop-root .hospital-stat-card p { color: var(--text-muted); margin: 0; }
+#hospital-desktop-root .hospital-stat-card:nth-child(4n+1) { border-top: 3px solid var(--tint-blue-fg); }
+#hospital-desktop-root .hospital-stat-card:nth-child(4n+2) { border-top: 3px solid var(--tint-red-fg); }
+#hospital-desktop-root .hospital-stat-card:nth-child(4n+3) { border-top: 3px solid var(--tint-violet-fg); }
+#hospital-desktop-root .hospital-stat-card:nth-child(4n+4) { border-top: 3px solid var(--tint-aqua-fg); }
+#hospital-desktop-root .hospital-stat-card[class*="mc-stat-"] { border-top-width: 1px; }
+#hospital-desktop-root .id-tag, #hospital-desktop-root code { border-radius: 6px; }
+#hospital-desktop-root input, #hospital-desktop-root select, #hospital-desktop-root textarea { border-radius: 10px; }
+#hospital-desktop-root input:focus, #hospital-desktop-root select:focus, #hospital-desktop-root textarea:focus {
+  border-color: var(--primary); box-shadow: 0 0 0 3px rgba(29,111,224,.15); outline: none;
+}
+.hospital-topbar { border-bottom: 1px solid var(--border); }
+#hospital-topbar-title { font-weight: 600; }

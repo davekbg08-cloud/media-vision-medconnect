@@ -170,3 +170,11 @@ test('mobile : les fenêtres gardent leur forme de feuille (coins arrondis deskt
   const css = read('css/style.css');
   assert.match(css, /@media \(min-width: 769px\) \{ \.modal \{ border-radius: 18px; \} \}/);
 });
+
+test("décoration en profondeur : bureau hôpital et application (titres, avatars, emojis de texte)", () => {
+  const src = read('js/icons.js');
+  assert.match(src, /function decorateDesktop\(root\)/);
+  assert.match(src, /function decorateInline\(content\)/);
+  assert.match(src, /decorateInline\(root\); \/\/ en dernier/, "après les tuiles de statistiques");
+  assert.match(src, /\.stat-icon, \.mc-tint, \.nav-icon/, 'ne touche jamais aux tuiles déjà décorées');
+});

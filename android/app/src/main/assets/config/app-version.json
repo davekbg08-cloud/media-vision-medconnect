@@ -1,8 +1,16 @@
 {
-  "version": "2.10.5",
-  "build": "2026.09.29.2",
+  "version": "2.10.6",
+  "build": "2026.09.29.3",
   "buildDate": "2026-09-29",
   "changelog": [
+    {
+      "version": "2.10.6",
+      "date": "2026-09-29",
+      "notes": [
+        "Refonte en profondeur de l’espace hôpital sur ordinateur : chaque page (patients, dossiers, consultations, ordonnances, urgences, maternité, laboratoire, IA…) affiche l’icône colorée de sa rubrique, les avatars deviennent des initiales colorées et les petits emojis des listes des icônes nettes ; cartes, statistiques et champs harmonisés.",
+        "Même traitement des listes dans l’application mobile."
+      ]
+    },
     {
       "version": "2.10.5",
       "date": "2026-09-29",

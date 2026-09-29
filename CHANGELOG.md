@@ -7,6 +7,12 @@ jour) et l'écran **Paramètres → À propos**.
 La source unique de la version en cours est `config/app-version.json` —
 ce fichier doit rester cohérent avec elle.
 
+## 2.10.6 — 2026-09-29
+
+**Refonte en profondeur du bureau** — décoration automatique de toutes les pages de l'espace hôpital (titre, avatars à initiales, icônes en ligne), cartes/statistiques/champs harmonisés ; même décoration des listes côté application. Test E2E dédié.
+
+Version **2.10.6** (build 2026.09.29.3, versionCode 57, cache `medconnect-v4.57`). Miroir Android resynchronisé.
+
 ## 2.10.5 — 2026-09-29
 
 **Premier abonnement** — bandeau permanent pendant l'essai (« Choisir une formule »), « Renouveler » réservé aux échéances d'abonnements payés ; un paiement pendant l'essai prolonge à partir de la fin de l'essai.

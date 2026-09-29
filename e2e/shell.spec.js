@@ -124,3 +124,25 @@ test('thème (refonte 2.10) : clair par défaut, choix « sombre » explicite re
   expect(await page.evaluate(() => document.body.classList.contains('light-theme')),
     'choix « sombre » enregistré → thème sombre').toBe(false);
 });
+
+test('bureau hôpital : titres, avatars et petits emojis deviennent des icônes', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => {
+    const root = document.createElement('div');
+    root.id = 'hospital-desktop-root';
+    root.innerHTML = `
+      <aside><button class="hospital-nav-item active" data-route="patients">Patients</button></aside>
+      <div class="hospital-main">
+        <div class="hospital-page-header"><h1>👥 Patients — dossiers par année</h1></div>
+        <div class="record-card"><div class="mrd-avatar">👩</div><strong>Grace Ilunga</strong>
+          <span>📅 2026-08-26</span><span>👨‍⚕️ Médecin</span></div>
+      </div>`;
+    document.body.appendChild(root);
+  });
+  const h1 = page.locator('#hospital-desktop-root h1');
+  await expect(h1.locator('.mc-page-icon')).toHaveCount(1);
+  await expect(h1).not.toContainText('👥');
+  await expect(page.locator('#hospital-desktop-root .mrd-avatar')).toHaveText('GI');
+  await expect(page.locator('#hospital-desktop-root .mc-inline-icon')).toHaveCount(2);
+  await expect(page.locator('#hospital-desktop-root .record-card')).not.toContainText('📅');
+});
