@@ -66,3 +66,9 @@ test("paiement : appel HTTP direct des fonctions (sans le SDK Messaging)", () =>
   assert.match(ui, /body: JSON\.stringify\(\{ data \}\)/);
   assert.match(read('index.html'), /connect-src[^"]*https:\/\/\*\.cloudfunctions\.net/);
 });
+
+test("paiement : App Check non exigé (connexion obligatoire, contrôles serveur)", () => {
+  const src = read('functions/pawapay.js');
+  assert.match(src, /enforceAppCheck: false,/);
+  assert.match(src, /if \(!uid\) throw new HttpsError\('unauthenticated', 'Connexion requise\.'\);/);
+});
