@@ -57,3 +57,9 @@ test('fonctions exportées et règles : dépôts serveur uniquement, config lisi
 test("l'expiration automatique couvre tous les abonnements datés (actif, grâce, essai)", () => {
   assert.match(read('functions/pawapay.js'), /where\('status', 'in', \['active', 'grace_period', 'trial'\]\)/);
 });
+
+test("paiement : client Cloud Functions créé avec la région sur l'application (SDK compat)", () => {
+  const ui = read('js/hospital-subscription.js');
+  assert.match(ui, /firebase\.app\(\)\.functions\('europe-west1'\)/);
+  assert.ok(!/const fns = firebaseFunctions;/.test(ui), "plus de dépendance au client global resté null");
+});

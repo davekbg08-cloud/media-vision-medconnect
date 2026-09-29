@@ -158,7 +158,14 @@ const HospitalSubscriptionModule = (() => {
       const hospitalId = await CloudDB.getActiveHospitalId();
       if (!hospitalId) throw new Error('Aucun établissement actif sélectionné.');
       try { await window.waitForAppCheckToken?.(8000); } catch (_) {}
-      const fns = firebaseFunctions;
+      // Client Cloud Functions de la région europe-west1. En SDK « compat »,
+      // la région se passe à l'instance d'application
+      // (firebase.app().functions(region)) — et non à firebase.functions(),
+      // qui attend une application : l'ancien appel renvoyait null.
+      const fns = (typeof firebase !== 'undefined' && firebase.app)
+        ? firebase.app().functions('europe-west1')
+        : null;
+      if (!fns) throw new Error('Service de paiement indisponible : rechargez l\'application.');
       show('Envoi de la demande de paiement…');
       const start = await fns.httpsCallable('startSubscriptionPayment')({ hospitalId, plan, phoneNumber: phone, provider });
       const depositId = start?.data?.depositId;
