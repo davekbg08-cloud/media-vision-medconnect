@@ -146,6 +146,30 @@ const HospitalSubscriptionModule = (() => {
     `);
   }
 
+  const FUNCTIONS_BASE = 'https://europe-west1-medconnect-e81ba.cloudfunctions.net';
+
+  async function callFunction(name, data) {
+    const user = firebase.auth().currentUser;
+    if (!user) throw new Error('Session expirée : reconnectez-vous.');
+    const headers = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${await user.getIdToken()}`,
+    };
+    try {
+      const ac = firebase.appCheck ? await firebase.appCheck().getToken(false) : null;
+      if (ac?.token) headers['X-Firebase-AppCheck'] = ac.token;
+    } catch (_) { /* App Check indisponible : le serveur tranchera */ }
+    const response = await fetch(`${FUNCTIONS_BASE}/${name}`, {
+      method: 'POST', headers, body: JSON.stringify({ data }),
+    });
+    let body = null;
+    try { body = await response.json(); } catch (_) { body = null; }
+    if (!response.ok || body?.error) {
+      throw new Error(body?.error?.message || `Service de paiement indisponible (${response.status}).`);
+    }
+    return { data: body?.result ?? body?.data ?? null };
+  }
+
   async function submitPayment(plan) {
     const btn = document.getElementById('sub-pay-btn');
     const statusEl = document.getElementById('sub-pay-status');
@@ -158,14 +182,11 @@ const HospitalSubscriptionModule = (() => {
       const hospitalId = await CloudDB.getActiveHospitalId();
       if (!hospitalId) throw new Error('Aucun établissement actif sélectionné.');
       try { await window.waitForAppCheckToken?.(8000); } catch (_) {}
-      // Client Cloud Functions de la région europe-west1. En SDK « compat »,
-      // la région se passe à l'instance d'application
-      // (firebase.app().functions(region)) — et non à firebase.functions(),
-      // qui attend une application : l'ancien appel renvoyait null.
-      const fns = (typeof firebase !== 'undefined' && firebase.app)
-        ? firebase.app().functions('europe-west1')
-        : null;
-      if (!fns) throw new Error('Service de paiement indisponible : rechargez l\'application.');
+      // Appel HTTP direct des fonctions « callable » (même protocole que
+      // le SDK) : le SDK compat tentait d'enregistrer le service worker de
+      // Firebase Messaging à la racine du domaine (404 sur GitHub Pages),
+      // ce qui faisait échouer le paiement avant même l'appel.
+      const fns = { httpsCallable: (name) => (data) => callFunction(name, data) };
       show('Envoi de la demande de paiement…');
       const start = await fns.httpsCallable('startSubscriptionPayment')({ hospitalId, plan, phoneNumber: phone, provider });
       const depositId = start?.data?.depositId;
