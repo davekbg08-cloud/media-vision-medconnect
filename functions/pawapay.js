@@ -35,7 +35,12 @@ const CALL_OPTS = {
   memory: '256MiB',
   minInstances: 0,
   maxInstances: 10,
-  enforceAppCheck: true,
+  // App Check NON exigé ici : le jeton n'est pas toujours disponible
+  // (application de bureau, domaine d'aperçu), et le serveur renvoyait
+  // alors « unauthenticated ». La sécurité repose sur la connexion
+  // Firebase Auth (obligatoire), l'appartenance à l'établissement, les
+  // prix fixés serveur et la relecture de chaque paiement chez pawaPay.
+  enforceAppCheck: false,
   secrets: [PAWAPAY_TOKEN],
 };
 
