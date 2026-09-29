@@ -40,3 +40,9 @@ test('bureau hôpital : icônes de menu, alerte de renouvellement et accès à l
   const icons = read('js/icons.js');
   assert.match(icons, /getElementById\('hospital-desktop-root'\)/);
 });
+
+test("pendant l'essai, le bandeau propose « Choisir une formule » (premier abonnement)", () => {
+  const ui = read('js/hospital-desktop-ui.js');
+  assert.match(ui, /const needsAction = isTrial \|\| \['expired', 'suspended', 'grace_period'\]\.includes\(sub\.status\);/);
+  assert.match(ui, /'Choisir une formule' : 'Renouveler'/);
+});

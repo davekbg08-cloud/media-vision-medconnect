@@ -356,8 +356,12 @@ const HospitalDesktopUI = (() => {
     const role = HospitalPermissions.getCurrentRole();
     const canManageSub = HospitalPermissions.canAccess(role, 'subscription');
     const subEnd = sub.endDate ? String(sub.endDate).slice(0, 10) : '';
-    const needsAction = ['expired', 'suspended', 'grace_period'].includes(sub.status)
-      || (sub.status === 'trial' && subEnd && (Date.parse(subEnd) - Date.now()) < 7 * 86400000);
+    // Pendant l'essai, le bandeau est toujours visible : c'est là que se
+    // fait le PREMIER abonnement (« Choisir une formule »). Après un
+    // abonnement payé, il n'apparaît qu'à l'échéance (« Renouveler »).
+    const isTrial = sub.status === 'trial';
+    const needsAction = isTrial || ['expired', 'suspended', 'grace_period'].includes(sub.status);
+    const ctaLabel = isTrial || !sub.plan || sub.plan === 'trial' ? 'Choisir une formule' : 'Renouveler';
     const dateLabel = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
     const kpi = (tint, iconName, value, label) => `
       <div class="hospital-stat-card mc-stat-${tint}">
@@ -373,15 +377,17 @@ const HospitalDesktopUI = (() => {
       </section>
 
       ${needsAction ? `
-      <div class="mc-alert ${sub.status === 'trial' || sub.status === 'grace_period' ? 'mc-alert-warning' : 'mc-alert-danger'} mc-sub-alert">
+      <div class="mc-alert ${isTrial ? 'mc-alert-info' : sub.status === 'grace_period' ? 'mc-alert-warning' : 'mc-alert-danger'} mc-sub-alert">
         ${ic('alert-triangle')}
         <span><strong>Abonnement : ${esc(subInfo[0])}${subEnd ? ` (jusqu'au ${esc(subEnd)})` : ''}.</strong>
           ${sub.status === 'expired' || sub.status === 'suspended'
             ? 'La consultation reste possible, mais les nouvelles actions sont bloquées jusqu\'au renouvellement.'
-            : 'Pensez à renouveler pour éviter toute interruption.'}
+            : isTrial
+              ? 'Choisissez une formule dès maintenant : les jours d\'essai restants sont conservés.'
+              : 'Pensez à renouveler pour éviter toute interruption.'}
           ${canManageSub ? '' : ' Contactez l\'administrateur de votre établissement.'}
         </span>
-        ${canManageSub ? `<button class="btn btn-primary btn-sm" onclick="HospitalDesktopUI.navigate('subscription')">${ic('file-certificate')} Renouveler</button>` : ''}
+        ${canManageSub ? `<button class="btn btn-primary btn-sm" onclick="HospitalDesktopUI.navigate('subscription')">${ic('file-certificate')} ${ctaLabel}</button>` : ''}
       </div>` : ''}
 
       <div class="hospital-stats-grid">

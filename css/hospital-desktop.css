@@ -293,4 +293,5 @@ body.hospital-desktop-open .toast-container {
 .hospital-stats-grid .hospital-stat-card { border-radius: 14px; border: 1px solid var(--border); }
 .hospital-stat-card .mc-stat-tile { margin-bottom: .5rem; }
 .mc-sub-alert { align-items: center; }
+.mc-alert-info { background: var(--tint-blue-bg); color: var(--tint-blue-fg); }
 .mc-sub-alert span { flex: 1; }
