@@ -179,11 +179,93 @@
     });
   }
 
+  /* ── Espace hôpital (ordinateur) : décoration en profondeur ──
+     Titres de page, avatars et petits emojis des listes deviennent des
+     icônes au trait colorées, sans modifier les ~20 modules du bureau. */
+  const AVATAR_EMOJI = new Set(['👨', '👩', '🧑', '👶', '🙂', '😊', '🧒', '👧', '👦', '🧓', '👴', '👵']);
+  const INLINE_EMOJI = Object.assign({}, BUTTON_EMOJI, {
+    '📅': 'calendar-event', '🗓️': 'calendar-event', '👨\u200d⚕️': 'stethoscope',
+    '👩\u200d⚕️': 'stethoscope', '🧑\u200d⚕️': 'stethoscope', '💊': 'pill', '🏥': 'building-hospital',
+    '📁': 'id-badge-2', '👥': 'users', '🤰': 'baby-carriage', '🩺': 'stethoscope',
+    '🔴': 'alert-triangle', '🟡': 'clock', '🟢': 'check', '✈️': 'send', '📨': 'mail',
+    '🤖': 'heart-rate-monitor', '📊': 'chart-line', '⚠️': 'alert-triangle', '🔎': 'search',
+  });
+  const LEAD_EMOJI = /^\s*(\p{Extended_Pictographic}(?:\uFE0F)?(?:\u200D\p{Extended_Pictographic}(?:\uFE0F)?)*)\s*/u;
+  const SKIP_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT', 'OPTION', 'SCRIPT', 'STYLE', 'svg']);
+
+  function currentDesktopRoute(root) {
+    return root.querySelector('.hospital-nav-item.active')?.dataset?.route || null;
+  }
+
+  function decorateDesktop(root) {
+    decorateButtons(root);
+    decorateStatIcons(root);
+    const content = root.querySelector('.hospital-main') || root;
+
+    // 1) Titre de la page : icône colorée de la rubrique courante.
+    const h1 = content.querySelector('.hospital-page-header h1:not([data-mc])');
+    if (h1) {
+      h1.setAttribute('data-mc', '1');
+      const tile = desktopRouteIcon(currentDesktopRoute(root));
+      const first = h1.firstChild;
+      if (first && first.nodeType === 3) first.textContent = first.textContent.replace(LEAD_EMOJI, '');
+      else if (first && first.nodeType === 1 && /^\s*\p{Extended_Pictographic}/u.test(first.textContent || '')) first.remove();
+      if (tile) {
+        h1.insertAdjacentHTML('afterbegin', tile.replace('class="mc-tint ', 'class="mc-tint mc-page-icon '));
+        h1.classList.add('mc-page-title');
+      }
+    }
+
+    decorateInline(content);
+  }
+
+  /* Avatars emoji et petits emojis en tête de texte → icônes (bureau
+     et application). */
+  function decorateInline(content) {
+    // a) Avatars emoji → initiales colorées.
+    content.querySelectorAll('.mrd-avatar:not([data-mc]), .patient-row-avatar:not([data-mc]), .id-avatar:not([data-mc])').forEach((el) => {
+      el.setAttribute('data-mc', '1');
+      const txt = (el.textContent || '').trim();
+      if (!AVATAR_EMOJI.has(txt)) return;
+      const row = el.closest('[class*="row"], [class*="card"], [class*="item"], li') || el.parentElement;
+      const name = (row?.querySelector('strong, h3, h4, .mrd-name, .patient-row-name')?.textContent || '').trim();
+      const parts = name.split(/\s+/).filter(Boolean);
+      const initials = ((parts[0] || '?')[0] + ((parts[1] || '')[0] || '')).toUpperCase();
+      el.textContent = initials;
+      el.classList.add('mc-avatar', txt === '👩' || txt === '👧' || txt === '👵' ? 'mc-tint-magenta' : 'mc-tint-blue');
+    });
+
+    // b) Petits emojis en tête de texte (dates, médecins, statuts…) → icônes.
+    const NF = window.NodeFilter;
+    if (!NF || !document.createTreeWalker) return;
+    const walker = document.createTreeWalker(content, NF.SHOW_TEXT, {
+      acceptNode(node) {
+        const parent = node.parentElement;
+        if (!parent || SKIP_TAGS.has(parent.tagName) || parent.closest('[data-mc-inline], .btn, svg, .stat-icon, .mc-tint, .nav-icon')) return NF.FILTER_REJECT;
+        return LEAD_EMOJI.test(node.textContent) ? NF.FILTER_ACCEPT : NF.FILTER_SKIP;
+      },
+    });
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    for (const node of nodes) {
+      const m = node.textContent.match(LEAD_EMOJI);
+      const name = m && INLINE_EMOJI[m[1]];
+      if (!name) continue;
+      const span = document.createElement('span');
+      span.setAttribute('data-mc-inline', '1');
+      span.className = 'mc-inline-icon';
+      span.innerHTML = icon(name);
+      node.textContent = node.textContent.slice(m[0].length);
+      node.parentNode.insertBefore(span, node);
+    }
+  }
+
   function decorateAll(root) {
     decoratePageHeader(root);
     decorateSubTitles(root);
     decorateStatIcons(root);
     decorateButtons(root);
+    decorateInline(root); // en dernier : ne touche pas aux tuiles déjà posées
   }
 
   function watchMainContent() {
@@ -196,7 +278,7 @@
       if (root && !root.dataset.mcWatched) {
         root.dataset.mcWatched = '1';
         let pending = false;
-        const run = () => { pending = false; decorateButtons(root); decorateStatIcons(root); };
+        const run = () => { pending = false; decorateDesktop(root); };
         run();
         new MutationObserver(() => { if (!pending) { pending = true; requestAnimationFrame(run); } })
           .observe(root, { childList: true, subtree: true });
@@ -222,5 +304,5 @@
     else watchMainContent();
   }
 
-  window.McIcons = { icon, sectionIcon, desktopRouteIcon, DESKTOP_ROUTES, roleIcon, decoratePageHeader, decorateStatIcons, decorateButtons, SECTIONS, ROLES, STAT_EMOJI, BUTTON_EMOJI };
+  window.McIcons = { icon, sectionIcon, desktopRouteIcon, decorateDesktop, INLINE_EMOJI, DESKTOP_ROUTES, roleIcon, decoratePageHeader, decorateStatIcons, decorateButtons, SECTIONS, ROLES, STAT_EMOJI, BUTTON_EMOJI };
 })();
