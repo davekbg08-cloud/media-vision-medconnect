@@ -1,8 +1,15 @@
 {
-  "version": "2.10.7",
-  "build": "2026.09.29.4",
+  "version": "2.10.8",
+  "build": "2026.09.29.5",
   "buildDate": "2026-09-29",
   "changelog": [
+    {
+      "version": "2.10.8",
+      "date": "2026-09-29",
+      "notes": [
+        "Correctif : le paiement de l’abonnement par Mobile Money affichait « Cannot read properties of null (reading httpsCallable) » ; il contacte désormais correctement le service de paiement."
+      ]
+    },
     {
       "version": "2.10.7",
       "date": "2026-09-29",

@@ -7,6 +7,12 @@ jour) et l'écran **Paramètres → À propos**.
 La source unique de la version en cours est `config/app-version.json` —
 ce fichier doit rester cohérent avec elle.
 
+## 2.10.8 — 2026-09-29
+
+**Correctif paiement** — client Cloud Functions de l'abonnement créé via firebase.app().functions('europe-west1') (SDK compat), au lieu du client global resté null.
+
+Version **2.10.8** (build 2026.09.29.5, versionCode 59, cache `medconnect-v4.59`). Miroir Android resynchronisé.
+
 ## 2.10.7 — 2026-09-29
 
 **Responsable de l'établissement** — rôle est_manager ouvert avec le compte de l'établissement (matricule + mot de passe), limité à l'abonnement (aucune donnée médicale) ; paiement pawaPay accepté côté serveur pour le compte de l'établissement ; bandeau des autres rôles mis à jour.
