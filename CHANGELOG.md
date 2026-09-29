@@ -7,6 +7,12 @@ jour) et l'écran **Paramètres → À propos**.
 La source unique de la version en cours est `config/app-version.json` —
 ce fichier doit rester cohérent avec elle.
 
+## 2.10.7 — 2026-09-29
+
+**Responsable de l'établissement** — rôle est_manager ouvert avec le compte de l'établissement (matricule + mot de passe), limité à l'abonnement (aucune donnée médicale) ; paiement pawaPay accepté côté serveur pour le compte de l'établissement ; bandeau des autres rôles mis à jour.
+
+Version **2.10.7** (build 2026.09.29.4, versionCode 58, cache `medconnect-v4.58`). Miroir Android resynchronisé.
+
 ## 2.10.6 — 2026-09-29
 
 **Refonte en profondeur du bureau** — décoration automatique de toutes les pages de l'espace hôpital (titre, avatars à initiales, icônes en ligne), cartes/statistiques/champs harmonisés ; même décoration des listes côté application. Test E2E dédié.

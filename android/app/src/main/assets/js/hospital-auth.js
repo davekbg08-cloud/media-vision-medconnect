@@ -113,6 +113,17 @@ const HospitalAuth = (() => {
     if (!session?.establishmentId || !session?.agentUid) return false;
     if (isSessionExpired(session)) return false;
 
+    // Responsable de l'établissement : session ouverte avec le compte de
+    // l'établissement lui-même (matricule + mot de passe hôpital). Valide
+    // tant que ce compte est connecté et que l'établissement est actif.
+    if (session.role === 'est_manager') {
+      const fbUser = (typeof firebaseAuth !== 'undefined' && firebaseAuth) ? firebaseAuth.currentUser : null;
+      if (!fbUser || fbUser.uid !== session.agentUid) return false;
+      const est = window.HospitalsRegistry?.getHospitalById?.(session.establishmentId);
+      if (!est || !['active', 'approved'].includes(String(est.status || '').toLowerCase())) return false;
+      return !est.authUid || est.authUid === fbUser.uid;
+    }
+
     const user = window.Auth?.getUser?.();
     const fbUser = (typeof firebaseAuth !== 'undefined' && firebaseAuth) ? firebaseAuth.currentUser : null;
     if (!user || !fbUser) return false;
@@ -460,6 +471,14 @@ const HospitalAuth = (() => {
           <div id="ha-agent-register-wrap" style="display:none;margin-top:.75rem;border-top:1px solid var(--border);padding-top:.75rem">
             <div id="register-form"></div>
             <div id="reg-err" class="auth-error" style="display:none"></div>
+          </div>
+
+          <div class="mc-manager-entry">
+            <div>
+              <strong>Vous êtes le responsable de l'établissement ?</strong>
+              <span>Gérez l'abonnement avec le matricule et le mot de passe de l'établissement que vous venez de saisir — sans compte personnel.</span>
+            </div>
+            <button class="btn btn-ghost btn-sm" type="button" onclick="HospitalAuth.enterAsManager('${esc(est.establishmentId || est.id)}')">Gérer l'abonnement →</button>
           </div>
 
           <button class="btn btn-ghost btn-full" style="margin-top:1rem" onclick="HospitalAuth.cancelVerificationAndGoBack()">← Retour</button>
@@ -869,6 +888,26 @@ const HospitalAuth = (() => {
     renderScreen();
   }
 
+  /* Entrée « responsable de l'établissement » : réutilise la session
+     Firebase de l'établissement ouverte à l'instant par login()
+     (matricule + mot de passe hôpital). Donne accès à la gestion de
+     l'abonnement uniquement — jamais aux données médicales. */
+  function enterAsManager(establishmentId) {
+    const est = window.HospitalsRegistry?.getHospitalById?.(establishmentId) || _activeEstablishment;
+    const fbUser = (typeof firebaseAuth !== 'undefined' && firebaseAuth) ? firebaseAuth.currentUser : null;
+    const expectedEmail = establishmentEmail(est?.officialId || '');
+    if (!est || !fbUser || String(fbUser.email || '').toLowerCase() !== expectedEmail
+        || (est.authUid && est.authUid !== fbUser.uid)) {
+      App.toast("Reconnectez-vous avec le matricule et le mot de passe de l'établissement.", 'error');
+      renderScreen();
+      return;
+    }
+    enter(establishmentId, 'est_manager', {
+      uid: fbUser.uid,
+      name: `Responsable — ${est.name || 'établissement'}`,
+    });
+  }
+
   function enter(establishmentId, role, agentInfo = {}) {
     const est = (window.HospitalsRegistry?.getHospitalById?.(establishmentId)) || { establishmentId };
     const session = {
@@ -1050,6 +1089,7 @@ const HospitalAuth = (() => {
     onAgentRoleChange, toggleAgentRegister, choosePharmacistRegisterType, isAgentLoginActive, cancelVerificationAndGoBack,
     isSessionExpired, isSessionConsistent, invalidateSession,
     SESSION_MAX_AGE_MS, INACTIVITY_TIMEOUT_MS,
+    enterAsManager,
   };
 })();
 

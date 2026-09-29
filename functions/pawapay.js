@@ -62,9 +62,16 @@ async function isPlatformAdmin(uid, token) {
 async function assertCanPay(uid, token, hospitalId) {
   const admin = await isPlatformAdmin(uid, token);
   if (!admin) {
-    const member = await db().collection('hospitalMembers').doc(`${hospitalId}_${uid}`).get();
-    if (!member.exists || member.data().status !== 'active') {
-      throw new HttpsError('permission-denied', "Vous n'êtes pas membre actif de cet établissement.");
+    // Le responsable paie avec le compte de l'établissement lui-même
+    // (establishments/{id}.authUid) ; sinon, membre actif du personnel.
+    const est = await db().collection('establishments').doc(hospitalId).get();
+    const isEstablishmentAccount = est.exists && est.data().authUid === uid
+      && ['active', 'approved'].includes(String(est.data().status || '').toLowerCase());
+    if (!isEstablishmentAccount) {
+      const member = await db().collection('hospitalMembers').doc(`${hospitalId}_${uid}`).get();
+      if (!member.exists || member.data().status !== 'active') {
+        throw new HttpsError('permission-denied', "Vous n'êtes pas membre actif de cet établissement.");
+      }
     }
   }
   const config = (await db().collection('appConfig').doc('payments').get()).data() || {};

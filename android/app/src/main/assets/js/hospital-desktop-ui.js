@@ -82,6 +82,9 @@ const HospitalDesktopUI = (() => {
     pharmacist: 'pharmacy',
   };
   function defaultRouteFor(role) {
+    // Le responsable de l'établissement n'accède qu'à la gestion
+    // (abonnement) — jamais aux données médicales.
+    if (role === 'est_manager') return 'subscription';
     return DEFAULT_ROUTE_BY_ROLE[role] || 'dashboard';
   }
 
@@ -172,7 +175,7 @@ const HospitalDesktopUI = (() => {
   }
 
   function roleName(role) {
-    return ({ admin_hospital:'Administration', doctor:'Médecin', nurse:'Infirmier(e)',
+    return ({ admin_hospital:'Administration', est_manager:'Responsable', doctor:'Médecin', nurse:'Infirmier(e)',
       lab:'Laboratoire', reception:'Réception', pharmacist:'Pharmacie' })[role] || 'Agent';
   }
 
@@ -385,7 +388,7 @@ const HospitalDesktopUI = (() => {
             : isTrial
               ? 'Choisissez une formule dès maintenant : les jours d\'essai restants sont conservés.'
               : 'Pensez à renouveler pour éviter toute interruption.'}
-          ${canManageSub ? '' : ' Contactez l\'administrateur de votre établissement.'}
+          ${canManageSub ? '' : ' Le responsable de l\'établissement peut s\'abonner : à la connexion, après le matricule et le mot de passe de l\'établissement, bouton « Gérer l\'abonnement ».'}
         </span>
         ${canManageSub ? `<button class="btn btn-primary btn-sm" onclick="HospitalDesktopUI.navigate('subscription')">${ic('file-certificate')} ${ctaLabel}</button>` : ''}
       </div>` : ''}
