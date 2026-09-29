@@ -21,10 +21,10 @@ const read = (p) => fs.readFileSync(root(p), 'utf8');
 const exists = (p) => fs.existsSync(root(p));
 
 const EXPECTED = {
-  version: '2.10.6',
-  build: '2026.09.29.3',
-  versionCode: '57',
-  cache: 'medconnect-v4.57',
+  version: '2.10.7',
+  build: '2026.09.29.4',
+  versionCode: '58',
+  cache: 'medconnect-v4.58',
 };
 
 test('config/app-version.json porte la version et le build attendus', () => {
@@ -39,7 +39,7 @@ test('package.json et electron/package.json concordent', () => {
   assert.strictEqual(JSON.parse(read('electron/package.json')).version, EXPECTED.version);
 });
 
-test('Android build.gradle porte versionCode 57 et versionName 2.10.6', () => {
+test('Android build.gradle porte versionCode 58 et versionName 2.10.7', () => {
   const g = read('android/app/build.gradle');
   assert.match(g, new RegExp(`versionCode\\s+${EXPECTED.versionCode}`));
   assert.match(g, new RegExp(`versionName\\s+"${EXPECTED.version}"`));
@@ -49,7 +49,7 @@ test('sw.js porte le cache medconnect-v4.50', () => {
   assert.match(read('sw.js'), new RegExp(`const CACHE = '${EXPECTED.cache}'`));
 });
 
-test('MainActivity pointe la PWA en ?apk=v2.10.6', () => {
+test('MainActivity pointe la PWA en ?apk=v2.10.7', () => {
   assert.match(read('android/app/src/main/java/com/medconnect/app/MainActivity.java'),
     new RegExp(`\\?apk=v${EXPECTED.version.replace(/\./g, '\\.')}`));
 });

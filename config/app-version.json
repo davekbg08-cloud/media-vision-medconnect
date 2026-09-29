@@ -1,8 +1,15 @@
 {
-  "version": "2.10.6",
-  "build": "2026.09.29.3",
+  "version": "2.10.7",
+  "build": "2026.09.29.4",
   "buildDate": "2026-09-29",
   "changelog": [
+    {
+      "version": "2.10.7",
+      "date": "2026-09-29",
+      "notes": [
+        "Nouveau : accès « Responsable de l’établissement ». Après la connexion de l’établissement (matricule et mot de passe), le bouton « Gérer l’abonnement » ouvre directement l’écran Abonnement pour choisir une formule et payer par Mobile Money — sans compte personnel, et sans accès aux données médicales."
+      ]
+    },
     {
       "version": "2.10.6",
       "date": "2026-09-29",

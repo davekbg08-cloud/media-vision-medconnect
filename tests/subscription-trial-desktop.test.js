@@ -36,7 +36,7 @@ test('bureau hôpital : icônes de menu, alerte de renouvellement et accès à l
   const ui = read('js/hospital-desktop-ui.js');
   assert.match(ui, /window\.McIcons\?\.desktopRouteIcon\(m\.key\) \|\| m\.icon/);
   assert.match(ui, /HospitalDesktopUI\.navigate\('subscription'\)/);
-  assert.match(ui, /Contactez l\\'administrateur de votre établissement/);
+  assert.match(ui, /bouton « Gérer l\\'abonnement »/);
   const icons = read('js/icons.js');
   assert.match(icons, /getElementById\('hospital-desktop-root'\)/);
 });
@@ -45,4 +45,19 @@ test("pendant l'essai, le bandeau propose « Choisir une formule » (premier abo
   const ui = read('js/hospital-desktop-ui.js');
   assert.match(ui, /const needsAction = isTrial \|\| \['expired', 'suspended', 'grace_period'\]\.includes\(sub\.status\);/);
   assert.match(ui, /'Choisir une formule' : 'Renouveler'/);
+});
+
+test("responsable de l'établissement : accès limité à l'abonnement, sans compte personnel", () => {
+  const perms = read('js/hospital-permissions.js');
+  assert.match(perms, /subscription:  \['admin', 'admin_hospital', 'est_manager'\]/);
+  for (const route of ['patients', 'records', 'consultations', 'prescriptions', 'lab']) {
+    const line = perms.match(new RegExp(`\\n    ${route}:\\s*\\[[^\\]]*\\]`))[0];
+    assert.ok(!line.includes('est_manager'), `${route} : jamais de données médicales pour le responsable`);
+  }
+  const auth = read('js/hospital-auth.js');
+  assert.match(auth, /function enterAsManager\(establishmentId\)/);
+  assert.match(auth, /String\(fbUser\.email \|\| ''\)\.toLowerCase\(\) !== expectedEmail/, 'compte de l\'établissement exigé');
+  assert.match(auth, /if \(session\.role === 'est_manager'\) \{/);
+  assert.match(read('js/hospital-desktop-ui.js'), /if \(role === 'est_manager'\) return 'subscription';/);
+  assert.match(read('functions/pawapay.js'), /est\.data\(\)\.authUid === uid/, 'le serveur accepte le compte de l\'établissement');
 });

@@ -45,7 +45,7 @@ const HospitalPermissions = (() => {
     // Reporting d'établissement (chantier E) : agrégats d'activité,
     // réservés à l'administration (jamais aux rôles cliniques/accueil).
     reporting:     ['admin', 'admin_hospital'],
-    subscription:  ['admin', 'admin_hospital'],
+    subscription:  ['admin', 'admin_hospital', 'est_manager'],
     // Messagerie interne à l'établissement (retour utilisateur : absente
     // du desktop hôpital, contrairement au mobile) — ouverte à tout le
     // personnel affilié, comme settings.
@@ -101,6 +101,7 @@ const HospitalPermissions = (() => {
     // mobile Auth.getRoleLabel).
     const DESK = {
       admin_hospital: 'Administration hôpital',
+      est_manager: 'Responsable de l\'établissement',
       lab: 'Laboratoire',
       reception: 'Réception',
     };
