@@ -1,8 +1,16 @@
 {
-  "version": "2.10.4",
-  "build": "2026.09.29.1",
+  "version": "2.10.5",
+  "build": "2026.09.29.2",
   "buildDate": "2026-09-29",
   "changelog": [
+    {
+      "version": "2.10.5",
+      "date": "2026-09-29",
+      "notes": [
+        "Pendant l’essai gratuit, le tableau de bord de l’établissement affiche en permanence « Choisir une formule » pour souscrire le premier abonnement ; « Renouveler » n’apparaît qu’à l’échéance d’un abonnement payé.",
+        "Payer pendant l’essai ne fait perdre aucun jour : l’abonnement démarre à la fin de l’essai."
+      ]
+    },
     {
       "version": "2.10.4",
       "date": "2026-09-29",

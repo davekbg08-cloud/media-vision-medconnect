@@ -21,7 +21,7 @@ function normalizePhone(raw) {
 /** Nouvelle date de fin : prolonge un abonnement encore valide, sinon part d'aujourd'hui. */
 function nextEndDate(current, nowMs) {
   const end = current && current.endDate ? Date.parse(current.endDate) : NaN;
-  const stillValid = current && ['active', 'grace_period'].includes(current.status) && end > nowMs;
+  const stillValid = current && ['active', 'grace_period', 'trial'].includes(current.status) && end > nowMs;
   const base = stillValid ? end : nowMs;
   return new Date(base + PERIOD_DAYS * DAY_MS).toISOString();
 }

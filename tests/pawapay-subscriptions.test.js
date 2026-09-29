@@ -36,6 +36,9 @@ test('prolongation : +30 jours après la fin d’un abonnement encore valide', (
     t.nextEndDate({ status: 'active', endDate: '2026-10-20T00:00:00Z' }, now),
     '2026-11-19T00:00:00.000Z');
   assert.strictEqual(
+    t.nextEndDate({ status: 'trial', endDate: '2026-10-10T00:00:00Z' }, now),
+    '2026-11-09T00:00:00.000Z', "les jours d'essai restants sont conservés");
+  assert.strictEqual(
     t.nextEndDate({ status: 'expired', endDate: '2026-09-01T00:00:00Z' }, now),
     '2026-10-31T00:00:00.000Z');
 });

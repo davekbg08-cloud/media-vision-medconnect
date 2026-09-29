@@ -7,6 +7,12 @@ jour) et l'écran **Paramètres → À propos**.
 La source unique de la version en cours est `config/app-version.json` —
 ce fichier doit rester cohérent avec elle.
 
+## 2.10.5 — 2026-09-29
+
+**Premier abonnement** — bandeau permanent pendant l'essai (« Choisir une formule »), « Renouveler » réservé aux échéances d'abonnements payés ; un paiement pendant l'essai prolonge à partir de la fin de l'essai.
+
+Version **2.10.5** (build 2026.09.29.2, versionCode 56, cache `medconnect-v4.56`). Miroir Android resynchronisé.
+
 ## 2.10.4 — 2026-09-29
 
 **Abonnements et bureau hôpital** — essai gratuit de 30 jours à la validation (statut trial accepté par les règles), échéances automatiques pour tous les abonnements datés, activation admin sans confirm() natif, statuts « Essai gratuit » ; espace hôpital desktop aux couleurs de la refonte (menu, tableau de bord, alerte de renouvellement).
