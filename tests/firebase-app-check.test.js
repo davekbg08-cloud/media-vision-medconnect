@@ -173,10 +173,13 @@ test('03. App Check est activé AVANT auth()', () => {
   assert.ok(order.indexOf('appcheck') < order.indexOf('auth'), 'appcheck doit précéder auth');
 });
 
-test('04. App Check est activé AVANT functions()', () => {
+test('04. App Check est activé à l\'initialisation ; le client des fonctions lit son jeton à chaque appel', () => {
   const { firebase, order } = fakeFirebase({ withAppCheckSdk: true, withFunctions: true });
   loadFirebaseConfig({ firebase, hostname: 'medconnect-e81ba.web.app' });
-  assert.ok(order.indexOf('appcheck') < order.indexOf('functions'), 'appcheck doit précéder functions');
+  assert.ok(order.includes('appcheck'), 'App Check activé');
+  // Le client HTTP n'appelle plus firebase.functions() : le jeton App Check
+  // est demandé au moment de chaque appel (toujours après l'activation).
+  assert.ok(!order.includes('functions'), 'plus d\'appel à firebase.functions()');
 });
 
 test('05. Domaine GitHub Pages : bonne clé sélectionnée + activation réussie (jeton valide)', async () => {

@@ -53,6 +53,44 @@ let firebaseReady = false;
 // son chemin actuel en repli (aucune casse avant déploiement).
 let firebaseFunctions = null;
 
+/* Client des fonctions « callable » (europe-west1) par appel HTTP direct,
+   même protocole que le SDK : POST {data} → {result} | {error}.
+
+   Pourquoi pas le SDK compat ? (1) firebase.functions('europe-west1')
+   attend une APPLICATION, pas une région : il renvoyait null, et aucune
+   fonction serveur n'était jamais appelée (repli silencieux partout) ;
+   (2) avec la bonne forme, le SDK tente d'enregistrer le service worker
+   de Firebase Messaging à la racine du domaine (404 sur GitHub Pages) et
+   fait échouer l'appel. Ce client transmet le jeton de connexion et le
+   jeton App Check, et lève une erreur {code, message} comme le SDK — les
+   appelants gardent leur repli en cas d'échec. */
+function createHttpCallableClient(region) {
+  const base = `https://${region}-${firebaseConfig.projectId}.cloudfunctions.net`;
+  async function call(name, data) {
+    const headers = { 'Content-Type': 'application/json' };
+    try {
+      const user = (typeof firebaseAuth !== 'undefined' && firebaseAuth) ? firebaseAuth.currentUser : null;
+      if (user) headers.Authorization = `Bearer ${await user.getIdToken()}`;
+    } catch (_) { /* appel anonyme : le serveur décide */ }
+    try {
+      const ac = (typeof firebase !== 'undefined' && firebase.appCheck) ? await firebase.appCheck().getToken(false) : null;
+      if (ac && ac.token) headers['X-Firebase-AppCheck'] = ac.token;
+    } catch (_) { /* App Check indisponible : le serveur décide */ }
+    const response = await fetch(`${base}/${name}`, {
+      method: 'POST', headers, body: JSON.stringify({ data: data === undefined ? null : data }),
+    });
+    let body = null;
+    try { body = await response.json(); } catch (_) { body = null; }
+    if (!response.ok || (body && body.error)) {
+      const err = new Error((body && body.error && body.error.message) || `Fonction ${name} indisponible (${response.status})`);
+      err.code = `functions/${String((body && body.error && body.error.status) || response.status).toLowerCase()}`;
+      throw err;
+    }
+    return { data: body ? (body.result !== undefined ? body.result : body.data) : null };
+  }
+  return { httpsCallable: (name) => (data) => call(name, data), region };
+}
+
 // ── App Check — état de MODULE pour une activation STRICTEMENT idempotente
 // et une vérification RÉELLE du jeton. Aucun jeton et aucune clé ne sont
 // jamais journalisés ni exposés (voir docs/FIREBASE_APP_CHECK_SETUP.md).
@@ -263,8 +301,8 @@ function initFirebase() {
     // Client Cloud Functions dans la MÊME région que les fonctions déployées
     // (voir functions/index.js REGION). Inerte si le SDK n'est pas chargé.
     try {
-      firebaseFunctions = firebase.functions ? firebase.functions('europe-west1') : null;
-      if (firebaseFunctions) window.firebaseFunctions = firebaseFunctions;
+      firebaseFunctions = createHttpCallableClient('europe-west1');
+      window.firebaseFunctions = firebaseFunctions;
     } catch (_) { firebaseFunctions = null; }
     firebaseReady = true;
 

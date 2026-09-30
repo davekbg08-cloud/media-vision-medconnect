@@ -62,12 +62,14 @@ test('le client tente authLookup puis retombe proprement (repli avant déploieme
   assert.match(s, /collection\('mc_accounts'\)\.where\('role', '==', role\)/);
 });
 
-test('le SDK Cloud Functions est chargé et exposé côté client', () => {
-  assert.match(read('index.html'), /firebase-functions-compat\.js/);
-  assert.match(read('sw.js'), /firebase-functions-compat\.js/);
+test('le client Cloud Functions (appel HTTP direct, europe-west1) est exposé côté client', () => {
   const cfg = read('js/firebase-config.js');
-  assert.match(cfg, /firebaseFunctions\s*=\s*firebase\.functions/);
+  // firebase.functions('europe-west1') renvoyait null (la région se passe à
+  // l'application) : remplacé par un client HTTP au protocole « callable ».
+  assert.match(cfg, /firebaseFunctions = createHttpCallableClient\('europe-west1'\);/);
   assert.match(cfg, /window\.firebaseFunctions\s*=\s*firebaseFunctions/);
+  assert.match(cfg, /headers\['X-Firebase-AppCheck'\] = ac\.token/);
+  assert.match(cfg, /headers\.Authorization = `Bearer \$\{await user\.getIdToken\(\)\}`/);
 });
 
 test('firebase.json déclare les functions et n\'expose pas le dossier au hosting', () => {
