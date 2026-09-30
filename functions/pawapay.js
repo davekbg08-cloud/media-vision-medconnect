@@ -50,7 +50,7 @@ const baseUrl = () => (process.env.PAWAPAY_BASE_URL || SANDBOX_URL).replace(/\/+
 async function pawapay(method, path, body) {
   const response = await fetch(`${baseUrl()}${path}`, {
     method,
-    headers: { Authorization: `Bearer ${PAWAPAY_TOKEN.value()}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Bearer ${String(PAWAPAY_TOKEN.value() || "").trim()}`, 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
   });
   let data = null;
