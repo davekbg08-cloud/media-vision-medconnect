@@ -7,6 +7,12 @@ jour) et l'écran **Paramètres → À propos**.
 La source unique de la version en cours est `config/app-version.json` —
 ce fichier doit rester cohérent avec elle.
 
+## 2.11.0 — 2026-09-30
+
+**RGPD — droit d'accès et portabilité** — export JSON du dossier patient (format medconnect-patient-export v1), secrets exclus (PIN, empreintes, codes, jetons), bouton « Mes données » sur la carte santé. Tests rgpd-export (3).
+
+Version **2.11.0** (build 2026.09.30.1, versionCode 61, cache `medconnect-v4.61`). Miroir Android resynchronisé.
+
 ## 2.10.9 — 2026-09-29
 
 **Correctif paiement (2)** — appel HTTP direct des fonctions callable (jeton Firebase Auth + App Check), sans le SDK compat qui tentait d'enregistrer le service worker Messaging à la racine (404).
