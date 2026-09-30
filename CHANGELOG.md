@@ -7,6 +7,12 @@ jour) et l'écran **Paramètres → À propos**.
 La source unique de la version en cours est `config/app-version.json` —
 ce fichier doit rester cohérent avec elle.
 
+## 2.11.1 — 2026-09-30
+
+**Client Cloud Functions global** — firebase.functions('europe-west1') renvoyait null (aucune fonction serveur appelée) ; remplacé par un client HTTP au protocole callable (jetons Auth + App Check), replis des appelants conservés.
+
+Version **2.11.1** (build 2026.09.30.2, versionCode 62, cache `medconnect-v4.62`). Miroir Android resynchronisé.
+
 ## 2.11.0 — 2026-09-30
 
 **RGPD — droit d'accès et portabilité** — export JSON du dossier patient (format medconnect-patient-export v1), secrets exclus (PIN, empreintes, codes, jetons), bouton « Mes données » sur la carte santé. Tests rgpd-export (3).

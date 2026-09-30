@@ -1,8 +1,15 @@
 {
-  "version": "2.11.0",
-  "build": "2026.09.30.1",
+  "version": "2.11.1",
+  "build": "2026.09.30.2",
   "buildDate": "2026-09-30",
   "changelog": [
+    {
+      "version": "2.11.1",
+      "date": "2026-09-30",
+      "notes": [
+        "Sécurité : les vérifications côté serveur prévues pour la connexion, l’inscription des agents et les notifications sont désormais réellement utilisées (elles étaient ignorées à cause d’un défaut de configuration). En cas d’indisponibilité, l’application garde son fonctionnement habituel."
+      ]
+    },
     {
       "version": "2.11.0",
       "date": "2026-09-30",
