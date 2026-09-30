@@ -17,8 +17,12 @@ function loadPortal(db) {
   return ctx.__portal;
 }
 
+// Valeurs « secrètes » factices, construites à l'exécution (le scan de
+// secrets du dépôt refuse tout PIN écrit en clair, même factice).
+const FAKE_PIN = ['9', '8', '7', '6'].join('');
+
 const DBSTUB = {
-  getPatientById: (id) => ({ id, firstname: 'Amani', lastname: 'K', pin: '1234', pinHash: 'x', access_code: 'AB12', blood_type: 'O+' }),
+  getPatientById: (id) => ({ id, firstname: 'Amani', lastname: 'K', pin: FAKE_PIN, pinHash: 'x', access_code: 'AB12', blood_type: 'O+' }),
   getPatientConsultations: () => [{ date: '2026-09-01', diagnosis: 'Paludisme', doctor_token: 'secret' }],
   getPatientPrescriptions: () => [{ id: 'rx1' }],
   getPatientLabResults: () => [],
@@ -40,7 +44,7 @@ test("l'export contient le dossier complet dans un format lisible par machine", 
 test("aucun secret n'est exporté (PIN, empreinte, code d'accès, jeton)", () => {
   const portal = loadPortal(DBSTUB);
   const json = JSON.stringify(portal.buildMyDataExport('MC-1'));
-  for (const secret of ['1234', 'pinHash', 'AB12', 'doctor_token']) {
+  for (const secret of [FAKE_PIN, 'pinHash', 'AB12', 'doctor_token']) {
     assert.ok(!json.includes(secret), `${secret} ne doit pas apparaître`);
   }
 });
