@@ -1943,6 +1943,18 @@ service cloud.firestore {
        L'admin garde un accès de secours pour la maintenance.
     ══════════════════════════════════════════════════ */
     // Configuration publique (ex. payments.pawapayMode) : lecture seule.
+    // Preuve du consentement (RGPD) : créée une seule fois par son titulaire,
+    // lisible par lui et l'administrateur, jamais modifiable ni supprimable.
+    match /consents/{uid} {
+      allow create: if signedIn() && request.auth.uid == uid
+        && request.resource.data.uid == uid
+        && request.resource.data.keys().hasOnly(['uid', 'role', 'version', 'acceptedAt', 'userAgent'])
+        && request.resource.data.version is string
+        && request.resource.data.acceptedAt is string;
+      allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
+      allow update, delete: if false;
+    }
+
     match /appConfig/{configId} {
       allow read: if signedIn();
       allow write: if false;

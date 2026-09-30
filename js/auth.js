@@ -315,7 +315,84 @@ const Auth = (() => {
     const err = document.getElementById('reg-err');
     if (err) err.style.display = 'none';
     const rf = document.getElementById('register-form');
-    if (rf) rf.innerHTML = _htmlAgentStrictRegister(role);
+    if (rf) { rf.innerHTML = _htmlAgentStrictRegister(role); _appendConsent(); }
+  }
+
+  /* ── CONSENTEMENT (RGPD) ─────────────────────────────────
+     Case obligatoire sur chaque formulaire d'inscription. L'acceptation
+     est enregistrée, datée et versionnée (consents/{uid}), une fois le
+     compte créé. */
+  const CONSENT_VERSION = '2026-09-30';
+
+  function _consentHtml() {
+    return `
+      <label class="mc-consent">
+        <input type="checkbox" id="reg-consent">
+        <span>J'accepte la <a href="privacy.html" target="_blank" rel="noopener">politique de confidentialité</a>
+        et le traitement des données de santé nécessaires à mon activité sur MedConnect.
+        Je peux exercer mes droits (accès, rectification, suppression) à tout moment.</span>
+      </label>`;
+  }
+
+  function _appendConsent() {
+    const rf = document.getElementById('register-form');
+    if (rf && !rf.querySelector('#reg-consent')) rf.insertAdjacentHTML('beforeend', _consentHtml());
+  }
+
+  function _consentAccepted() {
+    const box = document.getElementById('reg-consent');
+    // Pas de case rendue (appel programmatique, environnement de test) :
+    // rien à vérifier. Dès que la case existe, elle doit être cochée.
+    if (!box || typeof box.checked !== 'boolean' || box.checked) return true;
+    const err = document.getElementById('reg-err');
+    const msg = 'Veuillez accepter la politique de confidentialité pour créer votre compte.';
+    if (err) { err.textContent = msg; err.style.display = 'block'; } else App.toast(msg, 'error');
+    box?.focus?.();
+    return false;
+  }
+
+  async function _recordConsent(role, user) {
+    try {
+      if (!user || typeof firebaseDB === 'undefined' || !firebaseDB) return;
+      await firebaseDB.collection('consents').doc(user.uid).set({
+        uid: user.uid, role: role || '', version: CONSENT_VERSION,
+        acceptedAt: new Date().toISOString(),
+        userAgent: String(navigator.userAgent || '').slice(0, 200),
+      });
+    } catch (e) { console.warn('[MedConnect] Enregistrement du consentement :', e?.message || e); }
+  }
+
+  /* Le compte est créé au milieu de chaque parcours d'inscription, puis la
+     session est fermée : la preuve est écrite dès l'apparition du NOUVEAU
+     compte (créé il y a moins de 2 minutes), pendant qu'il est connecté. */
+  let _pendingConsent = null;
+  let _consentWatcher = false;
+  function _watchNewAccountForConsent() {
+    if (_consentWatcher || typeof firebaseAuth === 'undefined' || !firebaseAuth?.onAuthStateChanged) return;
+    _consentWatcher = true;
+    firebaseAuth.onAuthStateChanged((user) => {
+      if (!user || !_pendingConsent) return;
+      const created = Date.parse(user.metadata?.creationTime || '');
+      if (!Number.isFinite(created) || Date.now() - created > 120000) return;
+      const role = _pendingConsent.role;
+      _pendingConsent = null;
+      _recordConsent(role, user);
+    });
+  }
+
+  /* Enveloppe des actions d'inscription : consentement exigé avant,
+     preuve enregistrée à la création du compte. */
+  function _withConsent(role, fn) {
+    return async function (...args) {
+      if (!_consentAccepted()) return undefined;
+      _watchNewAccountForConsent();
+      _pendingConsent = { role };
+      try {
+        return await fn.apply(this, args);
+      } finally {
+        setTimeout(() => { _pendingConsent = null; }, 5000);
+      }
+    };
   }
 
   function _registerRole(role) {
@@ -325,6 +402,7 @@ const Auth = (() => {
 
     if (AGENT_STRICT_ROLES.includes(role)) {
       document.getElementById('register-form').innerHTML = _htmlAgentStrictRegister(role);
+      _appendConsent();
       return;
     }
 
@@ -366,6 +444,7 @@ const Auth = (() => {
         <p>✉️ Email : <strong>hello.mediavision.tech@gmail.com</strong></p>
         <p style="color:var(--text-dim);font-size:.72rem;margin-top:.4rem">Délai de traitement : 24 à 48h ouvrables</p>
       </div>`;
+    _appendConsent();
   }
 
   /* ── OUTILS RESTAURATION ─────────────────────────── */
@@ -1971,7 +2050,12 @@ const Auth = (() => {
     _setRegistrationContext,
     _tab, _pickRole, _loginRole, _registerRole,
     _doPatient, _createPatientPin, _doDoctor, _doPharmacist, _doNurse,
-    _regDoctor, _regPharmacist, _regNurse, _regLab, _regReception, _regPharmacistInternal,
+    _regDoctor: _withConsent('doctor', _regDoctor),
+    _regPharmacist: _withConsent('pharmacist', _regPharmacist),
+    _regNurse: _withConsent('nurse', _regNurse),
+    _regLab: _withConsent('lab', _regLab),
+    _regReception: _withConsent('reception', _regReception),
+    _regPharmacistInternal: _withConsent('pharmacist', _regPharmacistInternal),
     _showAgentStrictRegisterForm,
     _setupAdmin, _doAdmin,
     _deleteMyAccount, _confirmDeleteMyAccount,

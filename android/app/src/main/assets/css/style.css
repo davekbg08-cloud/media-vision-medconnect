@@ -1910,3 +1910,8 @@ table tr:hover td { background: var(--surface-h); }
 .filter-btn, .tab-btn { border-radius: 999px; }
 .mc-sub-icon { width: 1.7rem; height: 1.7rem; border-radius: 8px; }
 .mc-sub-icon .mc-icon { width: .95rem; height: .95rem; }
+
+/* Consentement à l'inscription (RGPD) */
+.mc-consent { display: flex; gap: .55rem; align-items: flex-start; margin: .9rem 0 .3rem; font-size: .78rem; color: var(--text-muted); line-height: 1.45; }
+.mc-consent input { margin-top: .15rem; width: 1.05rem; height: 1.05rem; flex-shrink: 0; accent-color: var(--primary); }
+.mc-consent a { color: var(--primary); }
