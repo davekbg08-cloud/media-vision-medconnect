@@ -1,8 +1,15 @@
 {
-  "version": "2.11.1",
-  "build": "2026.09.30.2",
+  "version": "2.11.2",
+  "build": "2026.09.30.3",
   "buildDate": "2026-09-30",
   "changelog": [
+    {
+      "version": "2.11.2",
+      "date": "2026-09-30",
+      "notes": [
+        "Vos droits sur vos données : chaque inscription demande désormais d’accepter la politique de confidentialité ; l’acceptation est enregistrée, datée et conservée comme preuve."
+      ]
+    },
     {
       "version": "2.11.1",
       "date": "2026-09-30",

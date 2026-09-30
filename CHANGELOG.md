@@ -7,6 +7,12 @@ jour) et l'écran **Paramètres → À propos**.
 La source unique de la version en cours est `config/app-version.json` —
 ce fichier doit rester cohérent avec elle.
 
+## 2.11.2 — 2026-09-30
+
+**RGPD — consentement** — case obligatoire sur tous les formulaires d'inscription (lien vers la politique), preuve immuable consents/{uid} (version, date), enregistrée uniquement à la création d'un compte ; règle Firestore dédiée.
+
+Version **2.11.2** (build 2026.09.30.3, versionCode 63, cache `medconnect-v4.63`). Miroir Android resynchronisé.
+
 ## 2.11.1 — 2026-09-30
 
 **Client Cloud Functions global** — firebase.functions('europe-west1') renvoyait null (aucune fonction serveur appelée) ; remplacé par un client HTTP au protocole callable (jetons Auth + App Check), replis des appelants conservés.
