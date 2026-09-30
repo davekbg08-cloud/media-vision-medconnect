@@ -131,6 +131,7 @@ const PatientPortal = (() => {
           <button class="btn btn-sm mc-health-btn" onclick="ShareModule.sharePatient('${p.id}')">${ic('send')} ${t('btn_share')}</button>
           <button class="btn btn-sm mc-health-btn" onclick="PatientPortal.printRecord('${p.id}')">${ic('printer')} ${t('btn_print')}</button>
           <button class="btn btn-sm mc-health-btn" onclick="PatientPortal.openEdit('${p.id}')">${ic('file-text')} ${t('btn_edit')}</button>
+          <button class="btn btn-sm mc-health-btn" onclick="PatientPortal.exportMyData('${p.id}')">${ic('download')} Mes données</button>
         </div>
       </section>
       ${allergies ? `<div class="mc-alert mc-alert-danger">${ic('alert-triangle')}<span><strong>Allergie :</strong> ${esc(allergies)}</span></div>` : ''}
@@ -176,6 +177,64 @@ const PatientPortal = (() => {
       <div class="mc-footer-link">
         <button class="btn btn-ghost btn-sm mc-danger-text" onclick="PatientPortal.resetRecord()">🔄 Réinitialiser</button>
       </div>`;
+  }
+
+  /* ── MES DONNÉES (droit d'accès et à la portabilité — RGPD art. 15 et 20)
+     Fichier JSON lisible par une machine avec tout le dossier du patient
+     connu sur cet appareil. Les secrets (PIN, codes, empreintes, jetons)
+     ne sont jamais exportés. */
+  const SECRET_KEY = /(pin|hash|password|passwd|secret|token|access_?code|salt)/i;
+
+  function stripSecrets(value) {
+    if (Array.isArray(value)) return value.map(stripSecrets);
+    if (value && typeof value === 'object') {
+      const out = {};
+      for (const [k, v] of Object.entries(value)) {
+        if (SECRET_KEY.test(k)) continue;
+        out[k] = stripSecrets(v);
+      }
+      return out;
+    }
+    return value;
+  }
+
+  function buildMyDataExport(id) {
+    const p = DB.getPatientById(id);
+    if (!p) return null;
+    const list = (fn) => { try { return (DB[fn]?.(id) || []); } catch (_) { return []; } };
+    return stripSecrets({
+      format: 'medconnect-patient-export',
+      formatVersion: 1,
+      exportedAt: new Date().toISOString(),
+      notice: "Copie de vos données de santé MedConnect (droit d'accès et à la portabilité). Conservez ce fichier en lieu sûr.",
+      patient: p,
+      consultations: list('getPatientConsultations'),
+      prescriptions: list('getPatientPrescriptions'),
+      labResults: list('getPatientLabResults'),
+      vaccinations: list('getPatientVaccinations'),
+      appointments: list('getPatientAppointments'),
+      admissions: list('getPatientAdmissions'),
+    });
+  }
+
+  function exportMyData(id) {
+    try {
+      const data = buildMyDataExport(id);
+      if (!data) { App.toast('Dossier introuvable.', 'error'); return; }
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `medconnect-mes-donnees-${id}-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      App.toast('Vos données ont été téléchargées.');
+    } catch (e) {
+      console.error('[PatientPortal] export :', e);
+      App.toast('Export impossible.', 'error');
+    }
   }
 
   /* ── EDIT ─────────────────────────────────────────── */
@@ -454,7 +513,7 @@ const PatientPortal = (() => {
   return {
     renderMyRecord, previewId, saveNew, openEdit, saveEdit, resetRecord,
     renderHistory, renderPrescriptions, renderVaccinations, openAddVacc, saveVacc,
-    printRecord, printRx, getCountriesList,
+    printRecord, printRx, getCountriesList, exportMyData, buildMyDataExport, stripSecrets
   };
 })();
 
