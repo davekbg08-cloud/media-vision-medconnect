@@ -73,3 +73,33 @@ jobs:
           name: medconnect-msstore
           path: electron/dist/*.appx
           if-no-files-found: error
+
+  release:
+    name: Publier le .appx sur une GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Télécharger le paquet
+        uses: actions/download-artifact@v4
+        with:
+          name: medconnect-msstore
+          path: store
+
+      # Lien de téléchargement direct (pratique depuis un téléphone) :
+      # release vX.Y.Z-store, remplacée à chaque nouveau build de la même version.
+      - name: Créer / mettre à jour la release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if [ -n "${{ github.event.inputs.version }}" ]; then VERSION="${{ github.event.inputs.version }}"; fi
+          TAG="v${VERSION}-store"
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$TAG" store/*.appx --latest=false \
+            --title "MedConnect ${VERSION} — Microsoft Store" \
+            --notes "Paquet .appx à déposer dans Partner Center (rubrique Packages). Ne pas installer directement : il n'est signé qu'après publication par le Microsoft Store."
