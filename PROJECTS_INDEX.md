@@ -4,49 +4,28 @@ Ce fichier sert de point d’entrée unique pour retrouver rapidement les projet
 
 Important : ce fichier ne copie pas tout le code dans un seul dépôt. Il garde les projets séparés pour éviter de casser les applications, mélanger les configurations Firebase/Android/Netlify, ou exposer par erreur du code privé. Il sert de tableau de bord central.
 
-## Dépôt central visible
+## Dépôts
 
-Dépôt public utilisé comme point de repère :
+Compte GitHub : https://github.com/davekbg08-cloud
 
-- `davekbg08-cloud/media-vision-medconnect`
-- Lien : `https://github.com/davekbg08-cloud/media-vision-medconnect`
+| Projet | Dépôt | Visibilité | Type | En ligne |
+|--------|-------|------------|------|----------|
+| MedConnect | [`media-vision-medconnect`](https://github.com/davekbg08-cloud/media-vision-medconnect) | public | PWA / Android / bureau — santé | https://davekbg08-cloud.github.io/media-vision-medconnect/ |
+| Media Vision (site vitrine) | [`media-vision-site`](https://github.com/davekbg08-cloud/media-vision-site) | public | Site statique | https://davekbg08-cloud.github.io/media-vision-site/ (domaine perso : voir `DOMAINE.md` du dépôt) |
+| Occasion | [`occasion`](https://github.com/davekbg08-cloud/occasion) | public | Flutter — marketplace | https://davekbg08-cloud.github.io/occasion/ |
+| Ma Gestion | [`ma-gestion`](https://github.com/davekbg08-cloud/ma-gestion) | privé | Flutter — gestion Mobile Money | — |
+| Longwei International | [`longwei-international`](https://github.com/davekbg08-cloud/longwei-international) | public | Site vitrine hôtelier trilingue | — |
+| React Native Gallery | `react-native-gallery` | — | Copie du projet Microsoft, sans lien avec Media Vision | À archiver |
 
-## Projets connus
+Ancien dépôt du site vitrine : `desktop-tutorial` (privé) — remplacé par `media-vision-site`.
 
-### 1. MedConnect
+### Notes par projet
 
-- Type : PWA / application médicale
-- Dépôt : `davekbg08-cloud/media-vision-medconnect`
-- Visibilité : public
-- Lien GitHub : `https://github.com/davekbg08-cloud/media-vision-medconnect`
-- Lien PWA : `https://davekbg08-cloud.github.io/media-vision-medconnect/`
-- Statut : projet principal en cours de stabilisation
-- Priorités : Firebase Auth, Firestore, suppression admin local, cohérence PWA/APK, cache service worker, localisation pharmacien
-
-### 2. Media Vision — site vitrine
-
-- Type : site web vitrine / entreprise
-- Dépôt : `davekbg08-cloud/desktop-tutorial`
-- Visibilité : privé
-- Lien GitHub : `https://github.com/davekbg08-cloud/desktop-tutorial`
-- Site : `https://media-vision.netlify.app/`
-- Statut : site fonctionnel
-- Notes : ne pas modifier inutilement pour éviter de casser le site ; contient formulaire Netlify, pages applications, confidentialité et conditions
-
-### 3. React Native Gallery
-
-- Type : dépôt existant / ancien projet ou test
-- Dépôt : `davekbg08-cloud/react-native-gallery`
-- Visibilité : selon GitHub
-- Lien GitHub : `https://github.com/davekbg08-cloud/react-native-gallery`
-- Statut : à vérifier plus tard si encore utile
-
-### 4. Ma Gestion / Gestion Money
-
-- Type : application de gestion mobile money / commissions
-- Dépôt : non trouvé séparément pour l’instant
-- Statut : à créer ou pousser sur GitHub plus tard si le code existe encore en local
-- Notes connues : app de gestion Mobile Money avec SQLite, Firestore, transactions, commissions, opérateurs M-Pesa / Orange Money / Airtel Money / Africell
+- **MedConnect** : projet principal. Firebase Auth / Firestore / Functions, paiements pawaPay, APK dans `downloads/`.
+- **Media Vision** : formulaires via FormSubmit, publication GitHub Pages automatique depuis `main`.
+- **Occasion** : publication Play Store uniquement après confirmation explicite (voir `CLAUDE.md` du dépôt).
+- **Ma Gestion** : opérateurs M-Pesa / Orange Money / Airtel Money / Afrimoney, stockage Hive + Firestore.
+- **Longwei** : photos encore provisoires, à remplacer par les vraies.
 
 ## Règles de travail
 
@@ -60,10 +39,9 @@ Dépôt public utilisé comme point de repère :
 ## Priorités actuelles
 
 1. Stabiliser MedConnect.
-2. Corriger les problèmes PWA/APK/Firebase de MedConnect.
-3. Générer ensuite un nouvel APK propre.
-4. Garder Media Vision stable.
-5. Créer ou pousser Ma Gestion / Gestion Money dans un dépôt séparé quand le code sera disponible.
+2. Brancher un nom de domaine sur le site Media Vision.
+3. Remplacer les photos provisoires de Longwei International.
+4. Archiver `react-native-gallery`.
 
 ## Commande utile pour Codex
 
