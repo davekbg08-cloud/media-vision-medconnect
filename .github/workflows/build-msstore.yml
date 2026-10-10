@@ -100,6 +100,6 @@ jobs:
           if [ -n "${{ github.event.inputs.version }}" ]; then VERSION="${{ github.event.inputs.version }}"; fi
           TAG="v${VERSION}-store"
           gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
-          gh release create "$TAG" store/*.appx \
+          gh release create "$TAG" store/*.appx --latest=false \
             --title "MedConnect ${VERSION} — Microsoft Store" \
             --notes "Paquet .appx à déposer dans Partner Center (rubrique Packages). Ne pas installer directement : il n'est signé qu'après publication par le Microsoft Store."
