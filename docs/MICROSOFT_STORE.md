@@ -17,7 +17,7 @@ Le paquet est construit par le workflow
 ## 2. Produit et identité (fait)
 
 Produit Partner Center créé (nom réservé « Medconnect apps » ; nom affiché
-dans le paquet : **MedConnect Santé** (« MedConnect » était déjà pris), qui doit aussi être réservé dans
+dans le paquet : **Medconnect santé** (orthographe exacte du nom réservé ; « MedConnect » était déjà pris), qui doit aussi être réservé dans
 *Gestion des produits → Gestion des noms d'application*).
 
 Identité du paquet, déjà renseignée dans `electron/package.json` (`build.appx`) :
