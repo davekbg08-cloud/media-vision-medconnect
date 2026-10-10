@@ -1,0 +1,96 @@
+name: Build MedConnect pour le Microsoft Store (MSIX/AppX)
+# Produit le paquet .appx à soumettre dans Partner Center. Microsoft signe
+# lui-même le paquet à la publication : aucun certificat de signature de
+# code n'est nécessaire ici, et Windows n'affiche plus d'avertissement
+# pour les utilisateurs qui installent depuis le Store.
+#
+# Identité du paquet : à copier depuis Partner Center
+# (Gestion des produits → Identité du produit) dans les variables du dépôt
+# (Settings → Secrets and variables → Actions → Variables) :
+#   MSSTORE_IDENTITY_NAME            Package/Identity/Name
+#   MSSTORE_PUBLISHER                Package/Identity/Publisher (CN=...)
+#   MSSTORE_PUBLISHER_DISPLAY_NAME   Package/Properties/PublisherDisplayName
+# Sans ces variables, le build produit un paquet de TEST (identité fictive),
+# utile pour vérifier le packaging mais refusé par le Store.
+# Voir docs/MICROSOFT_STORE.md.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version à construire (vide = version de package.json racine)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Paquet Microsoft Store
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Appliquer la version demandée à package.json racine (si fournie)
+        if: github.event.inputs.version != ''
+        shell: bash
+        run: |
+          node -e "
+            const fs = require('fs');
+            const p = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            p.version = '${{ github.event.inputs.version }}';
+            fs.writeFileSync('package.json', JSON.stringify(p, null, 2) + '\n');
+          "
+
+      - name: Installer les dépendances Electron
+        working-directory: electron
+        run: npm ci
+
+      - name: Construire le paquet .appx
+        working-directory: electron
+        shell: bash
+        env:
+          IDENTITY_NAME: ${{ vars.MSSTORE_IDENTITY_NAME }}
+          PUBLISHER: ${{ vars.MSSTORE_PUBLISHER }}
+          PUBLISHER_DISPLAY_NAME: ${{ vars.MSSTORE_PUBLISHER_DISPLAY_NAME }}
+        run: |
+          if [ -z "$IDENTITY_NAME" ] || [ -z "$PUBLISHER" ] || [ -z "$PUBLISHER_DISPLAY_NAME" ]; then
+            echo "::warning::Variables MSSTORE_* absentes : paquet de TEST (identité fictive), refusé par le Store. Voir docs/MICROSOFT_STORE.md."
+            IDENTITY_NAME="MediaVision.MedConnectTest"
+            PUBLISHER="CN=MediaVisionTest"
+            PUBLISHER_DISPLAY_NAME="Media Vision"
+          fi
+          npm run dist:store -- \
+            "-c.appx.identityName=$IDENTITY_NAME" \
+            "-c.appx.publisher=$PUBLISHER" \
+            "-c.appx.publisherDisplayName=$PUBLISHER_DISPLAY_NAME"
+
+      - name: Vérifier le paquet produit
+        shell: bash
+        run: |
+          shopt -s nullglob
+          files=(electron/dist/*.appx)
+          if [ ${#files[@]} -ne 1 ]; then
+            echo "::error::Paquet .appx introuvable (ou plusieurs) dans electron/dist"
+            ls -la electron/dist || true
+            exit 1
+          fi
+          SIZE=$(stat -c%s "${files[0]}")
+          if [ "$SIZE" -lt $((20*1024*1024)) ]; then
+            echo "::error::Paquet anormalement petit ($SIZE octets) : ${files[0]}"
+            exit 1
+          fi
+          echo "OK : ${files[0]} ($SIZE octets)"
+
+      - name: Upload artefact Store
+        uses: actions/upload-artifact@v4
+        with:
+          name: medconnect-msstore
+          path: electron/dist/*.appx
+          if-no-files-found: error

@@ -15,7 +15,9 @@
     "predist:win": "node ../scripts/sync-desktop-version.mjs",
     "dist:win": "electron-builder --win",
     "predist:linux": "node ../scripts/sync-desktop-version.mjs",
-    "dist:linux": "electron-builder --linux"
+    "dist:linux": "electron-builder --linux",
+    "predist:store": "node ../scripts/sync-desktop-version.mjs",
+    "dist:store": "electron-builder --win appx"
   },
   "devDependencies": {
     "electron": "^31.0.0",
@@ -25,7 +27,8 @@
     "appId": "com.mediavision.medconnect.desktop",
     "productName": "MedConnect",
     "directories": {
-      "output": "dist"
+      "output": "dist",
+      "buildResources": "build-resources"
     },
     "files": [
       "main.js",
@@ -51,6 +54,17 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
+    },
+    "appx": {
+      "applicationId": "MedConnect",
+      "displayName": "MedConnect",
+      "languages": [
+        "fr-FR",
+        "en-US"
+      ],
+      "backgroundColor": "transparent",
+      "showNameOnTiles": true,
+      "artifactName": "MedConnect-${version}-store.${ext}"
     }
   }
 }
