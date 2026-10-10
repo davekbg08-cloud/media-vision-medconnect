@@ -14,38 +14,29 @@ Le paquet est construit par le workflow
 2. Se connecter avec un compte Microsoft et vérifier son identité
    (pièce d'identité + selfie pour un compte individuel).
 
-## 2. Réserver le nom et récupérer l'identité du paquet
+## 2. Produit et identité (fait)
 
-1. Partner Center → **Apps et jeux** → **Nouveau produit** → **Application MSIX ou PWA**.
-2. Réserver le nom **MedConnect** (ou une variante si déjà pris).
-3. Ouvrir **Gestion des produits → Identité du produit** et noter :
-   - `Package/Identity/Name` (ex. `12345MediaVision.MedConnect`)
-   - `Package/Identity/Publisher` (ex. `CN=ABCD1234-...`)
-   - `Package/Properties/PublisherDisplayName` (ex. `Media Vision`)
+Produit Partner Center créé (nom réservé « Medconnect apps » ; nom affiché
+dans le paquet : **MedConnect**, qui doit aussi être réservé dans
+*Gestion des produits → Gestion des noms d'application*).
 
-## 3. Renseigner les variables du dépôt GitHub
+Identité du paquet, déjà renseignée dans `electron/package.json` (`build.appx`) :
 
-Dépôt `media-vision-medconnect` → **Settings → Secrets and variables →
-Actions → onglet Variables** → **New repository variable** :
-
-| Nom                              | Valeur (copiée de Partner Center)   |
-|----------------------------------|-------------------------------------|
-| `MSSTORE_IDENTITY_NAME`          | `Package/Identity/Name`             |
-| `MSSTORE_PUBLISHER`              | `Package/Identity/Publisher`        |
-| `MSSTORE_PUBLISHER_DISPLAY_NAME` | `Package/Properties/PublisherDisplayName` |
+| Champ Partner Center                       | Valeur |
+|--------------------------------------------|--------|
+| `Package/Identity/Name`                    | `DavidKabengele.Medconnectapps` |
+| `Package/Identity/Publisher`               | `CN=DE2F36F7-77D2-4F3B-88A1-0A723818E3C3` |
+| `Package/Properties/PublisherDisplayName`  | `David Kabengele` |
 
 Ce ne sont pas des secrets : ces valeurs figurent dans le paquet publié.
 
-## 4. Construire le paquet
+## 3. Construire le paquet
 
 **Actions → « Build MedConnect pour le Microsoft Store » → Run workflow**.
 À la fin, télécharger l'artefact `medconnect-msstore` : il contient
 `MedConnect-<version>-store.appx`.
 
-Sans les variables de l'étape 3, le workflow produit un paquet de **test**
-(identité fictive) : il sert à vérifier le build, mais le Store le refuse.
-
-## 5. Soumettre dans Partner Center
+## 4. Soumettre dans Partner Center
 
 Dans le produit MedConnect → **Démarrer la soumission** :
 
