@@ -4,14 +4,8 @@ name: Build MedConnect pour le Microsoft Store (MSIX/AppX)
 # code n'est nécessaire ici, et Windows n'affiche plus d'avertissement
 # pour les utilisateurs qui installent depuis le Store.
 #
-# Identité du paquet : à copier depuis Partner Center
-# (Gestion des produits → Identité du produit) dans les variables du dépôt
-# (Settings → Secrets and variables → Actions → Variables) :
-#   MSSTORE_IDENTITY_NAME            Package/Identity/Name
-#   MSSTORE_PUBLISHER                Package/Identity/Publisher (CN=...)
-#   MSSTORE_PUBLISHER_DISPLAY_NAME   Package/Properties/PublisherDisplayName
-# Sans ces variables, le build produit un paquet de TEST (identité fictive),
-# utile pour vérifier le packaging mais refusé par le Store.
+# Identité du paquet (Partner Center → Gestion des produits → Identité du
+# produit) : définie dans electron/package.json, section build.appx.
 # Voir docs/MICROSOFT_STORE.md.
 on:
   workflow_dispatch:
@@ -54,22 +48,7 @@ jobs:
 
       - name: Construire le paquet .appx
         working-directory: electron
-        shell: bash
-        env:
-          IDENTITY_NAME: ${{ vars.MSSTORE_IDENTITY_NAME }}
-          PUBLISHER: ${{ vars.MSSTORE_PUBLISHER }}
-          PUBLISHER_DISPLAY_NAME: ${{ vars.MSSTORE_PUBLISHER_DISPLAY_NAME }}
-        run: |
-          if [ -z "$IDENTITY_NAME" ] || [ -z "$PUBLISHER" ] || [ -z "$PUBLISHER_DISPLAY_NAME" ]; then
-            echo "::warning::Variables MSSTORE_* absentes : paquet de TEST (identité fictive), refusé par le Store. Voir docs/MICROSOFT_STORE.md."
-            IDENTITY_NAME="MediaVision.MedConnectTest"
-            PUBLISHER="CN=MediaVisionTest"
-            PUBLISHER_DISPLAY_NAME="Media Vision"
-          fi
-          npm run dist:store -- \
-            "-c.appx.identityName=$IDENTITY_NAME" \
-            "-c.appx.publisher=$PUBLISHER" \
-            "-c.appx.publisherDisplayName=$PUBLISHER_DISPLAY_NAME"
+        run: npm run dist:store
 
       - name: Vérifier le paquet produit
         shell: bash
